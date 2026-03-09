@@ -1,0 +1,11 @@
+# Build outputs
+**/[Dd]ebug/
+**/[Rr]elease/
+
+# Third-party dependencies
+**/SDL3-3.2.16/
+
+
+**/debug.zip/
+
+**/release.zip/
