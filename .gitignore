@@ -1,0 +1,60 @@
+# Build and generated output
+**/build/
+**/install/
+**/log/
+**/logs/
+**/build64/
+**/[Dd]ebug/
+**/[Rr]elease/
+**/__pycache__/
+*.py[cod]
+*.pdb
+*.ilk
+*.obj
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.lib
+*.exp
+*.idb
+*.ipdb
+*.tlog/
+*.lastbuildstate
+*.suo
+*.user
+*.autosave
+*.qmake.stash
+Makefile
+Makefile.*
+
+# Local release bundles and temporary workspaces
+tmp/
+target_board_release/runtime/
+target_board_release/install/
+target_board_release/vendor/
+target_board_release.previous*.zip
+target_board_release.zip
+**/dist/*.zip
+*.zip
+
+# Runtime logs and local artifacts
+*.log
+*.dmp
+
+# Local IDE/tool state
+.gitnexus/
+.vs/
+.vscode/
+
+# Large reference documents and local inventories
+*.pdf
+*.xlsx
+文档.txt
+-
+
+# Keep source-level dependency notes, but ignore vendored SDK binaries
+modules/**/bin/
+modules/**/lib/*.lib

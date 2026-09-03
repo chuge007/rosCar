@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>robot_direct_ethernet</transport_id>
+      <type>UDPv4</type>
+      <interfaceWhiteList>
+        <address>192.168.1.20</address>
+      </interfaceWhiteList>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="robot_direct_ethernet" is_default_profile="true">
+    <rtps>
+      <userTransports>
+        <transport_id>robot_direct_ethernet</transport_id>
+      </userTransports>
+      <useBuiltinTransports>false</useBuiltinTransports>
+      <builtin>
+        <initialPeersList>
+          <locator>
+            <udpv4>
+              <address>192.168.1.100</address>
+              <port>7410</port>
+            </udpv4>
+          </locator>
+        </initialPeersList>
+      </builtin>
+    </rtps>
+  </participant>
+</profiles>

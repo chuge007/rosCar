@@ -1,0 +1,11 @@
+# Generated ROS and release artifacts
+tmp/
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+target_board_release/install/
+target_board_release/runtime/
+target_board_release/vendor/
+
+# Local analyzer/runtime output
+.gitnexus/
