@@ -260,6 +260,14 @@ void MainWindow::configureRosEnvironment(QProcessEnvironment &environment) const
         }
         environment.insert(QStringLiteral("ROBOT_CONTROL_ROS_PATH"),
                            pathEntries.join(QStringLiteral(";")));
+        // The bundled interpreter does not discover the ROS distribution by
+        // itself when it is launched from a Qt process. This is the part of
+        // setup.bat needed by ros2-script.py; keeping it here avoids cmd.exe
+        // quote parsing entirely.
+        environment.insert(QStringLiteral("PYTHONPATH"),
+                           QDir(ros2Root_).filePath(QStringLiteral("Lib/site-packages")));
+        environment.insert(QStringLiteral("AMENT_PREFIX_PATH"), ros2Root_);
+        environment.insert(QStringLiteral("CMAKE_PREFIX_PATH"), ros2Root_);
     }
     if (!ros2Overlay_.isEmpty()) {
         environment.insert(QStringLiteral("ROBOT_CONTROL_WS_INSTALL"), ros2Overlay_);
@@ -551,26 +559,9 @@ QProcess *MainWindow::startCli(const QStringList &arguments, bool includeOverlay
     configureRosEnvironment(environment);
     process->setProcessEnvironment(environment);
 
-    const QString setupBat = resolveSetupBat(ros2Root_);
-    const QString overlaySetupBat = includeOverlay ? resolveSetupBat(ros2Overlay_) : QString();
-    if (setupBat.isEmpty()) {
-        process->deleteLater();
-        return nullptr;
-    }
-    QString command = QStringLiteral("call %1").arg(cmdQuote(setupBat));
-    if (!overlaySetupBat.isEmpty()) {
-        command += QStringLiteral(" && call %1").arg(cmdQuote(overlaySetupBat));
-    }
-    command += QStringLiteral(" && set PATH=%ROBOT_CONTROL_ROS_PATH%;%PATH%");
-    command += QStringLiteral(" && %1 %2").arg(cmdQuote(ros2Python_), cmdQuote(ros2Script_));
-    if (!arguments.isEmpty()) {
-        command += QStringLiteral(" ");
-        command += joinCmdArguments(arguments);
-    }
-    process->start(QStringLiteral("cmd.exe"), QStringList()
-                   << QStringLiteral("/d")
-                   << QStringLiteral("/c")
-                   << command);
+    QStringList cliArguments;
+    cliArguments << ros2Script_ << arguments;
+    process->start(ros2Python_, cliArguments);
     connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart) {
             statusBar()->showMessage(QStringLiteral("ROS CLI 启动失败：%1").arg(process->errorString()), 5000);
@@ -622,7 +613,7 @@ void MainWindow::pollDiscovery()
     discoveryTimeoutTimer_.start(2500);
 }
 
-void MainWindow::discoveryProcessFinished(int, QProcess::ExitStatus)
+void MainWindow::discoveryProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
     discoveryTimeoutTimer_.stop();
     if (!discoveryProcess_) return;
@@ -650,6 +641,9 @@ void MainWindow::discoveryProcessFinished(int, QProcess::ExitStatus)
     } else {
         connectionLabel_->setText(QStringLiteral("未发现目标机 ROS 2"));
         statusLabel_->setText(QStringLiteral("等待目标机 ROS 2"));
+        if (exitStatus != QProcess::NormalExit || exitCode != 0) {
+            statusBar()->showMessage(QStringLiteral("ROS 发现命令失败：退出码 %1").arg(exitCode), 5000);
+        }
     }
 }
 
@@ -662,6 +656,7 @@ void MainWindow::discoveryProcessTimeout()
     rosDiscovered_ = false;
     connectionLabel_->setText(QStringLiteral("未发现目标机 ROS 2"));
     statusLabel_->setText(QStringLiteral("等待目标机 ROS 2"));
+    statusBar()->showMessage(QStringLiteral("ROS 发现超时（2.5 秒）"), 5000);
 }
 
 void MainWindow::pollStatus()
