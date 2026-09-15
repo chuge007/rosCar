@@ -1,0 +1,112 @@
+{
+  "arch": "x86_64",
+  "build": "hcfcfb64_0",
+  "build_number": 0,
+  "depends": [
+    "ucrt >=10.0.20348.0",
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "b12b5bde5eb201a1df75e49320cc938a",
+  "name": "libdeflate",
+  "platform": "win",
+  "sha256": "6628a5b76ad70c1a0909563c637ddc446ee824739ba7c348d4da2f0aa6ac9527",
+  "size": 155358,
+  "subdir": "win-64",
+  "timestamp": 1711197066985,
+  "version": "1.20",
+  "fn": "libdeflate-1.20-hcfcfb64_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/libdeflate-1.20-hcfcfb64_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\libdeflate-1.20-hcfcfb64_0",
+  "requested_specs": [],
+  "files": [
+    "Library/lib/pkgconfig/libdeflate.pc",
+    "Library/bin/deflate.dll",
+    "Library/bin/libdeflate-gunzip.exe",
+    "Library/bin/libdeflate-gzip.exe",
+    "Library/lib/cmake/libdeflate/libdeflate-config-version.cmake",
+    "Library/lib/cmake/libdeflate/libdeflate-config.cmake",
+    "Library/lib/cmake/libdeflate/libdeflate-targets-release.cmake",
+    "Library/lib/cmake/libdeflate/libdeflate-targets.cmake",
+    "Library/lib/deflate.lib",
+    "Library/include/libdeflate.h"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/lib/pkgconfig/libdeflate.pc",
+        "path_type": "hardlink",
+        "sha256": "79554026fd910dbc7da79fe400fdd760b38b58761c83cea495bc8fc68a2fe96e",
+        "sha256_in_prefix": "f04dd0f13876b6b68b67c6ac10eff3c5cfa63754a0e265792a9743d2c6b649c0",
+        "size_in_bytes": 828,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/libdeflate_1711196544744/_h_env"
+      },
+      {
+        "_path": "Library/bin/deflate.dll",
+        "path_type": "hardlink",
+        "sha256": "0ea22589c96189ae338ab3ecf46cf92211e292fd9824aa48752a19bcbaa97c6e",
+        "size_in_bytes": 177152
+      },
+      {
+        "_path": "Library/bin/libdeflate-gunzip.exe",
+        "path_type": "hardlink",
+        "sha256": "a3ab4dbae07dbb429faf2f1b6e160bb744761db597f719c576bd0f04f4330f1c",
+        "size_in_bytes": 173056
+      },
+      {
+        "_path": "Library/bin/libdeflate-gzip.exe",
+        "path_type": "hardlink",
+        "sha256": "a3ab4dbae07dbb429faf2f1b6e160bb744761db597f719c576bd0f04f4330f1c",
+        "size_in_bytes": 173056
+      },
+      {
+        "_path": "Library/lib/cmake/libdeflate/libdeflate-config-version.cmake",
+        "path_type": "hardlink",
+        "sha256": "ae287fa5cbd9c7b25ca3d102d59e68bf851e0a076ac3b0ac48a994db87e21d0b",
+        "size_in_bytes": 1903
+      },
+      {
+        "_path": "Library/lib/cmake/libdeflate/libdeflate-config.cmake",
+        "path_type": "hardlink",
+        "sha256": "38872d2917fdd8b9acc643b06108e99ec4fe603e71055dfa6e84948578f0e5b8",
+        "size_in_bytes": 974
+      },
+      {
+        "_path": "Library/lib/cmake/libdeflate/libdeflate-targets-release.cmake",
+        "path_type": "hardlink",
+        "sha256": "61b947ca209a1405a0a9a36bec4cdd3e96f3f4ecf4f82e925fd12626661dd48a",
+        "size_in_bytes": 985
+      },
+      {
+        "_path": "Library/lib/cmake/libdeflate/libdeflate-targets.cmake",
+        "path_type": "hardlink",
+        "sha256": "80f4a2a0dcc5c0aeff1b3dbdc7bb5ffa9f9140ea34100d838f0f98ae76fca328",
+        "sha256_in_prefix": "66a9344b18c3d252776eea003a76b6910fe6704eef82f08200c6d55f562d1904",
+        "size_in_bytes": 4374,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/libdeflate_1711196544744/_h_env"
+      },
+      {
+        "_path": "Library/lib/deflate.lib",
+        "path_type": "hardlink",
+        "sha256": "502caa2e24d81bc80df7d6b553cda0122af82e02fe2478a5b668196f68cd989b",
+        "size_in_bytes": 7054
+      },
+      {
+        "_path": "Library/include/libdeflate.h",
+        "path_type": "hardlink",
+        "sha256": "85643c90aa0be39dfa74eea261674aee2a7c5e8d9aa6cc878e0302260a75adab",
+        "size_in_bytes": 17098
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\libdeflate-1.20-hcfcfb64_0",
+    "type": 1
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "arch": "x86_64",
+  "build": "he0c23c2_0",
+  "build_number": 0,
+  "depends": [
+    "ucrt >=10.0.20348.0",
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139"
+  ],
+  "license": "BSD-2-Clause",
+  "license_family": "BSD",
+  "md5": "ac11ae1da661e573b71870b1191ce079",
+  "name": "svt-av1",
+  "platform": "win",
+  "sha256": "c25bf68ef411d41ee29f353acc698c482fdd087426a77398b7b41ce9d968519e",
+  "size": 1845727,
+  "subdir": "win-64",
+  "timestamp": 1730246453216,
+  "version": "2.3.0",
+  "fn": "svt-av1-2.3.0-he0c23c2_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/svt-av1-2.3.0-he0c23c2_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\svt-av1-2.3.0-he0c23c2_0",
+  "requested_specs": [],
+  "files": [
+    "Library/lib/pkgconfig/SvtAv1Enc.pc",
+    "Library/include/svt-av1/EbDebugMacros.h",
+    "Library/include/svt-av1/EbSvtAv1.h",
+    "Library/include/svt-av1/EbSvtAv1Enc.h",
+    "Library/include/svt-av1/EbSvtAv1ErrorCodes.h",
+    "Library/include/svt-av1/EbSvtAv1ExtFrameBuf.h",
+    "Library/include/svt-av1/EbSvtAv1Formats.h",
+    "Library/include/svt-av1/EbSvtAv1Metadata.h",
+    "Library/bin/SvtAv1Enc.dll",
+    "Library/bin/SvtAv1EncApp.exe",
+    "Library/lib/SvtAv1Enc.lib"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/lib/pkgconfig/SvtAv1Enc.pc",
+        "path_type": "hardlink",
+        "sha256": "788fd8ea5d059e26d60a5cd880b4e30a61f162a56ad60983534fe2ebf9ad7d02",
+        "sha256_in_prefix": "de0437463d1f30a64373010b916afff3568c41c7bee4ed2e195bb382f2ddb09f",
+        "size_in_bytes": 363,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/svt-av1_1730245789172/_h_env"
+      },
+      {
+        "_path": "Library/include/svt-av1/EbDebugMacros.h",
+        "path_type": "hardlink",
+        "sha256": "89b32b14c0bef251a19729dbf195fc7681397c3ca8c6a4dcdf2b3afd6ff6a680",
+        "size_in_bytes": 3714
+      },
+      {
+        "_path": "Library/include/svt-av1/EbSvtAv1.h",
+        "path_type": "hardlink",
+        "sha256": "099a5837dfd0afe2a16eab8a0dedbb9268f16d28e69d1049e0281d93532b4be8",
+        "size_in_bytes": 16273
+      },
+      {
+        "_path": "Library/include/svt-av1/EbSvtAv1Enc.h",
+        "path_type": "hardlink",
+        "sha256": "eb96e1c2c8e3153663c39648e7dfbb9062f250b889af97e3508204cd1c39bd59",
+        "size_in_bytes": 35980
+      },
+      {
+        "_path": "Library/include/svt-av1/EbSvtAv1ErrorCodes.h",
+        "path_type": "hardlink",
+        "sha256": "a832d938e431271384fe0d99cabb82b6af9462f40c03c2cee3f6a444fe0a8225",
+        "size_in_bytes": 2795
+      },
+      {
+        "_path": "Library/include/svt-av1/EbSvtAv1ExtFrameBuf.h",
+        "path_type": "hardlink",
+        "sha256": "d2f6221c534b22b259a93b7c03560f56435a808c2846cd96947f2d99f618d83e",
+        "size_in_bytes": 2121
+      },
+      {
+        "_path": "Library/include/svt-av1/EbSvtAv1Formats.h",
+        "path_type": "hardlink",
+        "sha256": "e483f3ca5d41d0766f2411be996488397b73901017b1f410501751d3852efbdc",
+        "size_in_bytes": 6247
+      },
+      {
+        "_path": "Library/include/svt-av1/EbSvtAv1Metadata.h",
+        "path_type": "hardlink",
+        "sha256": "0ff032702a8f560886cf280c86f4e9698d9cd10d5a926ed7f5af7509b3a248ba",
+        "size_in_bytes": 5630
+      },
+      {
+        "_path": "Library/bin/SvtAv1Enc.dll",
+        "path_type": "hardlink",
+        "sha256": "15dc2ad81164cd96f9bc994ca84a075fd80bf6f336f78627d297a6abfe3a901b",
+        "size_in_bytes": 14035968
+      },
+      {
+        "_path": "Library/bin/SvtAv1EncApp.exe",
+        "path_type": "hardlink",
+        "sha256": "c0496112c8b4fe57516cf509146d68bc49668fdf7bd8abe7774fcf01d0a0e671",
+        "size_in_bytes": 83968
+      },
+      {
+        "_path": "Library/lib/SvtAv1Enc.lib",
+        "path_type": "hardlink",
+        "sha256": "ad2739378efad388703d6529b8b321b3dd403fa5078a849fdc77f9eaddf59649",
+        "size_in_bytes": 7142
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\svt-av1-2.3.0-he0c23c2_0",
+    "type": 1
+  }
+}

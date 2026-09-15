@@ -6,6 +6,15 @@ ros2_ws/log/
 target_board_release/install/
 target_board_release/runtime/
 target_board_release/vendor/
+target_board_release/build/
+target_board_release/log/
+target_board_release/run.pid
+robot_control_suite_portable/
+tmp_pdf/
+*.zip
+*.exe
+*.pdf
+*.xlsx
 
 # Local analyzer/runtime output
 .gitnexus/

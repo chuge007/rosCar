@@ -1,0 +1,15 @@
+std_msgs/Header header
+bool active
+bool contour_valid
+bool geometry_valid
+float64 lateral_error_m
+float64 preview_lateral_error_m
+float64 heading_error_rad
+float64 curvature_1pm
+float64 angular_command_rad_s
+float64 angular_accel_rad_s2
+float64 linear_command_m_s
+float64 contour_lateral_m
+float64 confidence
+float64 fit_residual_m
+uint32 trajectory_points

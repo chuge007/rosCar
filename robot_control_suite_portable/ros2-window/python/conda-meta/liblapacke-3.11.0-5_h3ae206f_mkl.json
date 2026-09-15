@@ -1,0 +1,46 @@
+{
+  "arch": "x86_64",
+  "build": "5_h3ae206f_mkl",
+  "build_number": 5,
+  "constrains": [
+    "blas 2.305   mkl"
+  ],
+  "depends": [
+    "libblas 3.11.0 5_hf2e6a31_mkl",
+    "libcblas 3.11.0 5_h2a3cdd5_mkl",
+    "liblapack 3.11.0 5_hf9ab0e9_mkl"
+  ],
+  "license": "BSD-3-Clause",
+  "license_family": "BSD",
+  "md5": "d2abec9d4ffacb43dbd389d5c2279222",
+  "name": "liblapacke",
+  "platform": "win",
+  "sha256": "72f312334765605cc456faa1a818d2fb6697fddc6fda798eed8408c20df19ad6",
+  "size": 84330,
+  "subdir": "win-64",
+  "timestamp": 1765819171828,
+  "version": "3.11.0",
+  "fn": "liblapacke-3.11.0-5_h3ae206f_mkl.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/liblapacke-3.11.0-5_h3ae206f_mkl.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\liblapacke-3.11.0-5_h3ae206f_mkl",
+  "requested_specs": [],
+  "files": [
+    "Library/bin/liblapacke.dll"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/bin/liblapacke.dll",
+        "path_type": "hardlink",
+        "sha256": "baa3cdccf3ffefb7018d3f6469d7701aed23c5d4c4506daf04d74f8a934b7b8d",
+        "size_in_bytes": 253440
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\liblapacke-3.11.0-5_h3ae206f_mkl",
+    "type": 1
+  }
+}

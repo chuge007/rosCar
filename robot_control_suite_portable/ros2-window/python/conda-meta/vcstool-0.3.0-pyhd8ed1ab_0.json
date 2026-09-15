@@ -1,0 +1,567 @@
+{
+  "build": "pyhd8ed1ab_0",
+  "build_number": 0,
+  "depends": [
+    "python >=3.6",
+    "pyyaml",
+    "setuptools"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "Apache",
+  "md5": "df3532b78514a3bf74707b3ba646a866",
+  "name": "vcstool",
+  "noarch": "python",
+  "sha256": "ec3085cf6f19a8b396106bb818f58dcc007db641b30651de803c2085d2304d02",
+  "size": 33393,
+  "subdir": "noarch",
+  "timestamp": 1628498742394,
+  "version": "0.3.0",
+  "fn": "vcstool-0.3.0-pyhd8ed1ab_0.tar.bz2",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/vcstool-0.3.0-pyhd8ed1ab_0.tar.bz2",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\vcstool-0.3.0-pyhd8ed1ab_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/vcstool/__init__.py",
+    "Lib/site-packages/vcstool/crawler.py",
+    "Lib/site-packages/vcstool/executor.py",
+    "Lib/site-packages/vcstool/streams.py",
+    "Lib/site-packages/vcstool/util.py",
+    "Lib/site-packages/vcstool-0.3.0.dist-info/INSTALLER",
+    "Lib/site-packages/vcstool-0.3.0.dist-info/LICENSE",
+    "Lib/site-packages/vcstool-0.3.0.dist-info/METADATA",
+    "Lib/site-packages/vcstool-0.3.0.dist-info/RECORD",
+    "Lib/site-packages/vcstool-0.3.0.dist-info/REQUESTED",
+    "Lib/site-packages/vcstool-0.3.0.dist-info/WHEEL",
+    "Lib/site-packages/vcstool-0.3.0.dist-info/direct_url.json",
+    "Lib/site-packages/vcstool-0.3.0.dist-info/entry_points.txt",
+    "Lib/site-packages/vcstool-0.3.0.dist-info/top_level.txt",
+    "share/vcstool-completion/vcs.bash",
+    "share/vcstool-completion/vcs.fish",
+    "share/vcstool-completion/vcs.tcsh",
+    "share/vcstool-completion/vcs.zsh",
+    "Lib/site-packages/vcstool/clients/__init__.py",
+    "Lib/site-packages/vcstool/clients/bzr.py",
+    "Lib/site-packages/vcstool/clients/git.py",
+    "Lib/site-packages/vcstool/clients/hg.py",
+    "Lib/site-packages/vcstool/clients/none.py",
+    "Lib/site-packages/vcstool/clients/svn.py",
+    "Lib/site-packages/vcstool/clients/tar.py",
+    "Lib/site-packages/vcstool/clients/vcs_base.py",
+    "Lib/site-packages/vcstool/clients/zip.py",
+    "Lib/site-packages/vcstool/commands/__init__.py",
+    "Lib/site-packages/vcstool/commands/branch.py",
+    "Lib/site-packages/vcstool/commands/command.py",
+    "Lib/site-packages/vcstool/commands/custom.py",
+    "Lib/site-packages/vcstool/commands/diff.py",
+    "Lib/site-packages/vcstool/commands/export.py",
+    "Lib/site-packages/vcstool/commands/help.py",
+    "Lib/site-packages/vcstool/commands/import_.py",
+    "Lib/site-packages/vcstool/commands/log.py",
+    "Lib/site-packages/vcstool/commands/pull.py",
+    "Lib/site-packages/vcstool/commands/push.py",
+    "Lib/site-packages/vcstool/commands/remotes.py",
+    "Lib/site-packages/vcstool/commands/status.py",
+    "Lib/site-packages/vcstool/commands/validate.py",
+    "Lib/site-packages/vcstool/commands/vcs.py",
+    "Scripts/vcs-script.py",
+    "Scripts/vcs.exe",
+    "Scripts/vcs-branch-script.py",
+    "Scripts/vcs-branch.exe",
+    "Scripts/vcs-bzr-script.py",
+    "Scripts/vcs-bzr.exe",
+    "Scripts/vcs-custom-script.py",
+    "Scripts/vcs-custom.exe",
+    "Scripts/vcs-diff-script.py",
+    "Scripts/vcs-diff.exe",
+    "Scripts/vcs-export-script.py",
+    "Scripts/vcs-export.exe",
+    "Scripts/vcs-git-script.py",
+    "Scripts/vcs-git.exe",
+    "Scripts/vcs-help-script.py",
+    "Scripts/vcs-help.exe",
+    "Scripts/vcs-hg-script.py",
+    "Scripts/vcs-hg.exe",
+    "Scripts/vcs-import-script.py",
+    "Scripts/vcs-import.exe",
+    "Scripts/vcs-log-script.py",
+    "Scripts/vcs-log.exe",
+    "Scripts/vcs-pull-script.py",
+    "Scripts/vcs-pull.exe",
+    "Scripts/vcs-push-script.py",
+    "Scripts/vcs-push.exe",
+    "Scripts/vcs-remotes-script.py",
+    "Scripts/vcs-remotes.exe",
+    "Scripts/vcs-status-script.py",
+    "Scripts/vcs-status.exe",
+    "Scripts/vcs-svn-script.py",
+    "Scripts/vcs-svn.exe",
+    "Scripts/vcs-validate-script.py",
+    "Scripts/vcs-validate.exe"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/vcstool/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "7c386aa711b8cc0f5c5e318983053c486152fcc267a125a74dfb1813779a1f5f",
+        "size_in_bytes": 68
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/crawler.py",
+        "path_type": "hardlink",
+        "sha256": "d1b3c8f45b6c7618a93fb22acfe0bc55afe53fae12fcdc00df91fa5769eddfd0",
+        "size_in_bytes": 972
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/executor.py",
+        "path_type": "hardlink",
+        "sha256": "57767f9c4637a47a824447443743bfd21ff62de04fa1fb5cd39de618e80c3f48",
+        "size_in_bytes": 9237
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/streams.py",
+        "path_type": "hardlink",
+        "sha256": "711f0a5c86528cc55012b030ae3726250a2b1ccecd6eda5f09f40c826791270c",
+        "size_in_bytes": 336
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/util.py",
+        "path_type": "hardlink",
+        "sha256": "7e6b60d5d56c2d8d49373134b81dd98e7bda52e8b52e0cee709bc27e064488cd",
+        "size_in_bytes": 452
+      },
+      {
+        "_path": "Lib/site-packages/vcstool-0.3.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/vcstool-0.3.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "03ed391ed35a54a27f3afb7f23a3962cf827ea351249343e36ca0a8d02ac3c0d",
+        "size_in_bytes": 11347
+      },
+      {
+        "_path": "Lib/site-packages/vcstool-0.3.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "ce5751bec7799438ff018d33a68a1c07539ef241aac32c3332ed86f98f93f437",
+        "size_in_bytes": 832
+      },
+      {
+        "_path": "Lib/site-packages/vcstool-0.3.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "6c46244fb4a5e9cac7edfa1fe3228f35da6e08aca2856a0311e17d23749c0e51",
+        "size_in_bytes": 6327
+      },
+      {
+        "_path": "Lib/site-packages/vcstool-0.3.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/vcstool-0.3.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "3aa464174798e461ecb0ca2b16395b4c8ab4ef6be91e917ad1f21003a952f710",
+        "size_in_bytes": 92
+      },
+      {
+        "_path": "Lib/site-packages/vcstool-0.3.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "77e577ef8870dbeed6c9dd7d165c66fb0a765c42e44711ef621875f574be88ea",
+        "size_in_bytes": 103
+      },
+      {
+        "_path": "Lib/site-packages/vcstool-0.3.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "01e39da303c73da1f29e33d29844e9b22bb844cda936962982b51c7ea4c5c9ba",
+        "size_in_bytes": 710
+      },
+      {
+        "_path": "Lib/site-packages/vcstool-0.3.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "00b91096e1836eba30058056118f37090f3818e9523bb885f6ae7be6b9e75640",
+        "size_in_bytes": 8
+      },
+      {
+        "_path": "share/vcstool-completion/vcs.bash",
+        "path_type": "hardlink",
+        "sha256": "b07c35e3a94f1ce217e0c03f85c08699d0276b7ef5237b6d0153421fef0fbeb9",
+        "size_in_bytes": 226
+      },
+      {
+        "_path": "share/vcstool-completion/vcs.fish",
+        "path_type": "hardlink",
+        "sha256": "41f9c45c9b332c53bfc6001707ba4ccff9c9ad1a64a4fb410123cdb81665dd45",
+        "size_in_bytes": 479
+      },
+      {
+        "_path": "share/vcstool-completion/vcs.tcsh",
+        "path_type": "hardlink",
+        "sha256": "c479c513a5175f9988c1d80eef6798d42977434b2d6d191931088bac910915d3",
+        "size_in_bytes": 46
+      },
+      {
+        "_path": "share/vcstool-completion/vcs.zsh",
+        "path_type": "hardlink",
+        "sha256": "3afa0807993a5fc07be50482697b99c58ea036448f564f1e8aada56c229ea588",
+        "size_in_bytes": 171
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/clients/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "43cb30c48a04008fe3f4ba31ed57a2f3bbc1139e679bc50794ec21a6f0f37812",
+        "size_in_bytes": 864
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/clients/bzr.py",
+        "path_type": "hardlink",
+        "sha256": "3c81b57b84c79e30bf6a3cca8ba54f60e02c2e5068e65eba7e9d6138673f02d1",
+        "size_in_bytes": 7169
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/clients/git.py",
+        "path_type": "hardlink",
+        "sha256": "0f0492e217f573cdc2fdcfc070e1f2c003a7b63db9b6ada34fef48dacb08c1ea",
+        "size_in_bytes": 31459
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/clients/hg.py",
+        "path_type": "hardlink",
+        "sha256": "336836db2dba1e03a7df5d53daf01c3a4f6f10046127ef5ee8ede800f032bf1c",
+        "size_in_bytes": 11970
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/clients/none.py",
+        "path_type": "hardlink",
+        "sha256": "dcdf1f09fb9d37d59c29eb4330c29f4ed403150739021a655a5c22637fab3d0e",
+        "size_in_bytes": 168
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/clients/svn.py",
+        "path_type": "hardlink",
+        "sha256": "060101d2b496e4d0ab66d64ae9448ec8f369167ceb875cbba3bb0d1f5624613a",
+        "size_in_bytes": 8527
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/clients/tar.py",
+        "path_type": "hardlink",
+        "sha256": "84e7dd4b18e22d58865144f7748d5ef82802f0dc2acc7b8d4411638ce02503e8",
+        "size_in_bytes": 3499
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/clients/vcs_base.py",
+        "path_type": "hardlink",
+        "sha256": "c81dabb42eec507f15000b5556ffbce49a6030a369482a1e19b9dc9a437e612b",
+        "size_in_bytes": 3935
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/clients/zip.py",
+        "path_type": "hardlink",
+        "sha256": "0f1652ce29ff96de9d46a920c8c1fc1020fcb97773f24615a0ad2bae8a61a409",
+        "size_in_bytes": 4388
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "bf1d35330a236115d62ddaf9fbd66462b6759194c1d16baeb81b287d1f1f6be4",
+        "size_in_bytes": 1024
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/branch.py",
+        "path_type": "hardlink",
+        "sha256": "257dd0d2a690d1510b6d07be10380ab8e0ff3869586e5a6315ff25d215a49ea4",
+        "size_in_bytes": 864
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/command.py",
+        "path_type": "hardlink",
+        "sha256": "6da960bc778af4b109595bb5229b4b259adffc9381ca2fb27c89547dab109cb9",
+        "size_in_bytes": 3543
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/custom.py",
+        "path_type": "hardlink",
+        "sha256": "7f26397e3b2375e37573aeda6a1860dd26a890f5efc0c2aa3ff1e6c3b84b4f24",
+        "size_in_bytes": 3541
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/diff.py",
+        "path_type": "hardlink",
+        "sha256": "95a12ac801b05b4d2a4c5f94d32ed5f30098d0cb775b43de80ad20f49faa44f0",
+        "size_in_bytes": 906
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/export.py",
+        "path_type": "hardlink",
+        "sha256": "d0942ec9c17a3687fc209d3e6ef01b5076f4d9c0e44d7558267f78e9066d96c2",
+        "size_in_bytes": 4119
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/help.py",
+        "path_type": "hardlink",
+        "sha256": "67e53b6bd8e95d2157f29321a8952e1223a09f32535fa9910ffa66d7a59567c2",
+        "size_in_bytes": 4232
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/import_.py",
+        "path_type": "hardlink",
+        "sha256": "1accfb8c59b98bd8c533d1dd7cde649d8841dfa3689c71e33758c816d5a61545",
+        "size_in_bytes": 8799
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/log.py",
+        "path_type": "hardlink",
+        "sha256": "d5147868ec8999e5cbe341c57f7a3a645b356f55bc9dcbbe9a33d727994f5ff2",
+        "size_in_bytes": 1650
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/pull.py",
+        "path_type": "hardlink",
+        "sha256": "22219ff5f9729394f2b65dd70663def5bcd10695a901434f9fc916b50d18bcfe",
+        "size_in_bytes": 791
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/push.py",
+        "path_type": "hardlink",
+        "sha256": "fcf818a13994d46dcb3bf33375537f51bc4c845a6608d17b99906d10d1be3996",
+        "size_in_bytes": 785
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/remotes.py",
+        "path_type": "hardlink",
+        "sha256": "1ffe7dcad452a85c990f0a1034eab59ef32c8706913b30599c5947f7750b9c84",
+        "size_in_bytes": 751
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/status.py",
+        "path_type": "hardlink",
+        "sha256": "93fc4874dc4efdb7c032963965dcfa0daa1525a9ee35f6a698d43805e2d6893b",
+        "size_in_bytes": 911
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/validate.py",
+        "path_type": "hardlink",
+        "sha256": "469efcd68465e96f5e73d65a26e75d010bea4bad259bc9001a75cce2304f35c1",
+        "size_in_bytes": 2762
+      },
+      {
+        "_path": "Lib/site-packages/vcstool/commands/vcs.py",
+        "path_type": "hardlink",
+        "sha256": "ecc8f212d4cd0cc29a10f3c2edf085ff3fd0d666315681c47b934ab65fd16b0a",
+        "size_in_bytes": 912
+      },
+      {
+        "_path": "Scripts/vcs-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "91e611b0de5542d48c77f7baac6ba7124712981fbecbea1a01dbf68a49bbe1ab",
+        "size_in_bytes": 198
+      },
+      {
+        "_path": "Scripts/vcs.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-branch-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "d28ca37ccc89bd747b9db79080a2db7fd060f56b8b02b9d408a2b8074bb9361c",
+        "size_in_bytes": 201
+      },
+      {
+        "_path": "Scripts/vcs-branch.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-bzr-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "63cc61344757f42bcd785725f134cf6b7cadb4a383d59f95e802a60d5895b501",
+        "size_in_bytes": 209
+      },
+      {
+        "_path": "Scripts/vcs-bzr.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-custom-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "93601d095cdb320fb1821add95f3106e32571a200265368dd104c94bdd764650",
+        "size_in_bytes": 201
+      },
+      {
+        "_path": "Scripts/vcs-custom.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-diff-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "bc46cd13009ee360851e24a52dda71ce213e1db21186088c92fbbc74ee89ab94",
+        "size_in_bytes": 199
+      },
+      {
+        "_path": "Scripts/vcs-diff.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-export-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "d181a6b1fd5ec2c318ebb89aa7b0db0a824d10e3fea97fa9edfa91272fd9c494",
+        "size_in_bytes": 201
+      },
+      {
+        "_path": "Scripts/vcs-export.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-git-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "1ecd7b98d3cd107f6a7de144c51a486e2c863918601a2ce3b3a4f2ef0165b7f2",
+        "size_in_bytes": 209
+      },
+      {
+        "_path": "Scripts/vcs-git.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-help-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "96e678e02f1d44232d2b7941bcbfec4f771ddc881bca10f3c139ead9a259f47f",
+        "size_in_bytes": 199
+      },
+      {
+        "_path": "Scripts/vcs-help.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-hg-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "0414cb607a1e242bae62f5edd6582eaa4613b4da5aa3a73a9ea3ce9eedd5fccc",
+        "size_in_bytes": 207
+      },
+      {
+        "_path": "Scripts/vcs-hg.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-import-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "91da362d3b910c7f36a06e8c5e34003cbdd1250943f958157c783fde941de9da",
+        "size_in_bytes": 202
+      },
+      {
+        "_path": "Scripts/vcs-import.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-log-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "16aec59a319b4ef429e31ae67b38c81d3434fa6d6e6eba3a41d8b0ef5076b234",
+        "size_in_bytes": 198
+      },
+      {
+        "_path": "Scripts/vcs-log.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-pull-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "51b123a2dcffef47c818537e04bbdcfb8c26f60e697e030c3109d390960ee7da",
+        "size_in_bytes": 199
+      },
+      {
+        "_path": "Scripts/vcs-pull.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-push-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "092002d5dc99cf1e2cceb9a96c5d5c45dc58f86642b27db2cbf2afc766159b39",
+        "size_in_bytes": 199
+      },
+      {
+        "_path": "Scripts/vcs-push.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-remotes-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "7c2c92d016716951e23ce4d5b5c22009360434b3efd3f68ca24e14235a450af3",
+        "size_in_bytes": 202
+      },
+      {
+        "_path": "Scripts/vcs-remotes.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-status-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "3b1efcb26a88e21fa65555fc73798cdcd1b99716b4640eb60cee4affbdbc15b6",
+        "size_in_bytes": 201
+      },
+      {
+        "_path": "Scripts/vcs-status.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-svn-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "29c95583e44ee8bfe1c43c5c62168771cc8ded1d357ee1b24a2fa6952cc7a310",
+        "size_in_bytes": 209
+      },
+      {
+        "_path": "Scripts/vcs-svn.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/vcs-validate-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "b2b3c8a84ba78285481e00e1227aeaaff6a6bea2d0b2ce3cb6dcc5e34dcd6ec2",
+        "size_in_bytes": 203
+      },
+      {
+        "_path": "Scripts/vcs-validate.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\vcstool-0.3.0-pyhd8ed1ab_0",
+    "type": 1
+  }
+}

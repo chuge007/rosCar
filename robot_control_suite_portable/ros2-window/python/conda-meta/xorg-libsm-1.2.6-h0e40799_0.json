@@ -1,0 +1,82 @@
+{
+  "arch": "x86_64",
+  "build": "h0e40799_0",
+  "build_number": 0,
+  "depends": [
+    "libgcc >=13",
+    "libwinpthread >=12.0.0.r4.gg4f2fc60ca",
+    "ucrt >=10.0.20348.0",
+    "xorg-libice >=1.1.2,<2.0a0"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "570c9a6d9b4909e45d49e9a5daa528de",
+  "name": "xorg-libsm",
+  "platform": "win",
+  "sha256": "065d49b0d1e6873ed1238e962f56cb8204c585cdc5c9bd4ae2bf385cadb5bd65",
+  "size": 97096,
+  "subdir": "win-64",
+  "timestamp": 1741896840170,
+  "version": "1.2.6",
+  "fn": "xorg-libsm-1.2.6-h0e40799_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/xorg-libsm-1.2.6-h0e40799_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\xorg-libsm-1.2.6-h0e40799_0",
+  "requested_specs": [],
+  "files": [
+    "Library/bin/msys-SM-6.dll",
+    "Library/include/X11/SM/SM.h",
+    "Library/include/X11/SM/SMlib.h",
+    "Library/include/X11/SM/SMproto.h",
+    "Library/lib/libSM.dll.a",
+    "Library/lib/pkgconfig/sm.pc"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/bin/msys-SM-6.dll",
+        "path_type": "hardlink",
+        "sha256": "ebf5e7fa72730b2a0a1083738745864a2b168378b8d5122f453491df07b76f71",
+        "size_in_bytes": 263718
+      },
+      {
+        "_path": "Library/include/X11/SM/SM.h",
+        "path_type": "hardlink",
+        "sha256": "3580529fdcd97370008a713ff8c4e9e22d7ce179b04d1eabad9ab21085cb3373",
+        "size_in_bytes": 2927
+      },
+      {
+        "_path": "Library/include/X11/SM/SMlib.h",
+        "path_type": "hardlink",
+        "sha256": "d2aea2243d0ec61de6dbde0a7b389d1d6918aa23adc50354d88f7580f8eac11a",
+        "size_in_bytes": 11268
+      },
+      {
+        "_path": "Library/include/X11/SM/SMproto.h",
+        "path_type": "hardlink",
+        "sha256": "39194dff4b0e535141fee600fd96558e58b1ef2ecc98a2f7cc40fcd6953d1048",
+        "size_in_bytes": 4780
+      },
+      {
+        "_path": "Library/lib/libSM.dll.a",
+        "path_type": "hardlink",
+        "sha256": "a2713798770a64c68ece1a6c44692bf35d31454d814e13d8236adbc4d4a5c7c9",
+        "size_in_bytes": 31570
+      },
+      {
+        "_path": "Library/lib/pkgconfig/sm.pc",
+        "path_type": "hardlink",
+        "sha256": "8a17372643bde339269772a656daafd9aee3f550c744f6123c1be85e70630f7b",
+        "sha256_in_prefix": "661ec5f30df82131be25dc6332dd04d17ab6d9c4c667c63ced1a8ae53f92f93d",
+        "size_in_bytes": 308,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/xorg-libsm_1741896223042/_h_env"
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\xorg-libsm-1.2.6-h0e40799_0",
+    "type": 1
+  }
+}

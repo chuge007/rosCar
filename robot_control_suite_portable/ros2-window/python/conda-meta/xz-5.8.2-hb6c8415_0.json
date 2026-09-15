@@ -1,0 +1,36 @@
+{
+  "arch": "x86_64",
+  "build": "hb6c8415_0",
+  "build_number": 0,
+  "depends": [
+    "liblzma 5.8.2 hfd05255_0",
+    "liblzma-devel 5.8.2 hfd05255_0",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.3,<15",
+    "vc14_runtime >=14.44.35208",
+    "xz-tools 5.8.2 hfd05255_0"
+  ],
+  "license": "0BSD AND LGPL-2.1-or-later AND GPL-2.0-or-later",
+  "md5": "5cab33f097ff61c7c8c31146b5b8d35a",
+  "name": "xz",
+  "platform": "win",
+  "sha256": "95078b4835f88b9e80368dc4ecfc261f8f85da457de3eca94867b1c0862b0851",
+  "size": 24394,
+  "subdir": "win-64",
+  "timestamp": 1768752837182,
+  "version": "5.8.2",
+  "fn": "xz-5.8.2-hb6c8415_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/xz-5.8.2-hb6c8415_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\xz-5.8.2-hb6c8415_0",
+  "requested_specs": [],
+  "files": [],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": []
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\xz-5.8.2-hb6c8415_0",
+    "type": 1
+  }
+}

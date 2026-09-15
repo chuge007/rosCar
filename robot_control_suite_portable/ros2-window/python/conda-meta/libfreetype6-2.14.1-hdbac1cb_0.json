@@ -1,0 +1,47 @@
+{
+  "arch": "x86_64",
+  "build": "hdbac1cb_0",
+  "build_number": 0,
+  "constrains": [
+    "freetype >=2.14.1"
+  ],
+  "depends": [
+    "libpng >=1.6.50,<1.7.0a0",
+    "libzlib >=1.3.1,<2.0a0",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.3,<15",
+    "vc14_runtime >=14.44.35208"
+  ],
+  "license": "GPL-2.0-only OR FTL",
+  "md5": "6e7c5c5ab485057b5d07fd8188ba5c28",
+  "name": "libfreetype6",
+  "platform": "win",
+  "sha256": "223710600b1a5567163f7d66545817f2f144e4ef8f84e99e90f6b8a4e19cb7ad",
+  "size": 340264,
+  "subdir": "win-64",
+  "timestamp": 1757946133889,
+  "version": "2.14.1",
+  "fn": "libfreetype6-2.14.1-hdbac1cb_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/libfreetype6-2.14.1-hdbac1cb_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\libfreetype6-2.14.1-hdbac1cb_0",
+  "requested_specs": [],
+  "files": [
+    "Library/bin/freetype.dll"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/bin/freetype.dll",
+        "path_type": "hardlink",
+        "sha256": "f42d192e05c28da970a896af67f3521cf545c78a455c138241524b2b6df6305b",
+        "size_in_bytes": 686080
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\libfreetype6-2.14.1-hdbac1cb_0",
+    "type": 1
+  }
+}

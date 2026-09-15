@@ -1,0 +1,167 @@
+{
+  "build": "pyhd8ed1ab_1",
+  "build_number": 1,
+  "depends": [
+    "colcon-core >=0.3.18",
+    "python >=3.10"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "APACHE",
+  "md5": "7568a13447ca84751fd58eb6542d9768",
+  "name": "colcon-powershell",
+  "noarch": "python",
+  "sha256": "6aeb528c0433e11052d08cd5982ae324c0a2257f8445c5ac9130919ebc5f8e43",
+  "size": 17321,
+  "subdir": "noarch",
+  "timestamp": 1757616979293,
+  "version": "0.4.0",
+  "fn": "colcon-powershell-0.4.0-pyhd8ed1ab_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/colcon-powershell-0.4.0-pyhd8ed1ab_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-powershell-0.4.0-pyhd8ed1ab_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/colcon_powershell-0.4.0.dist-info/licenses/LICENSE",
+    "Lib/site-packages/colcon_powershell-0.4.0.dist-info/INSTALLER",
+    "Lib/site-packages/colcon_powershell-0.4.0.dist-info/METADATA",
+    "Lib/site-packages/colcon_powershell-0.4.0.dist-info/RECORD",
+    "Lib/site-packages/colcon_powershell-0.4.0.dist-info/REQUESTED",
+    "Lib/site-packages/colcon_powershell-0.4.0.dist-info/WHEEL",
+    "Lib/site-packages/colcon_powershell-0.4.0.dist-info/direct_url.json",
+    "Lib/site-packages/colcon_powershell-0.4.0.dist-info/entry_points.txt",
+    "Lib/site-packages/colcon_powershell-0.4.0.dist-info/top_level.txt",
+    "Lib/site-packages/colcon_powershell/shell/template/__init__.py",
+    "Lib/site-packages/colcon_powershell/shell/template/command_prefix.ps1.em",
+    "Lib/site-packages/colcon_powershell/shell/template/hook_append_value.ps1.em",
+    "Lib/site-packages/colcon_powershell/shell/template/hook_prepend_value.ps1.em",
+    "Lib/site-packages/colcon_powershell/shell/template/package.ps1.em",
+    "Lib/site-packages/colcon_powershell/shell/template/prefix.ps1.em",
+    "Lib/site-packages/colcon_powershell/shell/template/prefix_chain.ps1.em",
+    "Lib/site-packages/colcon_powershell/shell/__init__.py",
+    "Lib/site-packages/colcon_powershell/shell/powershell.py",
+    "Lib/site-packages/colcon_powershell/__init__.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/colcon_powershell-0.4.0.dist-info/licenses/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_in_bytes": 11358
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell-0.4.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell-0.4.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "d8ed84c42e8d696a0f6516728ac9e1c41a1b4abf29cdabc75e6ed9095d0575d4",
+        "size_in_bytes": 1946
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell-0.4.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "dea591dd2cabc4131a0af76d7d8d2eec88a780fa292642e703142bd3168f9b8a",
+        "size_in_bytes": 2150
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell-0.4.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell-0.4.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b",
+        "size_in_bytes": 91
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell-0.4.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "1fcc6ccbf5cfbd991b197ecc4412f378075a5b10cd709a38b0e44ee67f2e462a",
+        "size_in_bytes": 113
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell-0.4.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "1e899e96140e07bdd7a1a34649918721bb4057da84478070164c33dcdc51a7fc",
+        "size_in_bytes": 220
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell-0.4.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "448167a154bd813067908a54ed20f4733a1ccb571ddbb09c79c188b0433b1b66",
+        "size_in_bytes": 18
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell/shell/template/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell/shell/template/command_prefix.ps1.em",
+        "path_type": "hardlink",
+        "sha256": "d7a22995bf37af653111b4b6484c47b5b398a6f3d81ba285b387c58ee9058e52",
+        "size_in_bytes": 255
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell/shell/template/hook_append_value.ps1.em",
+        "path_type": "hardlink",
+        "sha256": "7f9a2fe5789143ab8a497010c163ae32ad4b8867f67994cc46741eb5ac574daa",
+        "size_in_bytes": 215
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell/shell/template/hook_prepend_value.ps1.em",
+        "path_type": "hardlink",
+        "sha256": "3b90b16ffbd399907cbda199f87594062834b653b6e744f100593441832917fe",
+        "size_in_bytes": 217
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell/shell/template/package.ps1.em",
+        "path_type": "hardlink",
+        "sha256": "cc0babea28f70e6229ef1f1cd9b868d70485648d57982ec50c38b1ad743efdfc",
+        "size_in_bytes": 3271
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell/shell/template/prefix.ps1.em",
+        "path_type": "hardlink",
+        "sha256": "70fa67f6f8705d609a0bdcd197ccba28f4b9c75de7e596f960e645e7c5951374",
+        "size_in_bytes": 2263
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell/shell/template/prefix_chain.ps1.em",
+        "path_type": "hardlink",
+        "sha256": "2a5365d6df6fdbfedb58d3b08e3467964806696210f847f219f7006d0d864029",
+        "size_in_bytes": 1285
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell/shell/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell/shell/powershell.py",
+        "path_type": "hardlink",
+        "sha256": "0344c6fbe64dc0187682bf253a57cbcd052c22e2858692ff5ed54cd29897e396",
+        "size_in_bytes": 7470
+      },
+      {
+        "_path": "Lib/site-packages/colcon_powershell/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "4d446e4ab55b87546a9e66e1954f05793ca1a01f4010d94b910fd5d43995823f",
+        "size_in_bytes": 106
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-powershell-0.4.0-pyhd8ed1ab_1",
+    "type": 1
+  }
+}

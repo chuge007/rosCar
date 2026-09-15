@@ -1,0 +1,47 @@
+{
+  "arch": "x86_64",
+  "build": "hd5e4a3a_0",
+  "build_number": 0,
+  "depends": [
+    "krb5 >=1.21.2,<1.22.0a0",
+    "libcurl 8.5.0 hd5e4a3a_0",
+    "libssh2 >=1.11.0,<2.0a0",
+    "libzlib >=1.2.13,<2.0.0a0",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139"
+  ],
+  "license": "curl",
+  "license_family": "MIT",
+  "md5": "2d199c87ccbb43925d0948c40148a200",
+  "name": "curl",
+  "platform": "win",
+  "sha256": "d5fcd8fa6819862eea0204fa219a20f5a6001126661ebe5505829ae30cd198cb",
+  "size": 149447,
+  "subdir": "win-64",
+  "timestamp": 1701860692360,
+  "version": "8.5.0",
+  "fn": "curl-8.5.0-hd5e4a3a_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/curl-8.5.0-hd5e4a3a_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\curl-8.5.0-hd5e4a3a_0",
+  "requested_specs": [],
+  "files": [
+    "Library/bin/curl.exe"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/bin/curl.exe",
+        "path_type": "hardlink",
+        "sha256": "536f6a47e9b8db82089de3d23249685ec78b2a3828ce3343157885a099cfe310",
+        "size_in_bytes": 482816
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\curl-8.5.0-hd5e4a3a_0",
+    "type": 1
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "arch": "x86_64",
+  "build": "he0c23c2_2",
+  "build_number": 2,
+  "depends": [
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139",
+    "ucrt >=10.0.20348.0"
+  ],
+  "license": "Zlib",
+  "md5": "20cbb014a490241f74d429d2636aba63",
+  "name": "tinyxml2",
+  "platform": "win",
+  "sha256": "622e6b974f26eb2f09b9080207c10ed7278c302b229062acb35d67b06d5f1c3d",
+  "size": 75392,
+  "subdir": "win-64",
+  "timestamp": 1742462215649,
+  "version": "10.0.0",
+  "fn": "tinyxml2-10.0.0-he0c23c2_2.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/tinyxml2-10.0.0-he0c23c2_2.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\tinyxml2-10.0.0-he0c23c2_2",
+  "requested_specs": [],
+  "files": [
+    "Library/bin/tinyxml2.dll",
+    "Library/lib/tinyxml2.lib",
+    "Library/lib/pkgconfig/tinyxml2.pc",
+    "Library/include/tinyxml2.h",
+    "Library/lib/cmake/tinyxml2/tinyxml2-config-version.cmake",
+    "Library/lib/cmake/tinyxml2/tinyxml2-config.cmake",
+    "Library/lib/cmake/tinyxml2/tinyxml2-shared-targets-release.cmake",
+    "Library/lib/cmake/tinyxml2/tinyxml2-shared-targets.cmake"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/bin/tinyxml2.dll",
+        "path_type": "hardlink",
+        "sha256": "6ca806146c003cd98e7300fb8166b638d8c3df3015655ae0129ad86b0424ea76",
+        "size_in_bytes": 94720
+      },
+      {
+        "_path": "Library/lib/tinyxml2.lib",
+        "path_type": "hardlink",
+        "sha256": "ea3226cf4a69eefaa4843c20b1ab797358f8c6a36556f4c1e0e478bfb7db165f",
+        "size_in_bytes": 142924
+      },
+      {
+        "_path": "Library/lib/pkgconfig/tinyxml2.pc",
+        "path_type": "hardlink",
+        "sha256": "dfc119acef420187cd617e140f74e4af28ee0855986dcb2981f97c089c4ea2b0",
+        "sha256_in_prefix": "86b701bd2ce09628cba15752ac1e99bef990b17613a036815adf954fc1cfb1e0",
+        "size_in_bytes": 277,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/bld/rattler-build_tinyxml2_1742462215/h_env"
+      },
+      {
+        "_path": "Library/include/tinyxml2.h",
+        "path_type": "hardlink",
+        "sha256": "02f2389feb67fbb3efe42aaa6942034bc7d54695f357c5aac3cbd2f78a06ca4a",
+        "size_in_bytes": 74509
+      },
+      {
+        "_path": "Library/lib/cmake/tinyxml2/tinyxml2-config-version.cmake",
+        "path_type": "hardlink",
+        "sha256": "207dbfa5d26cc033a1e02ad7b3b4fe72f676afb7f87f1f98fa9507d8e85f0a0e",
+        "size_in_bytes": 2830
+      },
+      {
+        "_path": "Library/lib/cmake/tinyxml2/tinyxml2-config.cmake",
+        "path_type": "hardlink",
+        "sha256": "3bce32cb8ba9927c5c2376d53addfebb3458821300ac93bfe1a32c131ed6d0db",
+        "size_in_bytes": 1988
+      },
+      {
+        "_path": "Library/lib/cmake/tinyxml2/tinyxml2-shared-targets-release.cmake",
+        "path_type": "hardlink",
+        "sha256": "19b08907d6e47a2f2a28a562a880605cfca99d9f99b26000804d3e2659b28cdb",
+        "size_in_bytes": 934
+      },
+      {
+        "_path": "Library/lib/cmake/tinyxml2/tinyxml2-shared-targets.cmake",
+        "path_type": "hardlink",
+        "sha256": "83c041631990a4051e1399c1212c0b6a7ddfa878b3b064c87597ec9362a027e4",
+        "size_in_bytes": 4372
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\tinyxml2-10.0.0-he0c23c2_2",
+    "type": 1
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "build": "pyha770c72_1",
+  "build_number": 1,
+  "depends": [
+    "python >=3.9"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "29097e7ea634a45cc5386b95cac6568f",
+  "name": "mypy_extensions",
+  "noarch": "python",
+  "sha256": "1895f47b7d68581a6facde5cb13ab8c2764c2e53a76bd746f8f98910dc4e08fe",
+  "size": 10854,
+  "subdir": "noarch",
+  "timestamp": 1733230986902,
+  "version": "1.0.0",
+  "fn": "mypy_extensions-1.0.0-pyha770c72_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/mypy_extensions-1.0.0-pyha770c72_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\mypy_extensions-1.0.0-pyha770c72_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/mypy_extensions.py",
+    "Lib/site-packages/mypy_extensions-1.0.0.dist-info/INSTALLER",
+    "Lib/site-packages/mypy_extensions-1.0.0.dist-info/LICENSE",
+    "Lib/site-packages/mypy_extensions-1.0.0.dist-info/METADATA",
+    "Lib/site-packages/mypy_extensions-1.0.0.dist-info/RECORD",
+    "Lib/site-packages/mypy_extensions-1.0.0.dist-info/REQUESTED",
+    "Lib/site-packages/mypy_extensions-1.0.0.dist-info/WHEEL",
+    "Lib/site-packages/mypy_extensions-1.0.0.dist-info/direct_url.json",
+    "Lib/site-packages/mypy_extensions-1.0.0.dist-info/top_level.txt"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/mypy_extensions.py",
+        "path_type": "hardlink",
+        "sha256": "8ba98ff3eeb4379923d56ede6ef3db53801e18e4a987f7a41cb90c6dfa0ad9ad",
+        "size_in_bytes": 6227
+      },
+      {
+        "_path": "Lib/site-packages/mypy_extensions-1.0.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/mypy_extensions-1.0.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "a50450da1d53cd777b80ced77c58ff96abe0ccd879706bd142c3ec20e245f0b4",
+        "size_in_bytes": 1204
+      },
+      {
+        "_path": "Lib/site-packages/mypy_extensions-1.0.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "7e251c8dbb92718daa8cdbeb7d150d835c06bb1d95e93612c80894b22a2669d7",
+        "size_in_bytes": 1134
+      },
+      {
+        "_path": "Lib/site-packages/mypy_extensions-1.0.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "ba5c56ba3db16ce3dda48dd54274ce731c31082e87cc8ac4651d1d4870b6516b",
+        "size_in_bytes": 849
+      },
+      {
+        "_path": "Lib/site-packages/mypy_extensions-1.0.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/mypy_extensions-1.0.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "3d9504c5d7fbd548bfb28ebb417a724ae1ed0a2dfe277c2f1783912ba93f4bc5",
+        "size_in_bytes": 91
+      },
+      {
+        "_path": "Lib/site-packages/mypy_extensions-1.0.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "e7e3cc867f50866cd4479da1f4a2e27996d370fbe2101e10d34cf724ebf1d4a2",
+        "size_in_bytes": 111
+      },
+      {
+        "_path": "Lib/site-packages/mypy_extensions-1.0.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "4e5967196a83a053212b24e25fda5ea05d550b5c269118082c775e6e7b9b11bf",
+        "size_in_bytes": 16
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\mypy_extensions-1.0.0-pyha770c72_1",
+    "type": 1
+  }
+}

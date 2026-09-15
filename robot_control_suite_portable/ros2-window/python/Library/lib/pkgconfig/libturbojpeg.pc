@@ -1,0 +1,10 @@
+prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+exec_prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+libdir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib
+includedir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/include
+
+Name: libturbojpeg
+Description: A SIMD-accelerated JPEG codec that provides the TurboJPEG API
+Version: 3.1.2
+Libs: -L${libdir} -lturbojpeg
+Cflags: -I${includedir}

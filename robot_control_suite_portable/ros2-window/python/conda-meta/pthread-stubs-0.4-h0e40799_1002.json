@@ -1,0 +1,46 @@
+{
+  "arch": "x86_64",
+  "build": "h0e40799_1002",
+  "build_number": 1002,
+  "depends": [
+    "libgcc >=13",
+    "libwinpthread >=12.0.0.r4.gg4f2fc60ca",
+    "ucrt >=10.0.20348.0"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "3c8f2573569bb816483e5cf57efbbe29",
+  "name": "pthread-stubs",
+  "platform": "win",
+  "sha256": "7e446bafb4d692792310ed022fe284e848c6a868c861655a92435af7368bae7b",
+  "size": 9389,
+  "subdir": "win-64",
+  "timestamp": 1726802555076,
+  "version": "0.4",
+  "fn": "pthread-stubs-0.4-h0e40799_1002.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/pthread-stubs-0.4-h0e40799_1002.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\pthread-stubs-0.4-h0e40799_1002",
+  "requested_specs": [],
+  "files": [
+    "Library/lib/pkgconfig/pthread-stubs.pc"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/lib/pkgconfig/pthread-stubs.pc",
+        "path_type": "hardlink",
+        "sha256": "0b55fbca6e2203c4f12a03b378176bb83eaf194f4bcd7fbfb0f73de297a5b336",
+        "sha256_in_prefix": "efca0545668924f5844efe8fde1425d88001380b5c2eded951214438d2cd0689",
+        "size_in_bytes": 305,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/pthread-stubs_1726802316277/_h_env"
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\pthread-stubs-0.4-h0e40799_1002",
+    "type": 1
+  }
+}

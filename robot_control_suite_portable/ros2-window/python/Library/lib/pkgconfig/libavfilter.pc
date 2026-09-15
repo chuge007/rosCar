@@ -1,0 +1,14 @@
+prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+exec_prefix=${prefix}
+libdir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib
+includedir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/include
+
+Name: libavfilter
+Description: FFmpeg audio/video filtering library
+Version: 9.12.100
+Requires: 
+Requires.private: libswscale >= 7.5.100, libpostproc >= 57.3.100, libavformat >= 60.16.100, libavcodec >= 60.31.102, libswresample >= 4.12.100, libavutil >= 58.29.100
+Conflicts:
+Libs: -L${libdir}  -lavfilter 
+Libs.private: -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib harfbuzz.lib usp10.lib gdi32.lib rpcrt4.lib freetype.lib png16.lib zlib.lib glib-2.0.lib iconv.lib ws2_32.lib winmm.lib pcre2-8.lib graphite2.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib fontconfig.lib D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib/expat.lib freetype.lib png16.lib zlib.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib freetype.lib png16.lib zlib.lib
+Cflags: -I${includedir}

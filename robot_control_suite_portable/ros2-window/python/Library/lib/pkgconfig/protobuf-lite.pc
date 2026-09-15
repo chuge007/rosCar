@@ -1,0 +1,12 @@
+prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+exec_prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+libdir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib
+includedir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/include
+
+Name: Protocol Buffers
+Description: Google's Data Interchange Format
+Version: 25.3.0
+Requires: abseil_dll utf8_range
+Libs: -L${libdir} -lprotobuf-lite 
+Cflags: -I${includedir} -DPROTOBUF_USE_DLLS
+Conflicts: protobuf

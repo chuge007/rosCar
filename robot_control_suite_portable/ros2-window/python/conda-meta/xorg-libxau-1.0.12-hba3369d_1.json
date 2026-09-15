@@ -1,0 +1,67 @@
+{
+  "arch": "x86_64",
+  "build": "hba3369d_1",
+  "build_number": 1,
+  "depends": [
+    "libgcc >=14",
+    "libwinpthread >=12.0.0.r4.gg4f2fc60ca",
+    "ucrt >=10.0.20348.0"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "8436cab9a76015dfe7208d3c9f97c156",
+  "name": "xorg-libxau",
+  "platform": "win",
+  "sha256": "156a583fa43609507146de1c4926172286d92458c307bb90871579601f6bc568",
+  "size": 109246,
+  "subdir": "win-64",
+  "timestamp": 1762977105140,
+  "version": "1.0.12",
+  "fn": "xorg-libxau-1.0.12-hba3369d_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/xorg-libxau-1.0.12-hba3369d_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\xorg-libxau-1.0.12-hba3369d_1",
+  "requested_specs": [],
+  "files": [
+    "Library/include/X11/Xauth.h",
+    "Library/lib/libXau.dll.a",
+    "Library/lib/pkgconfig/xau.pc",
+    "Library/bin/msys-Xau-6.dll"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/include/X11/Xauth.h",
+        "path_type": "hardlink",
+        "sha256": "d0bc0612c0d2eb38bf7519190ebb60ea0d538c86589a6fbc06e0d761ec22f9c4",
+        "size_in_bytes": 4973
+      },
+      {
+        "_path": "Library/lib/libXau.dll.a",
+        "path_type": "hardlink",
+        "sha256": "8d680fc96aee79cd14e121863ead4f1b122837f6f750af4f3986b8459eb07c20",
+        "size_in_bytes": 6070
+      },
+      {
+        "_path": "Library/lib/pkgconfig/xau.pc",
+        "path_type": "hardlink",
+        "sha256": "5900b1d6016f068cbfeec1002e755ab2327763dd9dcff662406e021d8377c09f",
+        "sha256_in_prefix": "22586fb5eb8ba654ac96d94b741196e0e14e0d8a5fafb2635641270f57ee5373",
+        "size_in_bytes": 284,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/xorg-libxau_1762976373122/_h_env"
+      },
+      {
+        "_path": "Library/bin/msys-Xau-6.dll",
+        "path_type": "hardlink",
+        "sha256": "665cbede09d6205e9cabd94fe58b5e60adbe86a7bdc075d1af373f9837968201",
+        "size_in_bytes": 275491
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\xorg-libxau-1.0.12-hba3369d_1",
+    "type": 1
+  }
+}

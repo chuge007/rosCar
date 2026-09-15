@@ -1,0 +1,148 @@
+{
+  "build": "pyhd8ed1ab_1",
+  "build_number": 1,
+  "depends": [
+    "flake8",
+    "pycodestyle",
+    "python >=3.9",
+    "setuptools"
+  ],
+  "license": "LGPL-3.0-only",
+  "license_family": "LGPL",
+  "md5": "6798c855e421f655beec408cd2d43311",
+  "name": "flake8-import-order",
+  "noarch": "python",
+  "sha256": "6e0cc53b0237a49be940b137d203103752540e790c35c1402b2381ef2b3db5be",
+  "size": 20181,
+  "subdir": "noarch",
+  "timestamp": 1735327652508,
+  "version": "0.18.2",
+  "fn": "flake8-import-order-0.18.2-pyhd8ed1ab_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/flake8-import-order-0.18.2-pyhd8ed1ab_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\flake8-import-order-0.18.2-pyhd8ed1ab_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/flake8_import_order-0.18.2.dist-info/COPYING",
+    "Lib/site-packages/flake8_import_order-0.18.2.dist-info/INSTALLER",
+    "Lib/site-packages/flake8_import_order-0.18.2.dist-info/METADATA",
+    "Lib/site-packages/flake8_import_order-0.18.2.dist-info/RECORD",
+    "Lib/site-packages/flake8_import_order-0.18.2.dist-info/REQUESTED",
+    "Lib/site-packages/flake8_import_order-0.18.2.dist-info/WHEEL",
+    "Lib/site-packages/flake8_import_order-0.18.2.dist-info/direct_url.json",
+    "Lib/site-packages/flake8_import_order-0.18.2.dist-info/entry_points.txt",
+    "Lib/site-packages/flake8_import_order-0.18.2.dist-info/top_level.txt",
+    "Lib/site-packages/flake8_import_order/__about__.py",
+    "Lib/site-packages/flake8_import_order/__init__.py",
+    "Lib/site-packages/flake8_import_order/checker.py",
+    "Lib/site-packages/flake8_import_order/flake8_linter.py",
+    "Lib/site-packages/flake8_import_order/pylama_linter.py",
+    "Lib/site-packages/flake8_import_order/stdlib_list.py",
+    "Lib/site-packages/flake8_import_order/styles.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/flake8_import_order-0.18.2.dist-info/COPYING",
+        "path_type": "hardlink",
+        "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+        "size_in_bytes": 7651
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order-0.18.2.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order-0.18.2.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "73c9642b75f8e0f2c24ce58f47ee944de56e632daf4ad95dbc81565447d904a7",
+        "size_in_bytes": 8288
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order-0.18.2.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "bdf688a4b15279bcc0b2de26f846f45773644b24d25cf332ba58f58c798b9dea",
+        "size_in_bytes": 1935
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order-0.18.2.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order-0.18.2.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "a7178d5f925db427b9f0f51260ff6ea6673b8dd44f82f4f41a6f646f5487955c",
+        "size_in_bytes": 109
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order-0.18.2.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "f48ab1c5dd607b2cd75593bd06e2326390820b42f14ac2703c9fd151d003cf03",
+        "size_in_bytes": 115
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order-0.18.2.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "d0b57ed9180a036b6400566f58ac4fe54bf31601138eabf9542e47668d9cc7bb",
+        "size_in_bytes": 486
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order-0.18.2.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "40dacb103e706431259e88c3fcfa1997f90dfbc3f4308eb5eff3402042d2f5ed",
+        "size_in_bytes": 20
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order/__about__.py",
+        "path_type": "hardlink",
+        "sha256": "f56bcdbb3d64ff44965bfee21b8373b8f42b9514a9bcb767e809ed88cd47368a",
+        "size_in_bytes": 702
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e2dd37122270713469199d46428b3118f5db92c57eb33e1f90cc81eb81e48cdd",
+        "size_in_bytes": 3749
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order/checker.py",
+        "path_type": "hardlink",
+        "sha256": "16923aafec81287e1a98f030225f16eaa3eb45b4510be4b4eb1245732e652896",
+        "size_in_bytes": 3301
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order/flake8_linter.py",
+        "path_type": "hardlink",
+        "sha256": "f37ac276721f381a1714daad1e86b039a7d30fb616bc6b3d39df7fc5c7f591fa",
+        "size_in_bytes": 3274
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order/pylama_linter.py",
+        "path_type": "hardlink",
+        "sha256": "93dac2de0e046024ec43bb1d8961c2677c65eb6992a579b0b5d3ac48ce2c4d2d",
+        "size_in_bytes": 1067
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order/stdlib_list.py",
+        "path_type": "hardlink",
+        "sha256": "00369cc55b7074a9df93a03e8798fc53f6b7e6eb0a3577b1453ee7c21fa193c6",
+        "size_in_bytes": 4756
+      },
+      {
+        "_path": "Lib/site-packages/flake8_import_order/styles.py",
+        "path_type": "hardlink",
+        "sha256": "67cfe1c57c2e95ca0730cdaf67dc7e37c8ebb369f124887a1068cae68f030092",
+        "size_in_bytes": 8782
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\flake8-import-order-0.18.2-pyhd8ed1ab_1",
+    "type": 1
+  }
+}

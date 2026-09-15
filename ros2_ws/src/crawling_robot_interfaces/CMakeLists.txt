@@ -8,8 +8,12 @@ find_package(sensor_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CanFrame.msg"
+  "msg/DriveCommandStatus.msg"
   "msg/LaserProfile.msg"
   "msg/LaserCorrectionStatus.msg"
+  "srv/SetDriveLimits.srv"
+  "srv/SetMotorMapping.srv"
+  "srv/SetLocalizationReference.srv"
   DEPENDENCIES std_msgs sensor_msgs
 )
 

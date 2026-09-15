@@ -1,0 +1,97 @@
+{
+  "build": "pyhd8ed1ab_1",
+  "build_number": 1,
+  "depends": [
+    "flake8",
+    "python >=3.9"
+  ],
+  "license": "GPL-2.0-only",
+  "license_family": "GPL",
+  "md5": "83f584c9e22a89e3c8d1fda12ec84ec5",
+  "name": "flake8-deprecated",
+  "noarch": "python",
+  "sha256": "514e10a6f3c67f0a10d2343c3e0e0c5a7a4294d9f64753ebf157dadf30410baf",
+  "size": 17655,
+  "subdir": "noarch",
+  "timestamp": 1736151300086,
+  "version": "2.2.1",
+  "fn": "flake8-deprecated-2.2.1-pyhd8ed1ab_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/flake8-deprecated-2.2.1-pyhd8ed1ab_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\flake8-deprecated-2.2.1-pyhd8ed1ab_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/flake8_deprecated.py",
+    "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/INSTALLER",
+    "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/METADATA",
+    "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/RECORD",
+    "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/REQUESTED",
+    "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/WHEEL",
+    "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/direct_url.json",
+    "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/entry_points.txt",
+    "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/licenses/LICENSE"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/flake8_deprecated.py",
+        "path_type": "hardlink",
+        "sha256": "36ad369339b00aaf1ac5d633d5295ca016ba49f6af27a46677e158d46292edfd",
+        "size_in_bytes": 4155
+      },
+      {
+        "_path": "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "2fa5d003e2ce0a79d4c1ce052a92c0d6bf2c1b134c408f9f04194f68f6864d3a",
+        "size_in_bytes": 23671
+      },
+      {
+        "_path": "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "0a0fb8e1d1f14e9b378ba58776fe21d58dd05eef90c624bc487de643e03902bd",
+        "size_in_bytes": 883
+      },
+      {
+        "_path": "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "aad0b0a12256807936d52d4a6f88a1773236ae527564a688bab4e3fe780e8724",
+        "size_in_bytes": 87
+      },
+      {
+        "_path": "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "aea87db4964c8a159b47a98052f1f1d2ca1fba9ff14a0d25ccf917e3e0849744",
+        "size_in_bytes": 113
+      },
+      {
+        "_path": "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "6fcaf87df75bd04d2a442c4248e4b5f30c5c1e0c7b9645ee378f4c04bf8c9f1a",
+        "size_in_bytes": 61
+      },
+      {
+        "_path": "Lib/site-packages/flake8_deprecated-2.2.1.dist-info/licenses/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "size_in_bytes": 18092
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\flake8-deprecated-2.2.1-pyhd8ed1ab_1",
+    "type": 1
+  }
+}

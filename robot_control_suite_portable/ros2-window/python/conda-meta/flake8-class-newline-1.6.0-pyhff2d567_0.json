@@ -1,0 +1,118 @@
+{
+  "build": "pyhff2d567_0",
+  "build_number": 0,
+  "depends": [
+    "flake8",
+    "python >=3.9"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "7a5a5ece45a30f3dea03c8b5df8fad33",
+  "name": "flake8-class-newline",
+  "noarch": "python",
+  "sha256": "fb58e2469668494df49d6a3e88c4e72713e90ba6f903ed4b9ed78ae336c80599",
+  "size": 9890,
+  "subdir": "noarch",
+  "timestamp": 1732541886708,
+  "version": "1.6.0",
+  "fn": "flake8-class-newline-1.6.0-pyhff2d567_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/flake8-class-newline-1.6.0-pyhff2d567_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\flake8-class-newline-1.6.0-pyhff2d567_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/flake8_class_newline/__init__.py",
+    "Lib/site-packages/flake8_class_newline/__version__.py",
+    "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/INSTALLER",
+    "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/LICENSE",
+    "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/METADATA",
+    "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/RECORD",
+    "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/REQUESTED",
+    "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/WHEEL",
+    "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/direct_url.json",
+    "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/entry_points.txt",
+    "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/top_level.txt",
+    "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/zip-safe"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/flake8_class_newline/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "1cf6751c607ac8c0ac9b0cafb941c3c395d4ed582865e0e8b00b917d1deba57f",
+        "size_in_bytes": 1259
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline/__version__.py",
+        "path_type": "hardlink",
+        "sha256": "6d837ddc34d6afc6a59139cedf08f7d4253982a4ec87121cb1b5d470971401cf",
+        "size_in_bytes": 22
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "c181eed254a608399a1059ddf5cb72cb1f1a5841a083aaa30f3e6713853ddf9f",
+        "size_in_bytes": 1022
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "3328448e725d9adbd21a52848851ccad4f77b5af262ff5d569ab236d15f876be",
+        "size_in_bytes": 2675
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "af076911d8a2e4aa240d8316a891175a50d6e88984524d75744b4e794a60aaa9",
+        "size_in_bytes": 1280
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "3d9504c5d7fbd548bfb28ebb417a724ae1ed0a2dfe277c2f1783912ba93f4bc5",
+        "size_in_bytes": 91
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "39297133e637c7d92ebf2deaff8a7b5ec0762115b80f1cbcadc8f946efd9a022",
+        "size_in_bytes": 116
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "cb885bbd3b1bcbeeef8ba45d6b1e50b8e11b281e44d82802bf5fbdd808ff2b3f",
+        "size_in_bytes": 66
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "623ee21302ead5b22b585726cede47cbe3d0faa100e589b998767e484f42ed29",
+        "size_in_bytes": 21
+      },
+      {
+        "_path": "Lib/site-packages/flake8_class_newline-1.6.0.dist-info/zip-safe",
+        "path_type": "hardlink",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "size_in_bytes": 1
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\flake8-class-newline-1.6.0-pyhff2d567_0",
+    "type": 1
+  }
+}

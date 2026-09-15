@@ -1,0 +1,14 @@
+prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+exec_prefix=${prefix}
+libdir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib
+includedir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/include
+
+Name: libavformat
+Description: FFmpeg container format library
+Version: 60.16.100
+Requires: 
+Requires.private: libavcodec >= 60.31.102, libswresample >= 4.12.100, libavutil >= 58.29.100
+Conflicts:
+Libs: -L${libdir}  -lavformat 
+Libs.private: -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib xml2.lib iconv.lib zlib.lib bz2.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib zlib.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib libssl.lib libcrypto.lib crypt32.lib ws2_32.lib ws2_32.lib
+Cflags: -I${includedir}

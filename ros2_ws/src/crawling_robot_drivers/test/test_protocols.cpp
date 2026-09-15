@@ -1,9 +1,45 @@
 #include <gtest/gtest.h>
 
+#include "crawling_robot_drivers/differential_drive.hpp"
 #include "crawling_robot_drivers/servo_v38.hpp"
 #include "crawling_robot_drivers/rim302_protocol.hpp"
 
 namespace crawling_robot_drivers {
+
+TEST(DifferentialDriveTest, KeepsTranslatingTurnWheelsSameDirection) {
+  const auto left_turn = mixDifferentialWheelSpeeds(0.025, 0.30, 0.30, 0.5);
+  EXPECT_GT(left_turn.left_m_s, 0.0);
+  EXPECT_GT(left_turn.left_m_s, left_turn.right_m_s);
+  EXPECT_NEAR(left_turn.right_m_s / left_turn.left_m_s, 0.5, 1e-12);
+  EXPECT_NEAR(left_turn.applied_angular_rad_s, 0.05555555555555556, 1e-12);
+
+  const auto right_turn = mixDifferentialWheelSpeeds(-0.025, -0.30, 0.30, 0.5);
+  EXPECT_LT(right_turn.left_m_s, 0.0);
+  EXPECT_LT(right_turn.right_m_s, 0.0);
+  EXPECT_LT(right_turn.left_m_s, right_turn.right_m_s);
+}
+
+TEST(DifferentialDriveTest, StraightMotionKeepsPhysicalWheelsSynchronized) {
+  const auto forward = mixDifferentialWheelSpeeds(0.025, 0.0, 0.30, 0.5);
+  const auto reverse = mixDifferentialWheelSpeeds(-0.025, 0.0, 0.30, 0.5);
+  EXPECT_DOUBLE_EQ(forward.left_m_s, forward.right_m_s);
+  EXPECT_DOUBLE_EQ(reverse.left_m_s, reverse.right_m_s);
+}
+
+TEST(DifferentialDriveTest, WheelCapPreservesTurnRatio) {
+  const auto limited = limitDifferentialWheelSpeeds({0.10, 0.30, 1.0}, 0.12);
+  EXPECT_NEAR(limited.left_m_s, 0.04, 1e-12);
+  EXPECT_NEAR(limited.right_m_s, 0.12, 1e-12);
+  EXPECT_NEAR(limited.left_m_s / limited.right_m_s, 1.0 / 3.0, 1e-12);
+  EXPECT_NEAR(limited.applied_angular_rad_s, 0.4, 1e-12);
+}
+
+TEST(DifferentialDriveTest, AllowsPivotTurnWhenLinearSpeedIsZero) {
+  const auto pivot = mixDifferentialWheelSpeeds(0.0, 0.30, 0.30);
+  EXPECT_GT(pivot.left_m_s, 0.0);
+  EXPECT_LT(pivot.right_m_s, 0.0);
+  EXPECT_DOUBLE_EQ(pivot.applied_angular_rad_s, 0.30);
+}
 
 TEST(ServoV38Test, EncodesSpeedAndDecodesFeedback) {
   const CanFrame command = ServoV38::speedCommand(1, 100.0);

@@ -1,0 +1,11 @@
+prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+exec_prefix=${prefix}
+includedir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/include
+libdir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib
+
+Name: pugixml
+Description: Light-weight, simple and fast XML parser for C++ with XPath support.
+URL: https://pugixml.org/
+Version: 1.14
+Cflags: -I${includedir}
+Libs: -L${libdir} -lpugixml

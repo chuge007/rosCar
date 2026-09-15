@@ -1,0 +1,224 @@
+{
+  "build": "pyhd8ed1ab_0",
+  "build_number": 0,
+  "depends": [
+    "python >=3.8"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "Apache",
+  "md5": "1be9feadb435ef26456efaf70852ce93",
+  "name": "argcomplete",
+  "noarch": "python",
+  "sha256": "e0abc3e71e9f0af65afb9dc3f3d4991c117508023ebcef223b2394a43313ccc9",
+  "size": 39566,
+  "subdir": "noarch",
+  "timestamp": 1698912237718,
+  "version": "3.1.4",
+  "fn": "argcomplete-3.1.4-pyhd8ed1ab_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/argcomplete-3.1.4-pyhd8ed1ab_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\argcomplete-3.1.4-pyhd8ed1ab_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/argcomplete/packages/__init__.py",
+    "Lib/site-packages/argcomplete/packages/_argparse.py",
+    "Lib/site-packages/argcomplete/packages/_shlex.py",
+    "Lib/site-packages/argcomplete-3.1.4.dist-info/INSTALLER",
+    "Lib/site-packages/argcomplete-3.1.4.dist-info/LICENSE.rst",
+    "Lib/site-packages/argcomplete-3.1.4.dist-info/METADATA",
+    "Lib/site-packages/argcomplete-3.1.4.dist-info/NOTICE",
+    "Lib/site-packages/argcomplete-3.1.4.dist-info/RECORD",
+    "Lib/site-packages/argcomplete-3.1.4.dist-info/REQUESTED",
+    "Lib/site-packages/argcomplete-3.1.4.dist-info/WHEEL",
+    "Lib/site-packages/argcomplete-3.1.4.dist-info/direct_url.json",
+    "Lib/site-packages/argcomplete-3.1.4.dist-info/top_level.txt",
+    "Lib/site-packages/argcomplete/bash_completion.d/_python-argcomplete",
+    "Lib/site-packages/argcomplete/__init__.py",
+    "Lib/site-packages/argcomplete/_check_console_script.py",
+    "Lib/site-packages/argcomplete/_check_module.py",
+    "Lib/site-packages/argcomplete/completers.py",
+    "Lib/site-packages/argcomplete/exceptions.py",
+    "Lib/site-packages/argcomplete/finders.py",
+    "Lib/site-packages/argcomplete/io.py",
+    "Lib/site-packages/argcomplete/lexers.py",
+    "Lib/site-packages/argcomplete/py.typed",
+    "Lib/site-packages/argcomplete/shell_integration.py",
+    "Scripts/activate-global-python-argcomplete",
+    "Scripts/python-argcomplete-check-easy-install-script",
+    "Scripts/register-python-argcomplete"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/argcomplete/packages/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/packages/_argparse.py",
+        "path_type": "hardlink",
+        "sha256": "b8c4b5b21fdc2e722ea6c4ec38d59c46322089a99050fbf08d1010d76a4b4a9c",
+        "size_in_bytes": 15846
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/packages/_shlex.py",
+        "path_type": "hardlink",
+        "sha256": "a9ea8804071313fd45cfcdd7cfed51ac672253b7ef111251ecdfe072d0c695d8",
+        "size_in_bytes": 12766
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete-3.1.4.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete-3.1.4.dist-info/LICENSE.rst",
+        "path_type": "hardlink",
+        "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "size_in_bytes": 10174
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete-3.1.4.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "9f1d731dd7f60ae591b23637d389b33055c84d5e5d6f0520430eaec825345ef2",
+        "size_in_bytes": 16585
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete-3.1.4.dist-info/NOTICE",
+        "path_type": "hardlink",
+        "sha256": "2c889c721ec8ae6d7664680afaefbb4c7620976f434b57a506ecd92f0649b6a0",
+        "size_in_bytes": 387
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete-3.1.4.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "9eef7bc2c8bb0f8715c3e78bdc8c46af41848d706ca8f26255549cc768f679ca",
+        "size_in_bytes": 2981
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete-3.1.4.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete-3.1.4.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "5e8f7ed4fbe4ba29abc9dba360902317ba4292b8ae5c1a543c48e66b59d9c89d",
+        "size_in_bytes": 92
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete-3.1.4.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "446fc6ce78d5b49f40b43687bc520b1c4873a098e344e002fac7d1c711f5b0a8",
+        "size_in_bytes": 107
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete-3.1.4.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "8b0b063b9f94c44841f34f4eb166ce98b8ddf2bf17d71b5763ae663f4d408658",
+        "size_in_bytes": 12
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/bash_completion.d/_python-argcomplete",
+        "path_type": "hardlink",
+        "sha256": "26b81c3fa944f0db0255ca76f469dddd3abd15519d20390e1998c50f50920ca9",
+        "size_in_bytes": 8571
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "c85eb1aef7cad16a4ef2b96a4258a57d27205d3247d51497700322e6ce2267a4",
+        "size_in_bytes": 693
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/_check_console_script.py",
+        "path_type": "hardlink",
+        "sha256": "d40907c969cf39b04cb7a74f4835e2c4e9ac002b6433c98942fa4b66d87c02e0",
+        "size_in_bytes": 2426
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/_check_module.py",
+        "path_type": "hardlink",
+        "sha256": "e5c2792b8b8cb384fde61fc54ddcb0f567af6c4cebdc5d64200a0b9a2868a759",
+        "size_in_bytes": 2615
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/completers.py",
+        "path_type": "hardlink",
+        "sha256": "b14032a292d9dac2c6f8889119b8af3910c57238d5d8dc81fbec605d6e4ca5bf",
+        "size_in_bytes": 3980
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/exceptions.py",
+        "path_type": "hardlink",
+        "sha256": "b688e97ad6ebb5c99a6cb4550bf62a8851afd31f90cc73ce200d9f106ea5f5a0",
+        "size_in_bytes": 112
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/finders.py",
+        "path_type": "hardlink",
+        "sha256": "dae7612666ca65702914598783de3f2c33e06972c690a0e3dc3decc8eee4998e",
+        "size_in_bytes": 27230
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/io.py",
+        "path_type": "hardlink",
+        "sha256": "3c27a939a362ef5e2fe9a13343b00096d583628f9a3f95e66e6ebe7c9e2d6b95",
+        "size_in_bytes": 866
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/lexers.py",
+        "path_type": "hardlink",
+        "sha256": "b1ee766cf4d42bdee6f28183a8fd26af0c5011460c9cec6f190d85744a3cbf55",
+        "size_in_bytes": 2131
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/py.typed",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/argcomplete/shell_integration.py",
+        "path_type": "hardlink",
+        "sha256": "e101b125f898f5e186c67487db94ef8b63a5738ef1932ded2a17a72493e74cdc",
+        "size_in_bytes": 7089
+      },
+      {
+        "_path": "Scripts/activate-global-python-argcomplete",
+        "path_type": "hardlink",
+        "sha256": "d39e10280b4c27023340cc0af48f77bb932cab568ff779d8df397c5d0c48ffa5",
+        "sha256_in_prefix": "159dc7cbdc5d82dae083d3b295fc5b9279bf048ccfdfa9d2b327abe737620d60",
+        "size_in_bytes": 4975,
+        "file_mode": "text",
+        "prefix_placeholder": "/home/conda/feedstock_root/build_artifacts/argcomplete_1698912039670/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold"
+      },
+      {
+        "_path": "Scripts/python-argcomplete-check-easy-install-script",
+        "path_type": "hardlink",
+        "sha256": "73aa505885c10acb0c58ce62ef53e7fb83901d8b26f9307b92adf440aa4fa472",
+        "sha256_in_prefix": "d00e97d50a4f1f1caadd10be9a412175799fbacf911323c1543286b6b4364cf8",
+        "size_in_bytes": 2646,
+        "file_mode": "text",
+        "prefix_placeholder": "/home/conda/feedstock_root/build_artifacts/argcomplete_1698912039670/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold"
+      },
+      {
+        "_path": "Scripts/register-python-argcomplete",
+        "path_type": "hardlink",
+        "sha256": "667f45a8d09a01ac880ccd5220baa2cbc15b9531f52d60711216f6902b133599",
+        "sha256_in_prefix": "62d1b17010c71bbbc7069a0cbc22275a51020be7402e95757911e72c0a4b781c",
+        "size_in_bytes": 2034,
+        "file_mode": "text",
+        "prefix_placeholder": "/home/conda/feedstock_root/build_artifacts/argcomplete_1698912039670/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold"
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\argcomplete-3.1.4-pyhd8ed1ab_0",
+    "type": 1
+  }
+}

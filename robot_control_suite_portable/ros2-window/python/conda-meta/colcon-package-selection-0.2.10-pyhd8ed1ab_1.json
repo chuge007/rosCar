@@ -1,0 +1,181 @@
+{
+  "build": "pyhd8ed1ab_1",
+  "build_number": 1,
+  "depends": [
+    "colcon-core >=0.3.19",
+    "python >=3.10"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "APACHE",
+  "md5": "1ef460db4fbafbb3279e950378d317b5",
+  "name": "colcon-package-selection",
+  "noarch": "python",
+  "sha256": "1cc39947aace656988696bc63c520e031c27a974e18b3fce0db58e18bb6228a5",
+  "size": 18069,
+  "subdir": "noarch",
+  "timestamp": 1757614388574,
+  "version": "0.2.10",
+  "fn": "colcon-package-selection-0.2.10-pyhd8ed1ab_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/colcon-package-selection-0.2.10-pyhd8ed1ab_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-package-selection-0.2.10-pyhd8ed1ab_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/colcon_package_selection/package_discovery/__init__.py",
+    "Lib/site-packages/colcon_package_selection/package_discovery/ignore.py",
+    "Lib/site-packages/colcon_package_selection/__init__.py",
+    "Lib/site-packages/colcon_package_selection/argument.py",
+    "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/INSTALLER",
+    "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/METADATA",
+    "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/RECORD",
+    "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/REQUESTED",
+    "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/WHEEL",
+    "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/direct_url.json",
+    "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/entry_points.txt",
+    "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/top_level.txt",
+    "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/zip-safe",
+    "Lib/site-packages/colcon_package_selection/package_selection/previous/__init__.py",
+    "Lib/site-packages/colcon_package_selection/package_selection/previous/event_handler.py",
+    "Lib/site-packages/colcon_package_selection/package_selection/previous/package_selection.py",
+    "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/licenses/LICENSE",
+    "Lib/site-packages/colcon_package_selection/package_selection/__init__.py",
+    "Lib/site-packages/colcon_package_selection/package_selection/dependencies.py",
+    "Lib/site-packages/colcon_package_selection/package_selection/select_skip.py",
+    "Lib/site-packages/colcon_package_selection/package_selection/start_end.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/package_discovery/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/package_discovery/ignore.py",
+        "path_type": "hardlink",
+        "sha256": "cf742c42fdf1e8100f5a2bc1ae18442f703fa2f54c3edee1d59b5b428a16857d",
+        "size_in_bytes": 2951
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "b1f4da4e3a997e890feef08019865419e5c6964d2577805133211d0732cf9eb6",
+        "size_in_bytes": 107
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/argument.py",
+        "path_type": "hardlink",
+        "sha256": "26c412e8f3449be8f2d913d5e6bbf3a44ec0b20b9b1469daa58591ea1b939974",
+        "size_in_bytes": 1198
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "801e6842f37d78cc26d4d2b6a2937df25c6f10baeb9e33f2169cfceda2c75c29",
+        "size_in_bytes": 1211
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "38f67011f865a8a1cc11f9441ee3f35a1dffbdc02e76330d664409b12eb130e9",
+        "size_in_bytes": 3198
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b",
+        "size_in_bytes": 91
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "c965088f3d7b01b56516cf96e8d1ee5a09843f3ea02e4f6a5f42b6b6f24b43e0",
+        "size_in_bytes": 120
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "8202fb7fcdcedef39b75f9fc068c5d64723da3be5462b962b9acb9fbfa1cdad6",
+        "size_in_bytes": 809
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "062039c569939a6d6ed31c849c41d1446398e6df1bf3479e57d52d9208c2a85b",
+        "size_in_bytes": 25
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/zip-safe",
+        "path_type": "hardlink",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "size_in_bytes": 1
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/package_selection/previous/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "4c39e8f06d856fc88de5a9052aef1f146d44611b6e3b5adcdb457d22244e3d88",
+        "size_in_bytes": 1254
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/package_selection/previous/event_handler.py",
+        "path_type": "hardlink",
+        "sha256": "b18fa1a523c2ee198f29401248a1f26ce80e545ca98a8122cd8e09e83595f40c",
+        "size_in_bytes": 1804
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/package_selection/previous/package_selection.py",
+        "path_type": "hardlink",
+        "sha256": "2e21881bd6f3f58dee48bc722e3567766522c478882a0f4bebf90a4916deb67e",
+        "size_in_bytes": 5500
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection-0.2.10.dist-info/licenses/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_in_bytes": 11358
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/package_selection/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/package_selection/dependencies.py",
+        "path_type": "hardlink",
+        "sha256": "bbee2dee5fd5e151b6d47f36a038ee96d31878246adf3284d51f3fa54d863941",
+        "size_in_bytes": 10535
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/package_selection/select_skip.py",
+        "path_type": "hardlink",
+        "sha256": "b62e7f69193b0b50092235cf0ebe8952f71624423d5624c2542adef923e98f25",
+        "size_in_bytes": 4436
+      },
+      {
+        "_path": "Lib/site-packages/colcon_package_selection/package_selection/start_end.py",
+        "path_type": "hardlink",
+        "sha256": "6b06df10f844e274ec4995618c51d56bd790097c5291e2982f184acaf92762cf",
+        "size_in_bytes": 2804
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-package-selection-0.2.10-pyhd8ed1ab_1",
+    "type": 1
+  }
+}

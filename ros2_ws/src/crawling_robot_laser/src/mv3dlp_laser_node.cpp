@@ -74,6 +74,28 @@ sensor_msgs::msg::PointCloud2 makePointCloud(const mv3dlp::PointCloudFrame& sour
   return target;
 }
 
+sensor_msgs::msg::PointCloud2 makeDisplayPointCloud(const mv3dlp::PointCloudFrame& source,
+                                                    const std_msgs::msg::Header& header) {
+  constexpr std::size_t kDisplayStride = 8;
+  mv3dlp::PointCloudFrame reduced = source;
+  reduced.points.clear();
+  const std::size_t source_width = source.width > 0 ? source.width : source.points.size();
+  const std::size_t source_height = source.height > 0 ? source.height : 1;
+  const std::size_t available_rows = source_width > 0
+      ? std::min(source_height, source.points.size() / source_width) : 0;
+  const std::size_t reduced_width = (source_width + kDisplayStride - 1) / kDisplayStride;
+  reduced.points.reserve(available_rows * reduced_width);
+  for (std::size_t row = 0; row < available_rows; ++row) {
+    const std::size_t row_start = row * source_width;
+    for (std::size_t column = 0; column < source_width; column += kDisplayStride) {
+      reduced.points.push_back(source.points[row_start + column]);
+    }
+  }
+  reduced.width = static_cast<std::uint32_t>(reduced_width);
+  reduced.height = static_cast<std::uint32_t>(available_rows);
+  return makePointCloud(reduced, header);
+}
+
 }  // namespace
 
 class Mv3dlpLaserNode final : public rclcpp::Node {
@@ -84,14 +106,18 @@ public:
     sdk_library_path_ = declare_parameter<std::string>("sdk_library_path", "");
     frame_id_ = declare_parameter<std::string>("frame_id", "laser_link");
     acquisition_mode_ = declare_parameter<std::string>("acquisition_mode", "range_image");
+    trigger_mode_ = declare_parameter<int>("trigger_mode", 0);
+    trigger_source_ = declare_parameter<int>("trigger_source", 7);
     fetch_timeout_ms_ = declare_parameter<int>("fetch_timeout_ms", 100);
     capture_period_ms_ = declare_parameter<int>("capture_period_ms", 33);
     reconnect_delay_ms_ = declare_parameter<int>("reconnect_delay_ms", 2000);
     encoder_ticks_topic_ = declare_parameter<std::string>("encoder_ticks_topic", "/scan_encoder/ticks");
     points_topic_ = declare_parameter<std::string>("points_topic", "/laser_profile/points");
     profile_topic_ = declare_parameter<std::string>("profile_topic", "/laser_profile/frame");
+    display_points_topic_ = declare_parameter<std::string>("display_points_topic", "/laser_profile/display_points");
 
     points_publisher_ = create_publisher<sensor_msgs::msg::PointCloud2>(points_topic_, rclcpp::SensorDataQoS());
+    display_points_publisher_ = create_publisher<sensor_msgs::msg::PointCloud2>(display_points_topic_, rclcpp::SensorDataQoS());
     profile_publisher_ = create_publisher<crawling_robot_interfaces::msg::LaserProfile>(
         profile_topic_, rclcpp::SensorDataQoS());
     encoder_subscription_ = create_subscription<std_msgs::msg::Int64>(
@@ -112,13 +138,23 @@ private:
     }
 
     try {
-      const auto cloud =
-          driver_->fetchPointCloud(std::chrono::milliseconds(fetch_timeout_ms_));
+      const auto frame = driver_->fetchFrame(std::chrono::milliseconds(fetch_timeout_ms_));
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+                           "Laser raw frame: type=%u width=%u height=%u data_bytes=%zu intensity_bytes=%zu valid=%s scales=(%.6g,%.6g,%.6g)",
+                           static_cast<unsigned>(frame.type), frame.width, frame.height,
+                           frame.data.size(), frame.intensity_data.size(),
+                           frame.valid ? "true" : "false", frame.x_scale, frame.y_scale, frame.z_scale);
+      const auto cloud = driver_->convertDepthToPointCloud(frame);
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+                           "Laser frame received: type=%u width=%u height=%u bytes=%zu points=%zu valid=%s",
+                           static_cast<unsigned>(frame.type), frame.width, frame.height,
+                           frame.data.size(), cloud.points.size(), frame.valid ? "true" : "false");
       std_msgs::msg::Header header;
       header.stamp = now();
       header.frame_id = frame_id_;
       const auto points = makePointCloud(cloud, header);
       points_publisher_->publish(points);
+      display_points_publisher_->publish(makeDisplayPointCloud(cloud, header));
 
       crawling_robot_interfaces::msg::LaserProfile profile;
       profile.header = header;
@@ -126,7 +162,14 @@ private:
       profile.encoder_ticks = encoder_ticks_.load();
       profile_publisher_->publish(profile);
     } catch (const std::exception& error) {
-      RCLCPP_ERROR(get_logger(), "Laser capture failed: %s", error.what());
+      const std::string message = error.what();
+      if (message.find("Timed out waiting for an image frame") != std::string::npos) {
+        // A missing frame is recoverable; keep the device stream alive so a delayed frame can arrive.
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                             "Laser frame timeout; keeping the device connection alive.");
+        return;
+      }
+      RCLCPP_ERROR(get_logger(), "Laser capture failed: %s", message.c_str());
       disconnect();
     }
   }
@@ -156,10 +199,15 @@ private:
         driver_->connectByIp(device_ip_);
       }
       driver_->setAcquisitionMode(parseAcquisitionMode(acquisition_mode_));
-      driver_->setEnumParam(mv3dlp::param_keys::kTriggerMode, 0U);
+      driver_->setEnumParam(mv3dlp::param_keys::kTriggerMode,
+                            static_cast<std::uint32_t>(trigger_mode_));
+      driver_->setEnumParam(mv3dlp::param_keys::kTriggerSource,
+                            static_cast<std::uint32_t>(trigger_source_));
       driver_->startAcquisition();
-      RCLCPP_INFO(get_logger(), "Connected to laser profile sensor with SDK %s.",
-                  driver_->sdkVersion().c_str());
+      RCLCPP_INFO(get_logger(),
+                  "Connected to laser profile sensor with SDK %s (acquisition_mode=%s, trigger_mode=%d, trigger_source=%d).",
+                  driver_->sdkVersion().c_str(), acquisition_mode_.c_str(), trigger_mode_,
+                  trigger_source_);
       return true;
     } catch (const std::exception& error) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
@@ -200,16 +248,20 @@ private:
   std::string sdk_library_path_;
   std::string frame_id_;
   std::string acquisition_mode_;
+  int trigger_mode_ = 0;
+  int trigger_source_ = 7;
   int fetch_timeout_ms_ = 100;
   int capture_period_ms_ = 33;
   int reconnect_delay_ms_ = 2000;
   std::string encoder_ticks_topic_;
   std::string points_topic_;
+  std::string display_points_topic_;
   std::string profile_topic_;
   std::atomic<std::int64_t> encoder_ticks_{0};
   std::chrono::steady_clock::time_point last_connect_attempt_{};
   std::unique_ptr<mv3dlp::Driver> driver_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr points_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr display_points_publisher_;
   rclcpp::Publisher<crawling_robot_interfaces::msg::LaserProfile>::SharedPtr profile_publisher_;
   rclcpp::Subscription<std_msgs::msg::Int64>::SharedPtr encoder_subscription_;
   rclcpp::TimerBase::SharedPtr timer_;
