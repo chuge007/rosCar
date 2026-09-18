@@ -1,8 +1,12 @@
 #include "mv3dlp_laser_profile/driver.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -83,6 +87,60 @@ Frame copyFrame(const vendor::ImageDataRaw& raw) {
 
     if (raw.pIntensityData != nullptr && raw.nIntensityDataLen > 0) {
         frame.intensity_data.assign(raw.pIntensityData, raw.pIntensityData + raw.nIntensityDataLen);
+    }
+
+    return frame;
+}
+
+Frame copyProfileFrame(const vendor::ProfileDataRaw& raw) {
+    Frame frame;
+    frame.type = FrameType::profile_abc32;
+    frame.width = raw.nLinePntNum;
+    frame.height = raw.nProfileCnt;
+    frame.frame_number = raw.nFrameNum;
+    frame.timestamp = raw.nTimeStamp;
+    frame.valid = raw.bValid == vendor::kTrue;
+
+    constexpr std::size_t kRawCoordinateSize = sizeof(std::uint16_t) * 3u;
+    constexpr float kMicrometersPerMillimeter = 1000.0F;
+    const std::size_t declared_point_count =
+        static_cast<std::size_t>(raw.nLinePntNum) * static_cast<std::size_t>(raw.nProfileCnt);
+    if (raw.pData == nullptr || declared_point_count == 0u || raw.nDataLen == 0u) {
+        return frame;
+    }
+
+    // Some SDK builds expose profile callback data as already converted
+    // float XYZ (12 bytes/point), while the HFR path exposes packed 16-bit
+    // coordinates (6 bytes/point).  Preserve the former without interpreting
+    // float bytes as uint16_t coordinates.
+    constexpr std::size_t kFloatPointSize = sizeof(float) * 3u;
+    if (declared_point_count <= std::numeric_limits<std::size_t>::max() / kFloatPointSize) {
+        const std::size_t float_data_size = declared_point_count * kFloatPointSize;
+        if (raw.nDataLen == float_data_size) {
+            frame.data.assign(raw.pData, raw.pData + float_data_size);
+            return frame;
+        }
+    }
+
+    const std::size_t available_point_count = raw.nDataLen / kRawCoordinateSize;
+    const std::size_t point_count = std::min(declared_point_count, available_point_count);
+    frame.data.resize(point_count * sizeof(float) * 3u);
+
+    for (std::size_t index = 0; index < point_count; ++index) {
+        std::uint16_t coordinates[3]{};
+        std::memcpy(coordinates, raw.pData + index * kRawCoordinateSize, kRawCoordinateSize);
+
+        float values[3]{};
+        if (coordinates[0] == std::numeric_limits<std::uint16_t>::max() ||
+            coordinates[1] == std::numeric_limits<std::uint16_t>::max() ||
+            coordinates[2] == std::numeric_limits<std::uint16_t>::max()) {
+            values[0] = values[1] = values[2] = std::numeric_limits<float>::quiet_NaN();
+        } else {
+            values[0] = (coordinates[0] * raw.fXScale + raw.nXOffset) / kMicrometersPerMillimeter;
+            values[1] = (coordinates[1] * raw.fYScale + raw.nYOffset) / kMicrometersPerMillimeter;
+            values[2] = (coordinates[2] * raw.fZScale + raw.nZOffset) / kMicrometersPerMillimeter;
+        }
+        std::memcpy(frame.data.data() + index * sizeof(values), values, sizeof(values));
     }
 
     return frame;
@@ -207,6 +265,9 @@ public:
             handle = nullptr;
             connected = false;
         }
+        profile_callback_seen.store(false, std::memory_order_release);
+        image_queue.clear();
+        image_condition.notify_all();
     }
 
     void ensureConnected() const {
@@ -226,6 +287,20 @@ public:
         throwIfError(
             sdk.registerExceptionCallBack(handle, &Impl::exceptionCallbackThunk, this),
             "MV3D_LP_RegisterExceptionCallBack failed");
+    }
+
+    void registerImageCallbackLocked() {
+        ensureConnected();
+        throwIfError(
+            sdk.registerImageDataCallBack(handle, &Impl::imageCallbackThunk, this),
+            "MV3D_LP_RegisterImageDataCallBack failed");
+    }
+
+    void registerProfileCallbackLocked() {
+        ensureConnected();
+        throwIfError(
+            sdk.registerProfileCallBack(handle, &Impl::profileCallbackThunk, 1u, this),
+            "MV3D_LP_RegisterProfileCallBack failed");
     }
 
     void onException(vendor::ExceptionInfoRaw* info) {
@@ -257,13 +332,82 @@ public:
         }
     }
 
+    void onImage(vendor::ImageDataRaw* raw) {
+        if (raw == nullptr) {
+            return;
+        }
+        // In HFR point-cloud mode the image callback still receives the
+        // assembled range image (height ~= LSLRangeImgHeight) every few
+        // seconds.  Once per-profile output is flowing, discard those large
+        // snapshots so they cannot replace the low-latency profile frame in
+        // the live-preview queue.
+        if (profile_callback_seen.load(std::memory_order_acquire) && raw->nHeight > 1u) {
+            return;
+        }
+        Frame frame;
+        try {
+            // The SDK owns this buffer only for the callback duration, so copy it immediately.
+            frame = copyFrame(*raw);
+        } catch (...) {
+            return;
+        }
+
+        enqueueFrame(std::move(frame));
+    }
+
+    static void MV3DLP_CALL imageCallbackThunk(vendor::ImageDataRaw* raw, void* user) {
+        auto* self = static_cast<Impl*>(user);
+        if (self != nullptr) {
+            self->onImage(raw);
+        }
+    }
+
+    void onProfile(vendor::ProfileDataRaw* raw) {
+        if (raw == nullptr) {
+            return;
+        }
+        Frame frame;
+        try {
+            frame = copyProfileFrame(*raw);
+        } catch (...) {
+            return;
+        }
+        if (frame.valid && !frame.data.empty()) {
+            profile_callback_seen.store(true, std::memory_order_release);
+        }
+        enqueueFrame(std::move(frame));
+    }
+
+    static void MV3DLP_CALL profileCallbackThunk(vendor::ProfileDataRaw* raw, void* user) {
+        auto* self = static_cast<Impl*>(user);
+        if (self != nullptr) {
+            self->onProfile(raw);
+        }
+    }
+
+    void enqueueFrame(Frame frame) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!connected || handle == nullptr) {
+            return;
+        }
+        constexpr std::size_t kMaxQueuedFrames = 2;
+        if (image_queue.size() >= kMaxQueuedFrames) {
+            image_queue.pop_front();
+        }
+        image_queue.push_back(std::move(frame));
+        image_condition.notify_one();
+    }
+
     DriverOptions options;
     vendor::VendorSdk sdk;
     mutable std::mutex mutex;
     vendor::Handle handle = nullptr;
     bool connected = false;
     bool acquiring = false;
+    std::atomic<bool> profile_callback_seen{false};
     std::function<void(std::string)> exception_handler;
+    std::deque<Frame> image_queue;
+    std::condition_variable image_condition;
 };
 
 SdkError::SdkError(std::string message, std::int32_t status)
@@ -393,6 +537,7 @@ void Driver::connectBySerial(const std::string& serial_number) {
         throwIfError(impl_->sdk.closeDevice(&impl_->handle), "MV3D_LP_CloseDevice failed before reconnect");
         impl_->connected = false;
     }
+    impl_->profile_callback_seen.store(false, std::memory_order_release);
 
     vendor::Handle handle = nullptr;
     throwIfError(impl_->sdk.openDeviceBySN(&handle, serial_number.c_str()), "MV3D_LP_OpenDeviceBySN failed");
@@ -400,6 +545,8 @@ void Driver::connectBySerial(const std::string& serial_number) {
     impl_->handle = handle;
     impl_->connected = true;
     impl_->registerExceptionCallbackLocked();
+    impl_->registerImageCallbackLocked();
+    impl_->registerProfileCallbackLocked();
 }
 
 void Driver::connectByIp(const std::string& ip_address) {
@@ -414,6 +561,7 @@ void Driver::connectByIp(const std::string& ip_address) {
         throwIfError(impl_->sdk.closeDevice(&impl_->handle), "MV3D_LP_CloseDevice failed before reconnect");
         impl_->connected = false;
     }
+    impl_->profile_callback_seen.store(false, std::memory_order_release);
 
     vendor::Handle handle = nullptr;
     throwIfError(impl_->sdk.openDeviceByIP(&handle, ip_address.c_str()), "MV3D_LP_OpenDeviceByIP failed");
@@ -421,6 +569,8 @@ void Driver::connectByIp(const std::string& ip_address) {
     impl_->handle = handle;
     impl_->connected = true;
     impl_->registerExceptionCallbackLocked();
+    impl_->registerImageCallbackLocked();
+    impl_->registerProfileCallbackLocked();
 }
 
 void Driver::disconnect() {
@@ -517,20 +667,26 @@ void Driver::softTrigger() {
 }
 
 std::optional<Frame> Driver::tryFetchFrame(std::chrono::milliseconds timeout) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::unique_lock<std::mutex> lock(impl_->mutex);
     impl_->ensureConnected();
     impl_->ensureAcquiring();
 
-    vendor::ImageDataRaw raw{};
-    const vendor::Status status =
-        impl_->sdk.getImage(impl_->handle, &raw, static_cast<std::uint32_t>(std::max<std::int64_t>(timeout.count(), 0)));
-
-    if (status == vendor::kErrorNoData) {
+    const auto wait_time = std::chrono::milliseconds{std::max<std::int64_t>(timeout.count(), 0)};
+    if (impl_->image_queue.empty() &&
+        !impl_->image_condition.wait_for(lock, wait_time, [&] {
+            return !impl_->image_queue.empty() || !impl_->acquiring;
+        })) {
         return std::nullopt;
     }
-
-    throwIfError(status, "MV3D_LP_GetImage failed");
-    return copyFrame(raw);
+    if (impl_->image_queue.empty()) {
+        return std::nullopt;
+    }
+    // This is a live-preview API: stale frames are worse than dropped
+    // frames. Return the newest image and discard everything accumulated
+    // behind it so a temporary conversion/UI stall cannot create latency.
+    Frame frame = std::move(impl_->image_queue.back());
+    impl_->image_queue.clear();
+    return frame;
 }
 
 Frame Driver::fetchFrame(std::chrono::milliseconds timeout) {
@@ -576,4 +732,3 @@ void Driver::setExceptionHandler(std::function<void(std::string)> handler) {
 }
 
 }  // namespace mv3dlp
-

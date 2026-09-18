@@ -576,4 +576,3 @@ void Driver::setExceptionHandler(std::function<void(std::string)> handler) {
 }
 
 }  // namespace mv3dlp
-

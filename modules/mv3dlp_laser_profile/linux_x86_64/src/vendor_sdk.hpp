@@ -96,6 +96,25 @@ struct ImageDataRaw {
     std::uint8_t nReserved[16];
 };
 
+struct ProfileDataRaw {
+    std::uint32_t nLinePntNum;
+    std::uint32_t nProfileCnt;
+    std::uint8_t* pData;
+    std::uint32_t nDataLen;
+    std::uint32_t nFrameNum;
+    std::int64_t nTimeStamp;
+    Bool bValid;
+    float fXScale;
+    float fYScale;
+    float fZScale;
+    std::int32_t nXOffset;
+    std::int32_t nYOffset;
+    std::int32_t nZOffset;
+    std::uint8_t nReserved[16];
+};
+
+static_assert(sizeof(ProfileDataRaw) == 80u, "Unexpected vendor profile ABI layout.");
+
 struct IntParamRaw {
     std::int64_t nCurValue;
     std::int64_t nMax;
@@ -141,6 +160,7 @@ struct ExceptionInfoRaw {
 };
 
 using ImageDataCallback = void(MV3DLP_CALL*)(ImageDataRaw* image_data, void* user);
+using ProfileDataCallback = void(MV3DLP_CALL*)(ProfileDataRaw* profile_data, void* user);
 using ExceptionCallback = void(MV3DLP_CALL*)(ExceptionInfoRaw* exception_info, void* user);
 
 using FnGetVersion = const char*(MV3DLP_CALL*)();
@@ -157,6 +177,11 @@ using FnStopMeasure = Status(MV3DLP_CALL*)(Handle handle);
 using FnSoftTrigger = Status(MV3DLP_CALL*)(Handle handle);
 using FnGetImage = Status(MV3DLP_CALL*)(Handle handle, ImageDataRaw* image_data, std::uint32_t timeout_ms);
 using FnRegisterImageDataCallBack = Status(MV3DLP_CALL*)(Handle handle, ImageDataCallback callback, void* user);
+using FnRegisterProfileCallBack = Status(MV3DLP_CALL*)(
+    Handle handle,
+    ProfileDataCallback callback,
+    std::uint32_t profile_count,
+    void* user);
 using FnClearDataBuffer = Status(MV3DLP_CALL*)(Handle handle);
 using FnGetParam = Status(MV3DLP_CALL*)(Handle handle, const char* key, ParamRaw* param);
 using FnSetParam = Status(MV3DLP_CALL*)(Handle handle, const char* key, ParamRaw* param);
@@ -190,6 +215,11 @@ public:
     Status softTrigger(Handle handle) const;
     Status getImage(Handle handle, ImageDataRaw* image_data, std::uint32_t timeout_ms) const;
     Status registerImageDataCallBack(Handle handle, ImageDataCallback callback, void* user) const;
+    Status registerProfileCallBack(
+        Handle handle,
+        ProfileDataCallback callback,
+        std::uint32_t profile_count,
+        void* user) const;
     Status clearDataBuffer(Handle handle) const;
     Status getParam(Handle handle, const char* key, ParamRaw* param) const;
     Status setParam(Handle handle, const char* key, ParamRaw* param) const;
@@ -214,6 +244,7 @@ private:
     FnSoftTrigger soft_trigger_ = nullptr;
     FnGetImage get_image_ = nullptr;
     FnRegisterImageDataCallBack register_image_callback_ = nullptr;
+    FnRegisterProfileCallBack register_profile_callback_ = nullptr;
     FnClearDataBuffer clear_data_buffer_ = nullptr;
     FnGetParam get_param_ = nullptr;
     FnSetParam set_param_ = nullptr;
@@ -222,4 +253,3 @@ private:
 };
 
 }  // namespace mv3dlp::vendor
-

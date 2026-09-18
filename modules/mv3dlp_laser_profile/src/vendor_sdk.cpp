@@ -171,6 +171,8 @@ VendorSdk::VendorSdk(const std::string& library_path, const std::vector<std::str
         get_image_ = loadSymbol<FnGetImage>(module_, "MV3D_LP_GetImage");
         register_image_callback_ =
             loadSymbol<FnRegisterImageDataCallBack>(module_, "MV3D_LP_RegisterImageDataCallBack");
+        register_profile_callback_ =
+            loadSymbol<FnRegisterProfileCallBack>(module_, "MV3D_LP_RegisterProfileCallBack");
         clear_data_buffer_ = loadSymbol<FnClearDataBuffer>(module_, "MV3D_LP_ClearDataBuffer");
         get_param_ = loadSymbol<FnGetParam>(module_, "MV3D_LP_GetParam");
         set_param_ = loadSymbol<FnSetParam>(module_, "MV3D_LP_SetParam");
@@ -205,6 +207,7 @@ VendorSdk::VendorSdk(VendorSdk&& other) noexcept
       soft_trigger_(other.soft_trigger_),
       get_image_(other.get_image_),
       register_image_callback_(other.register_image_callback_),
+      register_profile_callback_(other.register_profile_callback_),
       clear_data_buffer_(other.clear_data_buffer_),
       get_param_(other.get_param_),
       set_param_(other.set_param_),
@@ -225,6 +228,7 @@ VendorSdk::VendorSdk(VendorSdk&& other) noexcept
     other.soft_trigger_ = nullptr;
     other.get_image_ = nullptr;
     other.register_image_callback_ = nullptr;
+    other.register_profile_callback_ = nullptr;
     other.clear_data_buffer_ = nullptr;
     other.get_param_ = nullptr;
     other.set_param_ = nullptr;
@@ -255,6 +259,7 @@ VendorSdk& VendorSdk::operator=(VendorSdk&& other) noexcept {
     soft_trigger_ = other.soft_trigger_;
     get_image_ = other.get_image_;
     register_image_callback_ = other.register_image_callback_;
+    register_profile_callback_ = other.register_profile_callback_;
     clear_data_buffer_ = other.clear_data_buffer_;
     get_param_ = other.get_param_;
     set_param_ = other.set_param_;
@@ -276,6 +281,7 @@ VendorSdk& VendorSdk::operator=(VendorSdk&& other) noexcept {
     other.soft_trigger_ = nullptr;
     other.get_image_ = nullptr;
     other.register_image_callback_ = nullptr;
+    other.register_profile_callback_ = nullptr;
     other.clear_data_buffer_ = nullptr;
     other.get_param_ = nullptr;
     other.set_param_ = nullptr;
@@ -346,6 +352,14 @@ Status VendorSdk::registerImageDataCallBack(Handle handle, ImageDataCallback cal
     return register_image_callback_(handle, callback, user);
 }
 
+Status VendorSdk::registerProfileCallBack(
+    Handle handle,
+    ProfileDataCallback callback,
+    std::uint32_t profile_count,
+    void* user) const {
+    return register_profile_callback_(handle, callback, profile_count, user);
+}
+
 Status VendorSdk::clearDataBuffer(Handle handle) const {
     return clear_data_buffer_(handle);
 }
@@ -367,4 +381,3 @@ Status VendorSdk::mapDepthToPointCloud(ImageDataRaw* depth_image, ImageDataRaw* 
 }
 
 }  // namespace mv3dlp::vendor
-
