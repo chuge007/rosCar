@@ -14,20 +14,29 @@ struct LaserCorrectionSettings {
   double lateralMinM = -0.20;
   double lateralMaxM = 0.20;
   double targetLateralM = 0.0;
+  // Distance from the vehicle control point to the laser plane. Set to zero
+  // when the incoming profile already represents the laser-point error.
+  double lookaheadDistanceM = 0.30;
   // IMU yaw target. Set this to the weld direction in the IMU frame.
   double headingReferenceRad = 0.0;
   double prominenceThresholdM = 0.0015;
   double contourHalfWidthM = 0.025;
+  // Legacy fixed-alpha values are retained as fallbacks when a cutoff is 0.
   double filterAlpha = 0.22;
   double derivativeAlpha = 0.18;
+  double lateralFilterCutoffHz = 4.0;
+  double headingFilterCutoffHz = 4.0;
+  double gyroFilterCutoffHz = 8.0;
   double proportionalGain = 3.0;
-  // Heading feedback and gyro damping are both expressed in rad/s per input
-  // unit. The gyro term uses the measured yaw rate instead of differentiating
-  // the noisy laser position.
+  double integralGain = 0.0;
+  double integralLimitMs = 0.30;
+  // Heading feedback and gyro damping use measured IMU signals. The gyro term
+  // is negative feedback, not a derivative of the noisy laser position.
   double headingGain = 1.8;
   double derivativeGain = 0.35;
   int steeringSign = 1;
   int headingSign = 1;
+  int gyroSign = 1;
   double deadbandM = 0.0015;
   double headingDeadbandRad = 0.00872664626;
   double maxLateralErrorM = 0.08;
@@ -48,9 +57,12 @@ struct LaserCorrectionStatus {
   bool active = false;
   bool contourValid = false;
   double contourLateralM = 0.0;
+  double sensorLateralErrorM = 0.0;
+  double lookaheadOffsetM = 0.0;
   double lateralErrorM = 0.0;
   double headingErrorRad = 0.0;
   double gyroRadps = 0.0;
+  double lateralIntegralMs = 0.0;
   double confidence = 0.0;
   double linearCommandMps = 0.0;
   double angularCommandRadps = 0.0;
@@ -84,9 +96,14 @@ class LaserCorrectionController final : public QObject {
   qint64 lastProfileMs_ = -1;
   qint64 lastImuMs_ = -1;
   qint64 previousControlMs_ = -1;
+  qint64 previousImuMs_ = -1;
+  bool lateralFilterInitialized_ = false;
+  bool headingFilterInitialized_ = false;
+  bool gyroFilterInitialized_ = false;
   double filteredError_ = 0.0;
   double filteredHeadingError_ = 0.0;
   double filteredGyroRadps_ = 0.0;
+  double lateralIntegralMs_ = 0.0;
   double currentYawRad_ = 0.0;
   double currentGyroRadps_ = 0.0;
   double currentLinear_ = 0.0;

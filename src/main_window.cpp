@@ -119,11 +119,18 @@ MainWindow::MainWindow(SynchronizedDriveController* controller, DeviceController
   setPointCloudPlane(initialPlaneIndex);
   correctionSpeedBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/speed"), 0.025).toDouble() * kMillimetersPerMeter);
   correctionKpBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/kp"), correctionKpBox_->value()).toDouble());
+  correctionIntegralBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/ki"), 0.0).toDouble());
   correctionKdBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/kd"), correctionKdBox_->value()).toDouble());
   correctionLimitBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/maxError"), 0.080).toDouble() * kMillimetersPerMeter);
+  correctionLookaheadBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/lookahead"), 0.30).toDouble() * kMillimetersPerMeter);
   correctionHeadingRefBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/headingReference"), 0.0).toDouble() * kDegreesPerRadian);
   correctionHeadingKpBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/headingGain"), 1.8).toDouble());
+  correctionLateralFilterBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/lateralFilterHz"), 4.0).toDouble());
+  correctionHeadingFilterBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/headingFilterHz"), 4.0).toDouble());
+  correctionGyroFilterBox_->setValue(persistent.value(CRAWLING_TEXT("laserCorrection/gyroFilterHz"), 8.0).toDouble());
   setComboToValue(correctionSignBox_, persistent.value(CRAWLING_TEXT("laserCorrection/sign"), 1).toInt());
+  setComboToValue(correctionHeadingSignBox_, persistent.value(CRAWLING_TEXT("laserCorrection/headingSign"), 1).toInt());
+  setComboToValue(correctionGyroSignBox_, persistent.value(CRAWLING_TEXT("laserCorrection/gyroSign"), 1).toInt());
   parameterStatusLabel_->setText(CRAWLING_TEXT("参数已加载"));
   bindController();
   refreshPorts();
@@ -285,18 +292,32 @@ void MainWindow::applyAllParameters() {
   LaserCorrectionSettings correctionSettings;
   correctionSettings.targetSpeedMps = correctionSpeedBox_->value() / kMillimetersPerMeter;
   correctionSettings.proportionalGain = correctionKpBox_->value();
+  correctionSettings.integralGain = correctionIntegralBox_->value();
   correctionSettings.derivativeGain = correctionKdBox_->value();
   correctionSettings.maxLateralErrorM = correctionLimitBox_->value() / kMillimetersPerMeter;
+  correctionSettings.lookaheadDistanceM = correctionLookaheadBox_->value() / kMillimetersPerMeter;
   correctionSettings.headingReferenceRad = correctionHeadingRefBox_->value() * kRadiansPerDegree;
   correctionSettings.headingGain = correctionHeadingKpBox_->value();
+  correctionSettings.lateralFilterCutoffHz = correctionLateralFilterBox_->value();
+  correctionSettings.headingFilterCutoffHz = correctionHeadingFilterBox_->value();
+  correctionSettings.gyroFilterCutoffHz = correctionGyroFilterBox_->value();
   correctionSettings.steeringSign = correctionSignBox_->currentData().toInt();
+  correctionSettings.headingSign = correctionHeadingSignBox_->currentData().toInt();
+  correctionSettings.gyroSign = correctionGyroSignBox_->currentData().toInt();
   persistent.setValue(CRAWLING_TEXT("laserCorrection/speed"), correctionSettings.targetSpeedMps);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/kp"), correctionSettings.proportionalGain);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/ki"), correctionSettings.integralGain);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/kd"), correctionSettings.derivativeGain);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/maxError"), correctionSettings.maxLateralErrorM);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/lookahead"), correctionSettings.lookaheadDistanceM);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/headingReference"), correctionSettings.headingReferenceRad);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/headingGain"), correctionSettings.headingGain);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/lateralFilterHz"), correctionSettings.lateralFilterCutoffHz);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/headingFilterHz"), correctionSettings.headingFilterCutoffHz);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/gyroFilterHz"), correctionSettings.gyroFilterCutoffHz);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/sign"), correctionSettings.steeringSign);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/headingSign"), correctionSettings.headingSign);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/gyroSign"), correctionSettings.gyroSign);
   persistent.sync();
   if (correction_) correction_->setSettings(correctionSettings);
 
@@ -899,32 +920,58 @@ void MainWindow::buildInterface() {
   auto* correctionLayout = new QGridLayout(correctionGroup);
   const QStringList correctionLabels = {
       CRAWLING_TEXT("跟踪速度 (mm/s)"), CRAWLING_TEXT("横向比例 Kp"),
-      CRAWLING_TEXT("陀螺阻尼 Kd"), CRAWLING_TEXT("最大横向偏差 (mm)"),
+      CRAWLING_TEXT("横向积分 Ki"), CRAWLING_TEXT("陀螺阻尼 Kd"),
+      CRAWLING_TEXT("最大横向偏差 (mm)"), CRAWLING_TEXT("前瞻距离 L (mm)"),
       CRAWLING_TEXT("航向参考 (deg)"), CRAWLING_TEXT("航向比例 Kp"),
-      CRAWLING_TEXT("转向方向")};
+      CRAWLING_TEXT("横向滤波 (Hz)"), CRAWLING_TEXT("航向滤波 (Hz)"),
+      CRAWLING_TEXT("陀螺滤波 (Hz)"),
+      CRAWLING_TEXT("转向方向 steeringSign"), CRAWLING_TEXT("航向方向 headingSign"),
+      CRAWLING_TEXT("陀螺方向 gyroSign")};
   correctionSpeedBox_ = makeDoubleSpin(5.0, 150.0, 1.0, 3, correctionGroup);
   correctionSpeedBox_->setValue(25.0);
   correctionKpBox_ = makeDoubleSpin(0.000, 10.000, 0.010, 3, correctionGroup);
   correctionKpBox_->setValue(3.0);
+  correctionIntegralBox_ = makeDoubleSpin(0.000, 10.000, 0.010, 3, correctionGroup);
+  correctionIntegralBox_->setValue(0.0);
   correctionKdBox_ = makeDoubleSpin(0.000, 5.000, 0.010, 3, correctionGroup);
   correctionKdBox_->setValue(0.35);
   correctionLimitBox_ = makeDoubleSpin(10.0, 200.0, 1.0, 3, correctionGroup);
   correctionLimitBox_->setValue(80.0);
+  correctionLookaheadBox_ = makeDoubleSpin(0.0, 2000.0, 10.0, 1, correctionGroup);
+  correctionLookaheadBox_->setValue(300.0);
   correctionHeadingRefBox_ = makeDoubleSpin(-360.0, 360.0, 1.0, 2, correctionGroup);
   correctionHeadingRefBox_->setValue(0.0);
   correctionHeadingKpBox_ = makeDoubleSpin(0.000, 10.000, 0.010, 3, correctionGroup);
   correctionHeadingKpBox_->setValue(1.8);
+  correctionLateralFilterBox_ = makeDoubleSpin(0.1, 50.0, 0.1, 2, correctionGroup);
+  correctionLateralFilterBox_->setValue(4.0);
+  correctionHeadingFilterBox_ = makeDoubleSpin(0.1, 50.0, 0.1, 2, correctionGroup);
+  correctionHeadingFilterBox_->setValue(4.0);
+  correctionGyroFilterBox_ = makeDoubleSpin(0.1, 50.0, 0.1, 2, correctionGroup);
+  correctionGyroFilterBox_->setValue(8.0);
   correctionSignBox_ = new QComboBox(correctionGroup);
   correctionSignBox_->addItem(CRAWLING_TEXT("+1（默认）"), 1);
   correctionSignBox_->addItem(CRAWLING_TEXT("-1（反向）"), -1);
+  correctionHeadingSignBox_ = new QComboBox(correctionGroup);
+  correctionHeadingSignBox_->addItem(CRAWLING_TEXT("+1（默认）"), 1);
+  correctionHeadingSignBox_->addItem(CRAWLING_TEXT("-1（反向）"), -1);
+  correctionGyroSignBox_ = new QComboBox(correctionGroup);
+  correctionGyroSignBox_->addItem(CRAWLING_TEXT("+1（默认）"), 1);
+  correctionGyroSignBox_->addItem(CRAWLING_TEXT("-1（反向）"), -1);
   const QList<QWidget*> correctionControls = {
-      correctionSpeedBox_, correctionKpBox_, correctionKdBox_, correctionLimitBox_,
-      correctionHeadingRefBox_, correctionHeadingKpBox_, correctionSignBox_};
-  for (int column = 0; column < correctionLabels.size(); ++column) {
-    correctionLayout->addWidget(new QLabel(correctionLabels.at(column), correctionGroup),
-                                0, column);
-    correctionLayout->addWidget(correctionControls.at(column), 1, column);
-    correctionLayout->setColumnStretch(column, 1);
+      correctionSpeedBox_, correctionKpBox_, correctionIntegralBox_, correctionKdBox_,
+      correctionLimitBox_, correctionLookaheadBox_, correctionHeadingRefBox_,
+      correctionHeadingKpBox_, correctionLateralFilterBox_, correctionHeadingFilterBox_,
+      correctionGyroFilterBox_, correctionSignBox_, correctionHeadingSignBox_,
+      correctionGyroSignBox_};
+  constexpr int kCorrectionFieldsPerRow = 4;
+  for (int index = 0; index < correctionLabels.size(); ++index) {
+    const int row = index / kCorrectionFieldsPerRow;
+    const int column = (index % kCorrectionFieldsPerRow) * 2;
+    correctionLayout->addWidget(new QLabel(correctionLabels.at(index), correctionGroup),
+                                row, column);
+    correctionLayout->addWidget(correctionControls.at(index), row, column + 1);
+    correctionLayout->setColumnStretch(column + 1, 1);
   }
   settingsLayout->addWidget(correctionGroup, 3, 0, 1, 3);
 
@@ -951,8 +998,11 @@ void MainWindow::buildInterface() {
                               maxLinearSpeedBox_, maxAngularSpeedBox_, maxLinearAccelBox_,
                               maxAngularAccelBox_, minimumInnerRatioBox_, synchronizationPBox_,
                                synchronizationIBox_, maxCorrectionBox_, minSyncSpeedBox_,
-                               correctionSpeedBox_, correctionKpBox_, correctionKdBox_,
-                               correctionLimitBox_, correctionHeadingRefBox_, correctionHeadingKpBox_}) {
+                               correctionSpeedBox_, correctionKpBox_, correctionIntegralBox_,
+                               correctionKdBox_, correctionLimitBox_, correctionLookaheadBox_,
+                               correctionHeadingRefBox_, correctionHeadingKpBox_,
+                               correctionLateralFilterBox_, correctionHeadingFilterBox_,
+                               correctionGyroFilterBox_}) {
     connect(box, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, markParametersDirty);
   }
   for (QSpinBox* box : {leftMotorIdBox_, rightMotorIdBox_, commandTimeoutBox_, feedbackTimeoutBox_,
@@ -961,7 +1011,8 @@ void MainWindow::buildInterface() {
   }
   for (QComboBox* box : {serialPortBox_, serialBaudBox_, canBitrateBox_, imuPortBox_, imuBaudBox_,
                          clampSerialPortBox_, clampSerialBaudBox_, clampCanBitrateBox_,
-                         leftSignBox_, rightSignBox_, correctionSignBox_}) {
+                         leftSignBox_, rightSignBox_, correctionSignBox_,
+                         correctionHeadingSignBox_, correctionGyroSignBox_}) {
     connect(box, QOverload<int>::of(&QComboBox::currentIndexChanged), this, markParametersDirty);
   }
   connect(laserSerialBox_, &QLineEdit::textChanged, this, markParametersDirty);
@@ -1150,18 +1201,32 @@ void MainWindow::startAutoCorrection() {
   if (!connected_ || currentState_ != DriveState::Enabled) { appendLog(CRAWLING_TEXT("\xE8\xAF\xB7""\xE5\x85\x88""\xE8\xBF\x9E""\xE6\x8E\xA5""\xE5\xB9\xB6""\xE4\xBD\xBF""\xE8\x83\xBD""\xE5\xBA\x95""\xE7\x9B\x98""\xEF\xBC\x8C""\xE5\x86\x8D""\xE5\x90\xAF""\xE5\x8A\xA8""\xE8\x87\xAA""\xE5\x8A\xA8""\xE7\xBA\xA0""\xE5\x81\x8F""\xE3\x80\x82""")); return; }
   LaserCorrectionSettings settings;
   settings.targetSpeedMps = correctionSpeedBox_->value() / kMillimetersPerMeter; settings.proportionalGain = correctionKpBox_->value();
-  settings.derivativeGain = correctionKdBox_->value(); settings.maxLateralErrorM = correctionLimitBox_->value() / kMillimetersPerMeter;
+  settings.integralGain = correctionIntegralBox_->value(); settings.derivativeGain = correctionKdBox_->value();
+  settings.maxLateralErrorM = correctionLimitBox_->value() / kMillimetersPerMeter;
+  settings.lookaheadDistanceM = correctionLookaheadBox_->value() / kMillimetersPerMeter;
   settings.headingReferenceRad = correctionHeadingRefBox_->value() * kRadiansPerDegree;
   settings.headingGain = correctionHeadingKpBox_->value();
+  settings.lateralFilterCutoffHz = correctionLateralFilterBox_->value();
+  settings.headingFilterCutoffHz = correctionHeadingFilterBox_->value();
+  settings.gyroFilterCutoffHz = correctionGyroFilterBox_->value();
   settings.steeringSign = correctionSignBox_->currentData().toInt();
+  settings.headingSign = correctionHeadingSignBox_->currentData().toInt();
+  settings.gyroSign = correctionGyroSignBox_->currentData().toInt();
   QSettings persistent(DriveSettings::persistentFilePath(), QSettings::IniFormat);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/speed"), settings.targetSpeedMps);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/kp"), settings.proportionalGain);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/ki"), settings.integralGain);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/kd"), settings.derivativeGain);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/maxError"), settings.maxLateralErrorM);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/lookahead"), settings.lookaheadDistanceM);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/headingReference"), settings.headingReferenceRad);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/headingGain"), settings.headingGain);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/lateralFilterHz"), settings.lateralFilterCutoffHz);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/headingFilterHz"), settings.headingFilterCutoffHz);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/gyroFilterHz"), settings.gyroFilterCutoffHz);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/sign"), settings.steeringSign);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/headingSign"), settings.headingSign);
+  persistent.setValue(CRAWLING_TEXT("laserCorrection/gyroSign"), settings.gyroSign);
   persistent.sync();
   correction_->setSettings(settings);
   cancelMotionButtonPulses();
@@ -1173,18 +1238,21 @@ void MainWindow::stopAutoCorrection() { if (correction_) correction_->setEnabled
 void MainWindow::setCorrectionReference() { if (correction_) correction_->resetReferenceToCurrentContour(); }
 void MainWindow::updateCorrectionStatus(const LaserCorrectionStatus& status) {
   if (!correctionStatusLabel_) return;
-  correctionStatusLabel_->setText(CRAWLING_TEXT("%1\n\xE8\xBD\xAE""\xE5\xBB\x93""\xEF\xBC\x9A""%2\xEF\xBC\x8C""\xE5\x81\x8F""\xE5\xB7\xAE""\xEF\xBC\x9A""%3 m\xEF\xBC\x8C""\xE7\xBD\xAE""\xE4\xBF\xA1""\xE5\xBA\xA6""\xEF\xBC\x9A""%4\n\xE5\x91\xBD""\xE4\xBB\xA4""\xEF\xBC\x9A""%5 m/s\xEF\xBC\x8C""%6 rad/s")
-      .arg(status.reason).arg(status.contourValid ? CRAWLING_TEXT("\xE6\x9C\x89""\xE6\x95\x88""") : CRAWLING_TEXT("\xE6\x97\xA0""\xE6\x95\x88"""))
-      .arg(status.lateralErrorM * kMillimetersPerMeter,0,'f',1).arg(status.confidence,0,'f',2)
-      .arg(status.linearCommandMps * kMillimetersPerMeter,0,'f',1).arg(status.angularCommandRadps * kDegreesPerRadian,0,'f',1)
-      .replace(CRAWLING_TEXT(" m，"), CRAWLING_TEXT(" mm，"))
-      .replace(CRAWLING_TEXT(" m/s"), CRAWLING_TEXT(" mm/s"))
-      .replace(CRAWLING_TEXT(" rad/s"), CRAWLING_TEXT(" deg/s")));
   correctionStatusLabel_->setText(
-      correctionStatusLabel_->text() +
-      CRAWLING_TEXT("\nHeading error: %1 deg, gyro Z: %2 deg/s")
+      CRAWLING_TEXT("%1\n轮廓：%2，传感器偏差：%3 mm，前瞻项：%4 mm，eL：%5 mm\n"
+                    "eψ：%6 deg，gyroZ：%7 deg/s，积分：%8 m*s，置信度：%9\n"
+                    "命令：%10 mm/s，%11 deg/s")
+          .arg(status.reason)
+          .arg(status.contourValid ? CRAWLING_TEXT("有效") : CRAWLING_TEXT("无效"))
+          .arg(status.sensorLateralErrorM * kMillimetersPerMeter, 0, 'f', 1)
+          .arg(status.lookaheadOffsetM * kMillimetersPerMeter, 0, 'f', 1)
+          .arg(status.lateralErrorM * kMillimetersPerMeter, 0, 'f', 1)
           .arg(status.headingErrorRad * kDegreesPerRadian, 0, 'f', 2)
-          .arg(status.gyroRadps * kDegreesPerRadian, 0, 'f', 2));
+          .arg(status.gyroRadps * kDegreesPerRadian, 0, 'f', 2)
+          .arg(status.lateralIntegralMs, 0, 'f', 4)
+          .arg(status.confidence, 0, 'f', 2)
+          .arg(status.linearCommandMps * kMillimetersPerMeter, 0, 'f', 1)
+          .arg(status.angularCommandRadps * kDegreesPerRadian, 0, 'f', 1));
   autoStartButton_->setEnabled(!status.active); autoStopButton_->setEnabled(status.active);
   autoCorrectionActive_ = status.active;
 }
