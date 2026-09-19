@@ -67,7 +67,220 @@ struct BaselineProjection {
   double residualPx = 0.0;
   QVector<int> profile;
   QVector<int> ridgeCrossPx;
+  QVector<bool> contourProfile;
+  int contourStartSample = -1;
+  int contourEndSample = -1;
+  double contourConfidence = 0.0;
+  int contourDisplacementThresholdPx = 0;
+  int contourMinimumRunSamples = 0;
+  int contourLineStartSample = -1;
+  int contourLineEndSample = -1;
 };
+
+// Derive a geometric contour from the same raw image used by the baseline
+// detector. A weld raised above the plate may have no dark interruption in
+// the fitted stripe, but its laser return remains a bright, displaced ridge.
+QVector<Run> collectRuns(const QVector<bool>& present);
+void closeSmallHoles(QVector<bool>* present, int maximumHole);
+void removeShortRuns(QVector<bool>* present, int minimumRun);
+
+void detectDisplacedContour(const QImage& grayscale, int sampleStep,
+                            int backgroundLevel, bool horizontal,
+                            const LaserGapDetectorConfig& config,
+                            BaselineProjection* output) {
+  if (!output || !output->valid || output->profile.isEmpty()) return;
+  const int axisLength = horizontal ? grayscale.width() : grayscale.height();
+  const int crossLength = horizontal ? grayscale.height() : grayscale.width();
+  const int count = output->profile.size();
+  if (axisLength < 48 || crossLength < 24 || count < 24) return;
+
+  // Search a wider geometric band than the intensity projection. The
+  // threshold is relative to the supported stripe so background texture is
+  // not promoted merely because it is a few gray levels above black.
+  const int lineLevel = vectorPercentile(output->profile, 0.94);
+  const int ridgeThreshold = backgroundLevel + std::max(
+      config.minimumContrast,
+      static_cast<int>(std::lround((lineLevel - backgroundLevel) * 0.28)));
+  const int displacementThreshold = std::clamp(
+      static_cast<int>(std::lround(std::max(5.0,
+          output->halfWidthPx * 0.90))), 5, std::max(5, crossLength / 5));
+  const int minimumRun = std::max(
+      4, static_cast<int>(std::ceil(
+          count * std::max(0.018, config.minimumGapRatio))));
+  const int holeLimit = std::max(
+      1, static_cast<int>(std::ceil(count * 0.006)));
+  output->contourDisplacementThresholdPx = displacementThreshold;
+  output->contourMinimumRunSamples = minimumRun;
+
+  const auto pixel = [&](int axis, int cross) {
+    return horizontal ? grayscale.constScanLine(cross)[axis]
+                      : grayscale.constScanLine(axis)[cross];
+  };
+  QVector<bool> contour(count, false);
+  QVector<bool> negativeContour(count, false);
+  QVector<bool> positiveContour(count, false);
+  const int searchRadius = std::max(
+      displacementThreshold + 4, static_cast<int>(std::lround(crossLength * 0.22)));
+  for (int i = 0; i < count; ++i) {
+    const int axis = std::min(axisLength - 1, i * sampleStep);
+    const double prediction = output->offsetPx + output->slope * axis;
+    const int lower = std::max(0, static_cast<int>(std::floor(prediction)) -
+                                      searchRadius);
+    const int upper = std::min(crossLength - 1,
+                               static_cast<int>(std::ceil(prediction)) +
+                                   searchRadius);
+    int cross = lower;
+    while (cross <= upper) {
+      if (pixel(axis, cross) < ridgeThreshold) {
+        cross += sampleStep;
+        continue;
+      }
+      const int start = cross;
+      double moment = 0.0;
+      double weight = 0.0;
+      int peak = 0;
+      while (cross <= upper && pixel(axis, cross) >= ridgeThreshold) {
+        const int value = pixel(axis, cross);
+        const double currentWeight = value - backgroundLevel;
+        moment += cross * currentWeight;
+        weight += currentWeight;
+        peak = std::max(peak, value);
+        cross += sampleStep;
+      }
+      const int width = cross - start;
+      if (width <= std::max(12, crossLength / 10) && weight > 0.0 &&
+          peak - backgroundLevel >= config.minimumContrast &&
+          std::abs(moment / weight - prediction) >= displacementThreshold) {
+        if (moment / weight < prediction) negativeContour[i] = true;
+        else positiveContour[i] = true;
+      }
+    }
+  }
+  // A raised or recessed surface has a consistent displacement sign; never
+  // join alternating upper/lower reflections into one artificial contour.
+  for (QVector<bool>* side : {&negativeContour, &positiveContour}) {
+    closeSmallHoles(side, holeLimit);
+    removeShortRuns(side, minimumRun);
+    closeSmallHoles(side, holeLimit);
+  }
+  for (int i = 0; i < count; ++i) {
+    contour[i] = negativeContour[i] || positiveContour[i];
+  }
+  output->contourProfile = contour;
+  QVector<Run> runs = collectRuns(negativeContour);
+  runs += collectRuns(positiveContour);
+  if (runs.isEmpty()) return;
+
+  int firstBaseline = -1;
+  int lastBaseline = -1;
+  for (int i = 0; i < output->ridgeCrossPx.size(); ++i) {
+    if (output->ridgeCrossPx[i] < 0) continue;
+    if (firstBaseline < 0) firstBaseline = i;
+    lastBaseline = i;
+  }
+  if (firstBaseline < 0 || lastBaseline <= firstBaseline) return;
+  const int lineSpan = lastBaseline - firstBaseline + 1;
+  const int minimumExteriorSupport = std::max(3, lineSpan / 30);
+  const bool hasExpectedCenter = config.expectedAbsoluteCenterRatio >= 0.0 &&
+                                 config.expectedAbsoluteCenterRatio <= 1.0;
+  const bool hasExpectedWidth =
+      config.expectedAbsoluteGapWidthRatio > 0.0 ||
+      (config.expectedGapWidthRatio > 0.0 &&
+       config.expectedLineEndRatio > config.expectedLineStartRatio &&
+       config.expectedLineStartRatio >= 0.0);
+  double bestScore = -1.0;
+  int bestStart = -1;
+  int bestEnd = -1;
+  int bestSupport = 0;
+  for (const Run& run : runs) {
+    const int start = std::max(firstBaseline, run.start);
+    const int end = std::min(lastBaseline, run.end);
+    if (end < start || end - start + 1 < minimumRun) continue;
+    const int width = end - start + 1;
+    // A contour spanning nearly the complete line is generally a bad fit or
+    // glare, not a weld. Require useful parent-stripe support where possible.
+    if (width > std::max(minimumRun, static_cast<int>(lineSpan * 0.82))) continue;
+    int leftSupport = 0;
+    int rightSupport = 0;
+    for (int i = firstBaseline; i < start; ++i) {
+      if (output->ridgeCrossPx[i] >= 0) ++leftSupport;
+    }
+    for (int i = end + 1; i <= lastBaseline; ++i) {
+      if (output->ridgeCrossPx[i] >= 0) ++rightSupport;
+    }
+    const int exteriorSupport = leftSupport + rightSupport;
+    // Both shoulders are measured for this observation. A single visible
+    // shoulder remains admissible only at the established optical boundary;
+    // the ordinary interior case must have shoulders on both sides.
+    const double runCenterRatio =
+        (static_cast<double>(start + end) * 0.5 - firstBaseline) /
+        std::max(1, lineSpan - 1);
+    const bool nearBoundary = runCenterRatio < 0.18 || runCenterRatio > 0.82;
+    if ((!nearBoundary && (leftSupport < minimumExteriorSupport ||
+                           rightSupport < minimumExteriorSupport)) ||
+        (nearBoundary && std::max(leftSupport, rightSupport) <
+                              minimumExteriorSupport)) continue;
+    int unsupportedBaseline = 0;
+    for (int i = start; i <= end; ++i) {
+      if (output->ridgeCrossPx[i] < 0) ++unsupportedBaseline;
+    }
+    // A displaced stripe alongside a perfectly continuous parent stripe is
+    // a reflection, not evidence that the plate contour rose at that point.
+    if (unsupportedBaseline < width * 0.55) continue;
+    const double absoluteCenter =
+        static_cast<double>(start + end) * 0.5 * sampleStep /
+        std::max(1, axisLength - 1);
+    if (config.referenceAbsoluteCenterRatio >= 0.0 &&
+        config.referenceAbsoluteCenterRatio <= 1.0 &&
+        std::abs(absoluteCenter - config.referenceAbsoluteCenterRatio) >
+            std::max(0.08, config.maximumReferenceCenterDriftRatio)) continue;
+    double score = width * (1.0 + std::log1p(exteriorSupport));
+    if (hasExpectedCenter) {
+      const double centerError =
+          std::abs(absoluteCenter - config.expectedAbsoluteCenterRatio);
+      if (centerError > std::max(0.02, config.maximumAbsoluteCenterJumpRatio)) {
+        continue;
+      }
+      score /= 1.0 + centerError * 8.0;
+    }
+    if (hasExpectedWidth) {
+      const double expectedWidthPx = config.expectedAbsoluteGapWidthRatio > 0.0
+          ? config.expectedAbsoluteGapWidthRatio *
+                std::max(1, axisLength - 1)
+          : config.expectedGapWidthRatio *
+                (config.expectedLineEndRatio - config.expectedLineStartRatio) *
+                std::max(1, axisLength - 1);
+      const double widthScale = width * sampleStep / std::max(1.0, expectedWidthPx);
+      if (widthScale < 0.45 || widthScale > 1.75) continue;
+      score /= 1.0 + std::abs(widthScale - 1.0) * 2.0;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestStart = start;
+      bestEnd = end;
+      bestSupport = exteriorSupport;
+    }
+  }
+  if (bestStart < 0) return;
+  output->contourStartSample = bestStart;
+  output->contourEndSample = bestEnd;
+  output->contourLineStartSample = firstBaseline;
+  output->contourLineEndSample = lastBaseline;
+  const double supportScore = std::clamp(
+      static_cast<double>(bestSupport) / std::max(1, lineSpan / 3), 0.0, 1.0);
+  const double widthScore = std::clamp(
+      static_cast<double>(bestEnd - bestStart + 1) /
+          std::max(1, lineSpan / 3),
+      0.0, 1.0);
+  // Keep the auxiliary path below a normal measured gap's authority. The
+  // controller can use it to avoid losing the seam, then wait for a fresh
+  // two-edge observation before restoring full steering authority.
+  // Keep this below the controller's geometry-sample threshold. A contour
+  // recovery can hold the live center loop, but must not enter the stitched
+  // path fit until a normal two-edge frame corroborates it.
+  output->contourConfidence = std::min(0.075, 0.035 +
+      0.025 * widthScore + 0.025 * supportScore);
+}
 
 // Keep the long parent stripe, including a slope, separate from elevated or
 // depressed weld returns. A whole-image maximum/top-three projection loses
@@ -282,6 +495,8 @@ BaselineProjection projectLaserBaseline(const QImage& grayscale,
     }
     output.profile[i] = (top[0] + top[1] + top[2]) / 3;
   }
+  detectDisplacedContour(grayscale, sampleStep, backgroundLevel, horizontal,
+                         config, &output);
   return output;
 }
 
@@ -353,8 +568,12 @@ LaserGapDetection inferFromVisibleEdge(
     const LaserGapDetectorConfig& config) {
   LaserGapDetection result;
   result.horizontal = horizontal;
-  const bool trackingActive = config.expectedCenterRatio >= 0.0 &&
-                              config.expectedCenterRatio <= 1.0;
+  const bool hasExpectedAbsoluteCenter =
+      config.expectedAbsoluteCenterRatio >= 0.0 &&
+      config.expectedAbsoluteCenterRatio <= 1.0;
+  const bool trackingActive =
+      (config.expectedCenterRatio >= 0.0 && config.expectedCenterRatio <= 1.0) ||
+      hasExpectedAbsoluteCenter;
   const bool lineRangeKnown = config.expectedLineStartRatio >= 0.0 &&
                               config.expectedLineStartRatio < 1.0 &&
                               config.expectedLineEndRatio > 0.0 &&
@@ -379,15 +598,29 @@ LaserGapDetection inferFromVisibleEdge(
   const int expectedLineSpan = lineEndSample - lineStartSample;
   if (expectedLineSpan < 12) return result;
 
-  const double widthRatio =
-      config.expectedGapWidthRatio > 0.0
-          ? config.expectedGapWidthRatio
-          : std::max(config.minimumGapRatio, config.edgeBreakGapRatio);
+  const bool hasExpectedAbsoluteWidth =
+      config.expectedAbsoluteGapWidthRatio > 0.0 &&
+      config.expectedAbsoluteGapWidthRatio <= 1.0;
+  // expectedLineSpan and gapWidth are measured in sampled columns, whereas
+  // the absolute-width field is a ratio of the full raw-image pixel axis.
+  // Keep both branches in sample units before clamping; dividing the legacy
+  // local-width branch by sampleStep would halve its inferred physical gap.
+  const double expectedWidthSamples = hasExpectedAbsoluteWidth
+      ? config.expectedAbsoluteGapWidthRatio * axisLastPixel / sampleStep
+      : (config.expectedGapWidthRatio > 0.0
+             ? config.expectedGapWidthRatio * expectedLineSpan
+             : std::max(config.minimumGapRatio, config.edgeBreakGapRatio) *
+                   expectedLineSpan);
   const int gapWidth = std::clamp(
-      static_cast<int>(std::lround(widthRatio * expectedLineSpan)),
+      static_cast<int>(std::lround(expectedWidthSamples)),
       minimumGap, std::max(minimumGap, expectedLineSpan / 2));
-  const double expectedCenter =
-      lineStartSample + config.expectedCenterRatio * expectedLineSpan;
+  // Use the full-image center whenever available. The local center is tied to
+  // the visible line endpoints and moves spuriously when one optical end is
+  // clipped. Full-image continuity lets the last visible run remain a valid
+  // observation of a gap at that boundary.
+  const double expectedCenter = hasExpectedAbsoluteCenter
+      ? config.expectedAbsoluteCenterRatio * axisLastPixel / sampleStep
+      : lineStartSample + config.expectedCenterRatio * expectedLineSpan;
   const double expectedGapStart = expectedCenter - gapWidth * 0.5;
   const double expectedGapEnd = expectedGapStart + gapWidth - 1;
   const int minimumVisibleRun = std::max(
@@ -584,6 +817,9 @@ LaserGapDetection detectAlongAxis(const QVector<int>& rawProfile, int sampleStep
   const int lineStartSample = runs.first().start;
   const int lineEndSample = runs.last().end;
   const int lineSpan = std::max(1, lineEndSample - lineStartSample);
+  const bool hasExpectedAbsoluteWidth =
+      config.expectedAbsoluteGapWidthRatio > 0.0 &&
+      config.expectedAbsoluteGapWidthRatio <= 1.0;
 
   // Find the dominant physical interruption before applying temporal
   // preferences. Small residual holes may survive preprocessing, but they
@@ -696,10 +932,17 @@ LaserGapDetection detectAlongAxis(const QVector<int>& rawProfile, int sampleStep
       trackingCandidateSeen = true;
       continue;
     }
-    if (trackingActive && config.expectedGapWidthRatio > 0.0 &&
-        std::abs(candidateWidth - config.expectedGapWidthRatio) >
+    const double candidateWidthForTracking = hasExpectedAbsoluteWidth
+        ? gapLength * sampleStep /
+              static_cast<double>(std::max(1, axisPixelLength - 1))
+        : candidateWidth;
+    const double expectedWidthForTracking = hasExpectedAbsoluteWidth
+        ? config.expectedAbsoluteGapWidthRatio
+        : config.expectedGapWidthRatio;
+    if (trackingActive && expectedWidthForTracking > 0.0 &&
+        std::abs(candidateWidthForTracking - expectedWidthForTracking) >
             std::max(config.maximumTrackingGapWidthJumpRatio,
-                     config.expectedGapWidthRatio * 0.55)) {
+                     expectedWidthForTracking * 0.55)) {
       result.widthRejected = true;
       trackingCandidateSeen = true;
       continue;
@@ -709,8 +952,9 @@ LaserGapDetection detectAlongAxis(const QVector<int>& rawProfile, int sampleStep
                            std::max(leftSupport, rightSupport);
     double score = gapLength * std::sqrt(
         static_cast<double>(leftSupport) * rightSupport) * (0.75 + 0.25 * balance);
-    if (trackingActive && config.expectedGapWidthRatio >= 0.0) {
-      const double widthError = std::abs(candidateWidth - config.expectedGapWidthRatio);
+    if (trackingActive && expectedWidthForTracking >= 0.0) {
+      const double widthError = std::abs(candidateWidthForTracking -
+                                         expectedWidthForTracking);
       score *= 1.0 / (1.0 + std::max(0.0, config.trackingWidthWeight) * widthError * 20.0);
     }
     if (trackingActive && config.expectedAbsoluteCenterRatio >= 0.0 &&
@@ -855,6 +1099,9 @@ LaserGapDetection LaserGapDetector::detect(const QImage& image,
     frame->baselineSupportRatio = baseline.supportRatio;
     frame->baselineResidualPx = baseline.residualPx;
     frame->ridgeCrossPx = baseline.ridgeCrossPx;
+    frame->contourProfile = baseline.contourProfile;
+    frame->contourDisplacementThresholdPx = baseline.contourDisplacementThresholdPx;
+    frame->contourMinimumRunSamples = baseline.contourMinimumRunSamples;
     frame->rawProfile = baseline.profile;
     // An untrusted stripe must remain unobserved. Falling back to the
     // whole-height projection would reintroduce reflection-created gaps.
@@ -862,6 +1109,103 @@ LaserGapDetection LaserGapDetector::detect(const QImage& image,
     result = detectAlongAxis(baseline.profile, kSampleStep,
                              horizontal ? grayscale.width() : grayscale.height(),
                              backgroundLevel, horizontal, config, frame);
+    if (baseline.contourStartSample >= 0 && baseline.contourEndSample >= 0) {
+      const int axisLength = horizontal ? grayscale.width() : grayscale.height();
+      result.contourSupported = true;
+      result.contourStartPx = baseline.contourStartSample * kSampleStep;
+      result.contourEndPx = std::min(axisLength - 1,
+          (baseline.contourEndSample + 1) * kSampleStep - 1);
+      result.contourConfidence = baseline.contourConfidence;
+      bool contourPreferredByTrack = false;
+      if (result.valid && !result.edgeBreakFallback) {
+        const double gapCenter = (result.gapStartPx + result.gapEndPx) * 0.5;
+        const double contourCenter =
+            (result.contourStartPx + result.contourEndPx) * 0.5;
+        const double gapWidth = result.gapEndPx - result.gapStartPx + 1;
+        const double contourWidth = result.contourEndPx - result.contourStartPx + 1;
+        result.contourAgreesWithGap =
+            std::abs(gapCenter - contourCenter) <=
+                std::max(6.0, std::max(gapWidth, contourWidth) * 0.15) &&
+            std::min(gapWidth, contourWidth) >=
+                std::max(gapWidth, contourWidth) * 0.50;
+        result.contourConflict = !result.contourAgreesWithGap;
+        const bool hasTrackedIdentity = config.expectedAbsoluteCenterRatio >= 0.0 ||
+                                        config.expectedCenterRatio >= 0.0;
+        result.contourDominant = !hasTrackedIdentity &&
+            baseline.contourConfidence >= 0.060 &&
+            gapWidth < contourWidth * std::clamp(config.dominantGapMinimumRatio, 0.2, 0.8);
+        if (result.contourConflict &&
+            (config.expectedAbsoluteGapWidthRatio > 0.0 ||
+             (config.expectedGapWidthRatio > 0.0 &&
+              config.expectedLineStartRatio >= 0.0 &&
+              config.expectedLineEndRatio > config.expectedLineStartRatio)) &&
+            config.expectedAbsoluteCenterRatio >= 0.0 &&
+            config.expectedAbsoluteCenterRatio <= 1.0) {
+          const double expectedWidth = config.expectedAbsoluteGapWidthRatio > 0.0
+              ? config.expectedAbsoluteGapWidthRatio *
+                    std::max(1, axisLength - 1)
+              : config.expectedGapWidthRatio *
+                    (config.expectedLineEndRatio -
+                     config.expectedLineStartRatio) *
+                    std::max(1, axisLength - 1);
+          const double expectedCenter = config.expectedAbsoluteCenterRatio *
+              std::max(1, axisLength - 1);
+          const double gapWidthError =
+              std::abs(gapWidth - expectedWidth) / std::max(1.0, expectedWidth);
+          const double contourWidthError =
+              std::abs(contourWidth - expectedWidth) / std::max(1.0, expectedWidth);
+          // Candidate association may prefer a raised contour over a small
+          // surviving dark hole, but only using an established seam identity.
+          // A contour is deliberately capped at 0.075 confidence.  Therefore
+          // it must never replace an ordinary two-edge observation merely
+          // because its expected width is a better numerical match: require
+          // the raw observation to be genuinely weak and the contour to have
+          // strong geometric support.  The absolute-center/width gates above
+          // retain continuity with the confirmed seam identity. The result
+          // remains an auxiliary observation with reduced control authority.
+          constexpr double kMaximumRawConfidenceForContourOverride = 0.10;
+          constexpr double kMinimumContourConfidenceForOverride = 0.060;
+          const bool rawObservationIsWeak =
+              result.confidence < kMaximumRawConfidenceForContourOverride;
+          const bool contourObservationIsStrong =
+              baseline.contourConfidence >= kMinimumContourConfidenceForOverride;
+          contourPreferredByTrack =
+              rawObservationIsWeak && contourObservationIsStrong &&
+              gapWidthError > 0.45 &&
+              contourWidthError + 0.25 < gapWidthError &&
+              std::abs(contourCenter - expectedCenter) <=
+                  std::abs(gapCenter - expectedCenter) + axisLength * 0.01;
+        }
+      }
+      // A trusted two-sided intensity gap remains the primary observation.
+      // Use the same-image contour when that observation is missing, is a
+      // single inferred edge, or is weak and disagrees with the known seam
+      // identity. No stale center is manufactured: both ends below are
+      // measured from the current raw image.
+      if (!result.valid || result.edgeBreakFallback || contourPreferredByTrack ||
+          result.contourDominant) {
+        result.valid = true;
+        result.contourFallback = true;
+        result.edgeBreakFallback = false;
+        result.continuityRejected = false;
+        result.widthRejected = false;
+        result.gapStartPx = result.contourStartPx;
+        result.gapEndPx = result.contourEndPx;
+        result.lineStartPx = baseline.contourLineStartSample * kSampleStep;
+        result.lineEndPx = std::min(axisLength - 1,
+            (baseline.contourLineEndSample + 1) * kSampleStep - 1);
+        const double center = (result.gapStartPx + result.gapEndPx) * 0.5;
+        result.absoluteCenterRatio = std::clamp(
+            center / std::max(1, axisLength - 1), 0.0, 1.0);
+        result.normalizedCenter = std::clamp(
+            (center - result.lineStartPx) /
+                std::max(1, result.lineEndPx - result.lineStartPx),
+            0.0, 1.0);
+        result.confidence = baseline.contourConfidence;
+        result.supportingSamples = static_cast<int>(std::lround(
+            baseline.supportRatio * baseline.profile.size()));
+      }
+    }
     result.baselineSupported = true;
     result.baselineOffsetPx = baseline.offsetPx;
     result.baselineSlope = baseline.slope;

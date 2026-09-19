@@ -21,6 +21,7 @@ bool positiveFinite(double value) {
 constexpr double kMinimumPracticalTrackWidthM = 0.050;
 constexpr double kMinimumPracticalLinearAccelerationMps2 = 0.050;
 constexpr double kMinimumPracticalAngularAccelerationRadps2 = 0.10;
+constexpr double kInstalledMotorOutputToWheelRatio = 36.0;
 
 }  // namespace
 
@@ -188,6 +189,16 @@ DriveSettings DriveSettings::load(QSettings& settings) {
   if (settingsSchemaVersion < 3) {
     value.synchronizer.maximumCorrectionMps =
         defaults.synchronizer.maximumCorrectionMps;
+  }
+
+  // Schema 4 records the installed gearbox explicitly. Older builds shipped
+  // 100:1 as a placeholder and some schema-3 profiles were saved as 1:1;
+  // both values produce an incorrect wheel speed for the installed 36:1
+  // motor/axle assembly. Preserve other custom ratios.
+  if (settingsSchemaVersion < 4 &&
+      (std::abs(value.motorOutputToWheelRatio - 100.0) <= 1e-9 ||
+       std::abs(value.motorOutputToWheelRatio - 1.0) <= 1e-9)) {
+    value.motorOutputToWheelRatio = kInstalledMotorOutputToWheelRatio;
   }
 
   // Migrate the former shared motor bus configuration to both wheel ports.

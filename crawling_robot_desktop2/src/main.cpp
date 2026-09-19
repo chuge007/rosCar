@@ -28,6 +28,7 @@ int main(int argc, char* argv[]) {
   qRegisterMetaType<QImage>("QImage");
   qRegisterMetaType<crawling::LaserCorrectionSettings>("crawling::LaserCorrectionSettings");
   qRegisterMetaType<crawling::LaserCorrectionStatus>("crawling::LaserCorrectionStatus");
+  qRegisterMetaType<crawling::LaserGapDetection>("crawling::LaserGapDetection");
   qRegisterMetaType<crawling::LaserEdgeSample>("crawling::LaserEdgeSample");
   qRegisterMetaType<crawling::LaserPathFit>("crawling::LaserPathFit");
   qRegisterMetaType<QVector<crawling::LaserEdgeSample>>(
@@ -51,7 +52,17 @@ int main(int argc, char* argv[]) {
   crawling::AppLogger::write(QStringLiteral("SYSTEM.THREAD"),
                              QStringLiteral("event=thread_start module=DEVICE.CONTROL result=OK"));
 
-  auto* correction = new crawling::LaserCorrectionController(&application);
+  // Perception and feedback must not wait for UI painting or synchronous
+  // diagnostic file writes. All inputs and UI publications cross queues.
+  QThread correctionThread;
+  auto* correction = new crawling::LaserCorrectionController();
+  correction->moveToThread(&correctionThread);
+  QObject::connect(&correctionThread, &QThread::finished,
+                   correction, &QObject::deleteLater);
+  correctionThread.start();
+  crawling::AppLogger::write(
+      QStringLiteral("SYSTEM.THREAD"),
+      QStringLiteral("event=thread_start module=CORRECTION.CONTROL result=OK"));
 
   QThread trajectoryWriterThread;
   auto* trajectoryWriter = new crawling::LaserTrajectoryWriter();
@@ -125,6 +136,11 @@ int main(int argc, char* argv[]) {
   const int result = application.exec();
 
   window.shutdownControl();
+  correctionThread.quit();
+  correctionThread.wait();
+  crawling::AppLogger::write(
+      QStringLiteral("SYSTEM.THREAD"),
+      QStringLiteral("event=thread_stop module=CORRECTION.CONTROL result=OK"));
   crawling::AppLogger::write(
       QStringLiteral("SYSTEM.SHUTDOWN"),
       QStringLiteral("event=module_shutdown_complete module=DRIVE.CONTROL result=OK"));

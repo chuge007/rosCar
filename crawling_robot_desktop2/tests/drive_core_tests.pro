@@ -10,6 +10,7 @@ SOURCES += \
     ../src/drive_settings.cpp \
     ../src/laser_gap_detector.cpp \
     ../src/laser_path_estimator.cpp \
+    ../src/laser_seam_trajectory.cpp \
     ../src/laser_trajectory_renderer.cpp \
     ../src/laser_correction_controller.cpp \
     ../src/differential_mixer.cpp \
@@ -22,6 +23,7 @@ HEADERS += \
     ../src/drive_settings.h \
     ../src/laser_gap_detector.h \
     ../src/laser_path_estimator.h \
+    ../src/laser_seam_trajectory.h \
     ../src/laser_trajectory_renderer.h \
     ../src/laser_correction_controller.h \
     ../src/differential_mixer.h \

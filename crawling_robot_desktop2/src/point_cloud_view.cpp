@@ -124,7 +124,16 @@ void PointCloudView::paintEvent(QPaintEvent*) {
                          screenPoint(axisLast, detection_.baselineOffsetPx + detection_.baselineSlope * axisLast));
       }
       if (detection_.valid) {
-        const QColor gapColor(detection_.edgeBreakFallback ? "#ffaa44" : "#53ee82");
+        // Keep the visual mode consistent with the detector's authority:
+        // contour recovery is an auxiliary low-confidence observation, edge
+        // inference is the next fallback, and only the remaining case is a
+        // measured two-edge gap.  Contour must not be presented as a normal
+        // two-edge result because that makes a degraded frame look trusted.
+        const QColor gapColor(detection_.contourFallback
+                                  ? "#c58cff"
+                                  : (detection_.edgeBreakFallback
+                                         ? "#ffaa44"
+                                         : "#53ee82"));
         painter.setPen(QPen(gapColor, 2));
         for (int along : {detection_.gapStartPx, detection_.gapEndPx}) {
           painter.drawLine(screenPoint(along, 0), screenPoint(along, crossLast));
@@ -133,12 +142,22 @@ void PointCloudView::paintEvent(QPaintEvent*) {
         painter.setPen(QPen(gapColor, 1, Qt::DashLine));
         painter.drawLine(screenPoint(center, 0), screenPoint(center, crossLast));
       }
-      painter.setPen(detection_.valid ? QColor("#53ee82") : QColor("#ffaa44"));
+      painter.setPen(detection_.valid
+                         ? (detection_.contourFallback
+                                ? QColor("#c58cff")
+                                : (detection_.edgeBreakFallback
+                                       ? QColor("#ffaa44")
+                                       : QColor("#53ee82")))
+                         : QColor("#ffaa44"));
       painter.drawText(area.adjusted(8, 8, -8, -8), Qt::AlignTop | Qt::AlignLeft,
           detection_.valid
               ? CRAWLING_TEXT("检测焊缝 %1..%2 px / %3；青线=中心，黄线=主激光基线")
                     .arg(detection_.gapStartPx).arg(detection_.gapEndPx)
-                    .arg(detection_.edgeBreakFallback ? CRAWLING_TEXT("单边推断") : CRAWLING_TEXT("双边实测"))
+                    .arg(detection_.contourFallback
+                             ? CRAWLING_TEXT("轮廓辅助")
+                             : (detection_.edgeBreakFallback
+                                    ? CRAWLING_TEXT("单边推断")
+                                    : CRAWLING_TEXT("双边实测")))
               : CRAWLING_TEXT("当前帧未确认焊缝；青线=目标中心"));
       painter.restore();
     }

@@ -201,7 +201,7 @@ void MainWindow::shutdownControl() {
     inputTimer_->stop();
   }
   if (correction_) {
-    correction_->shutdown();
+    QMetaObject::invokeMethod(correction_, "shutdown", Qt::BlockingQueuedConnection);
   }
   QMetaObject::invokeMethod(controller_, "shutdown", Qt::BlockingQueuedConnection);
 }
@@ -361,7 +361,10 @@ void MainWindow::applyAllParameters() {
   persistent.setValue(CRAWLING_TEXT("laserCorrection/kp"), correctionSettings.proportionalGain);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/kd"), correctionSettings.derivativeGain);
   persistent.sync();
-  if (correction_) correction_->setSettings(correctionSettings);
+  if (correction_) {
+    QMetaObject::invokeMethod(correction_, "setSettings", Qt::QueuedConnection,
+                             Q_ARG(crawling::LaserCorrectionSettings, correctionSettings));
+  }
 
   if (connected_) {
     cancelMotionButtonPulses();
@@ -1178,12 +1181,13 @@ void MainWindow::bindController() {
   connect(correction_, &LaserCorrectionController::cameraObservationReady, this,
           [this](const QImage& image, const LaserGapDetection& detection) {
             if (pointCloud_) pointCloud_->setDetectionImage(image, detection);
-          });
+          }, Qt::QueuedConnection);
   connect(correction_, &LaserCorrectionController::commandChanged, controller_,
           &SynchronizedDriveController::setInputCommand, Qt::QueuedConnection);
   connect(correction_, &LaserCorrectionController::statusChanged, this,
-          &MainWindow::updateCorrectionStatus);
-  connect(correction_, &LaserCorrectionController::logMessage, this, &MainWindow::appendLog);
+          &MainWindow::updateCorrectionStatus, Qt::QueuedConnection);
+  connect(correction_, &LaserCorrectionController::logMessage, this,
+          &MainWindow::appendLog, Qt::QueuedConnection);
   connect(devices_, &DeviceController::sensorSettingsDetected, this,
           &MainWindow::applySensorDetection, Qt::QueuedConnection);
   connect(controller_, &SynchronizedDriveController::canSettingsDetected, this,
@@ -1311,7 +1315,8 @@ void MainWindow::startAutoCorrection() {
   persistent.setValue(CRAWLING_TEXT("laserCorrection/kp"), settings.proportionalGain);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/kd"), settings.derivativeGain);
   persistent.sync();
-  correction_->setSettings(settings);
+  QMetaObject::invokeMethod(correction_, "setSettings", Qt::QueuedConnection,
+                           Q_ARG(crawling::LaserCorrectionSettings, settings));
   cancelMotionButtonPulses();
   activeMotionKeys_.clear();
   keyboardMotionKeys_.clear();
@@ -1319,16 +1324,29 @@ void MainWindow::startAutoCorrection() {
                    QStringLiteral("event=start_auto_correction target=CORRECTION.CONTROL speed_mps=%1 segment_m=%2 kp=%3 kd=%4")
                        .arg(settings.targetSpeedMps).arg(settings.segmentLengthM)
                        .arg(settings.proportionalGain).arg(settings.derivativeGain));
-  correction_->setEnabled(true);
+  // Ownership changes at the click, before the worker's status arrives.
+  // Otherwise the manual timer can insert a zero command during startup.
+  autoCorrectionActive_ = true;
+  autoCorrectionStartPending_ = true;
+  autoStartButton_->setEnabled(false);
+  autoStopButton_->setEnabled(true);
+  QMetaObject::invokeMethod(correction_, "setEnabled", Qt::QueuedConnection,
+                           Q_ARG(bool, true));
 }
 void MainWindow::stopAutoCorrection() {
   if (!correction_) return;
   AppLogger::write(QStringLiteral("UI.OPERATION"),
                    QStringLiteral("event=stop_auto_correction target=CORRECTION.CONTROL"));
-  correction_->setEnabled(false);
+  QMetaObject::invokeMethod(correction_, "setEnabled", Qt::QueuedConnection,
+                           Q_ARG(bool, false));
 }
 void MainWindow::updateCorrectionStatus(const LaserCorrectionStatus& status) {
   if (!correctionStatusLabel_) return;
+  // The worker publishes its active acknowledgement before any subsequent
+  // stop/error. Earlier inactive messages cannot return ownership to manual
+  // input during this queued startup handshake.
+  if (autoCorrectionStartPending_ && !status.active) return;
+  if (status.active) autoCorrectionStartPending_ = false;
   const QString gapPosition = status.gapValid
                                    ? CRAWLING_TEXT("线内 %1%，全图 %2%（基准 %3%，中心 %4 px，%5，%6）")
                                          .arg(status.gapCenterRatio * 100.0, 0, 'f', 1)
@@ -1336,9 +1354,13 @@ void MainWindow::updateCorrectionStatus(const LaserCorrectionStatus& status) {
                                          .arg(status.referenceGapAbsoluteCenterRatio * 100.0, 0, 'f', 1)
                                          .arg((status.gapStartPx + status.gapEndPx) * 0.5,
                                               0, 'f', 1)
-                                         .arg(status.edgeBreakFallback
-                                                  ? CRAWLING_TEXT("边缘推断")
-                                                  : CRAWLING_TEXT("双边缘原始图"))
+                                         .arg(status.detectionHeld
+                                                  ? CRAWLING_TEXT("沿用/预测")
+                                                  : status.contourFallback
+                                                      ? CRAWLING_TEXT("轮廓辅助")
+                                                      : status.edgeBreakFallback
+                                                          ? CRAWLING_TEXT("边缘推断")
+                                                          : CRAWLING_TEXT("双边缘原始图"))
                                          .arg(status.horizontalLaser ? CRAWLING_TEXT("横向激光线")
                                                                      : CRAWLING_TEXT("纵向激光线"))
                                   : CRAWLING_TEXT("--");

@@ -3,6 +3,7 @@
 #include "drive_types.h"
 #include "laser_gap_detector.h"
 #include "laser_path_estimator.h"
+#include "laser_seam_trajectory.h"
 
 #include <QElapsedTimer>
 #include <QImage>
@@ -82,6 +83,10 @@ struct LaserCorrectionStatus {
   double gapCenterRatio = 0.5;
   double referenceGapAbsoluteCenterRatio = 0.5;
   bool edgeBreakFallback = false;
+  // The current image supplied a sustained displaced laser contour rather
+  // than a dark interruption in the fitted baseline band. It is a live,
+  // lower-authority observation, not the same as a held previous frame.
+  bool contourFallback = false;
   bool detectionHeld = false;
   bool baselineSupported = false;
   double baselineOffsetPx = 0.0;
@@ -184,7 +189,8 @@ class LaserCorrectionController final : public QObject {
   void advanceFromTelemetry(qint64 now);
   void appendCurrentEdgeSample();
   void logRawFrameDiagnostic(const LaserRawFrameDiagnostic& diagnostic,
-                             const LaserGapDetection& detection, qint64 now);
+                             const LaserGapDetection& detection,
+                             const LaserGapDetectorConfig& config, qint64 now);
   void queueRawFrame(const QImage& image, const LaserRawFrameDiagnostic& diagnostic,
                      const LaserGapDetection& detection,
                      const LaserGapDetectorConfig& config, qint64 now);
@@ -197,6 +203,9 @@ class LaserCorrectionController final : public QObject {
   void setPhase(Phase phase, const QString& reason, bool writeLog = true);
   QString phaseName(Phase phase) const;
   QString runningReason() const;
+  double updateForwardSpeedSupervisor(qint64 now, double deltaSeconds,
+                                      double boundaryScale);
+  double laserBoundaryMargin(qint64 now) const;
   void applyCommand(double targetLinearMps, double targetAngularRadps,
                     double deltaSeconds,
                     double curvatureLimitRadPerM = -1.0);
@@ -213,6 +222,8 @@ class LaserCorrectionController final : public QObject {
   qint64 phaseStartedMs_ = -1;
   qint64 lastImageMs_ = -1;
   qint64 lastValidDetectionMs_ = -1;
+  double lastObservedGapAbsoluteCenterRatio_ = 0.5;
+  bool lastObservedWasContour_ = false;
   qint64 lastTelemetryMs_ = -1;
   qint64 previousControlMs_ = -1;
   qint64 lastCommandMs_ = -1;
@@ -270,6 +281,7 @@ class LaserCorrectionController final : public QObject {
   qint64 lastDetectionRejectLogMs_ = -1;
   bool detectionHeld_ = false;
   bool detectionEdgeBreakFallback_ = false;
+  bool trajectoryPredictionActive_ = false;
   double desiredHeadingRad_ = 0.0;
   double filteredYawRateRadps_ = 0.0;
   // Camera-center feedback is short-filtered and measured relative to the
@@ -294,6 +306,16 @@ class LaserCorrectionController final : public QObject {
   int pendingFitDirectionCount_ = 0;
   double currentLinearMps_ = 0.0;
   double currentAngularRadps_ = 0.0;
+  // One supervisory loop owns forward-speed authority.  Perception quality
+  // and laser-boundary protection produce constraints, but they are merged
+  // once here instead of being multiplied independently in the steering
+  // controller.
+  double speedSupervisorScale_ = 1.0;
+  double speedSupervisorBoundaryScale_ = 1.0;
+  double speedSupervisorObservationScale_ = 1.0;
+  qint64 speedSupervisorObservationAgeMs_ = -1;
+  qint64 speedSupervisorRecoverySinceMs_ = -1;
+  QString speedSupervisorReason_;
   bool angularLimitLogged_ = false;
   int trackingFitFailureCount_ = 0;
   int controlDiagnosticSequence_ = 0;
@@ -304,11 +326,19 @@ class LaserCorrectionController final : public QObject {
   int angularDirectionChangeCount_ = 0;
   int lastAngularDirection_ = 0;
   int steeringMismatchCount_ = 0;
+  // Small center-error sign changes are usually image/encoder quantization,
+  // not a real request to reverse the turn. Require persistence near center
+  // while retaining immediate response for a large displacement.
+  int centerControlDirection_ = 0;
+  int pendingCenterControlDirection_ = 0;
+  int pendingCenterControlDirectionCount_ = 0;
+  quint64 lastCenterDirectionCameraSequence_ = 0;
   // The detector must see the same dominant two-sided gap repeatedly before
   // the first survey is allowed to move. This prevents a startup reflection
   // or one noisy frame from becoming the tracked weld identity.
   int initialGapConfirmationCount_ = 0;
   bool initialGapConfirmationHorizontal_ = true;
+  bool initialGapConfirmationContour_ = false;
   double pendingInitialGapAbsoluteCenterRatio_ = 0.5;
   double pendingInitialGapWidthRatio_ = 0.0;
   bool boundaryProtectionLogged_ = false;
@@ -328,6 +358,10 @@ class LaserCorrectionController final : public QObject {
   QVector<LaserEdgeSample> visualSamples_;
   QVector<LaserEdgeSample> guidanceSamples_;
   QVector<double> guidanceTravelSamples_;
+  // Independent association memory survives segment and detector recovery
+  // resets. It contains real observations only and expires its own priors.
+  LaserSeamTrajectory seamTrajectory_;
+  LaserSeamPrediction seamPrediction_;
   double lastVisualLongitudinalM_ = -1.0;
   double lastGuidanceLongitudinalM_ = -1.0;
   quint64 trajectorySessionId_ = 0;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QImage>
+#include <QMetaType>
 #include <QVector>
 
 namespace crawling {
@@ -27,6 +28,11 @@ struct LaserGapDetectorConfig {
   // Full-image ratios provide a stable coordinate system when the detected
   // laser-line endpoints change because of reflections or partial occlusion.
   double expectedAbsoluteCenterRatio = -1.0;
+  // Gap width in the full raw-image axis. This is intentionally separate from
+  // expectedGapWidthRatio, which is relative to the currently visible laser
+  // span. When an optical end is clipped, the visible-span ratio changes even
+  // though the physical weld width has not changed.
+  double expectedAbsoluteGapWidthRatio = -1.0;
   double referenceAbsoluteCenterRatio = -1.0;
   // Keep the full-image continuity gate strict even at an optical edge. A
   // clipped edge is handled by inferFromVisibleEdge(), but it still must move
@@ -79,6 +85,21 @@ struct LaserGapDetection {
   int supportingSamples = 0;
   bool continuityRejected = false;
   bool edgeBreakFallback = false;
+  // A raised/occluded weld can move the laser return outside the fitted
+  // baseline band, so no two-sided intensity gap is present. In that case
+  // contourFallback identifies a sustained displaced laser ridge. It is an
+  // auxiliary observation and intentionally carries a lower confidence than
+  // a measured two-edge gap.
+  bool contourSupported = false;
+  bool contourFallback = false;
+  bool contourAgreesWithGap = false;
+  bool contourConflict = false;
+  // At acquisition, a much wider supported contour can be the main weld
+  // while a smaller, perfectly dark hole is only surface noise.
+  bool contourDominant = false;
+  double contourConfidence = 0.0;
+  int contourStartPx = -1;
+  int contourEndPx = -1;
   bool widthRejected = false;
 };
 
@@ -112,6 +133,12 @@ struct LaserRawFrameDiagnostic {
   QVector<int> rawProfile;
   QVector<int> filteredProfile;
   QVector<bool> presentProfile;
+  // Samples whose strongest laser ridge is persistently displaced from the
+  // fitted baseline. This is the raw-image contour signal used to recover a
+  // raised weld when the baseline stripe itself is temporarily absent.
+  QVector<bool> contourProfile;
+  int contourMinimumRunSamples = 0;
+  int contourDisplacementThresholdPx = 0;
 };
 
 class LaserGapDetector final {
@@ -122,3 +149,5 @@ class LaserGapDetector final {
 };
 
 }  // namespace crawling
+
+Q_DECLARE_METATYPE(crawling::LaserGapDetection)

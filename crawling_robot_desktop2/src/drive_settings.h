@@ -11,7 +11,7 @@ namespace crawling {
 
 struct DriveSettings {
   static constexpr int kMinimumFeedbackTimeoutMs = 800;
-  static constexpr int kCurrentSettingsSchemaVersion = 3;
+  static constexpr int kCurrentSettingsSchemaVersion = 4;
 
   // Legacy shared-port fields are retained for loading older settings files.
   QString serialPort;
@@ -38,8 +38,9 @@ struct DriveSettings {
 
   double wheelRadiusM = 0.040;
   double trackWidthM = 0.300;
-  // Motor-shaft revolutions per one wheel revolution.
-  double motorOutputToWheelRatio = 100.0;
+  // Motor-shaft revolutions per one wheel revolution. The installed MWD
+  // gearbox is 36:1 and the motor output shaft is coupled 1:1 to the wheel.
+  double motorOutputToWheelRatio = 36.0;
 
   double maximumWheelSpeedMps = 0.30;
   double maximumLinearSpeedMps = 0.15;

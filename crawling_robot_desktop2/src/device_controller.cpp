@@ -22,7 +22,7 @@
 namespace crawling {
 namespace {
 constexpr qint64 kPointCloudPublishIntervalMs = 33;
-constexpr qint64 kCorrectionImagePublishIntervalMs = 50;
+constexpr qint64 kPreviewImagePublishIntervalMs = 50;
 constexpr std::size_t kMaxPointCloudSamples = 1000;
 }  // namespace
 
@@ -609,14 +609,18 @@ void DeviceController::captureCameraFrame() {
       // the sampled points before the latest-frame buffer takes ownership.
       emit pointCloudProfileChanged(profile);
     }
-    if (imagePreviewAvailable &&
-        now - lastCorrectionImageEmitMs_ >= kCorrectionImagePublishIntervalMs) {
-      lastCorrectionImageEmitMs_ = now;
-      // QImage is implicitly shared. A queued receiver keeps the decoded frame
-      // alive while the GUI preview buffer takes ownership below.
-      emit cameraImageFrameChanged(cameraImage);
+    if (imagePreviewAvailable) {
+      // Perception must consume every decoded image produced directly from the
+      // SDK frame.  Keep it independent from the desktop preview throttle: the
+      // preview is a display artifact and may be refreshed less often.
       emit correctionCameraFrameReady(cameraImage, frame->frame_number,
                                       frameReceivedMs);
+      if (now - lastPreviewImageEmitMs_ >= kPreviewImagePublishIntervalMs) {
+        lastPreviewImageEmitMs_ = now;
+        // QImage is implicitly shared. A queued receiver keeps the decoded frame
+        // alive while the GUI preview buffer takes ownership below.
+        emit cameraImageFrameChanged(cameraImage);
+      }
     }
     bool notifyPreview = false;
     if (!imagePreviewAvailable) {

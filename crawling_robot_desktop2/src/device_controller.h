@@ -60,7 +60,7 @@ class DeviceController final : public QObject {
   QTimer* cameraTimer_ = nullptr;
   std::unique_ptr<mv3dlp::Driver> camera_;
   qint64 lastPointCloudEmitMs_ = -1000;
-  qint64 lastCorrectionImageEmitMs_ = -1000;
+  qint64 lastPreviewImageEmitMs_ = -1000;
   qint64 cameraAcquisitionStartedMs_ = 0;
   qint64 lastCameraFrameMs_ = 0;
   qint64 lastImuSampleMs_ = 0;

@@ -119,6 +119,7 @@ class MainWindow final : public QMainWindow {
   bool connected_ = false;
   bool isClosing_ = false;
   bool autoCorrectionActive_ = false;
+  bool autoCorrectionStartPending_ = false;
   DriveState currentState_ = DriveState::Disconnected;
 
   QComboBox* serialPortBox_ = nullptr;
