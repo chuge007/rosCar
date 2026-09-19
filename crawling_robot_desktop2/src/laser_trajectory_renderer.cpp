@@ -2,11 +2,16 @@
 #include "utf8_compat.h"
 
 #include <QCoreApplication>
+#include <QBuffer>
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QFile>
 #include <QFont>
 #include <QGuiApplication>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPolygonF>
@@ -30,6 +35,11 @@ constexpr int kMaximumHeightPx = 5000;
 constexpr double kNominalPixelsPerMeter = 4000.0;
 constexpr double kGridSpacingM = 0.05;
 constexpr int kMaximumStoredSessions = 3;
+// Raw snapshots share the existing three-session retention, but must not grow
+// indefinitely during a long run. Preserve the first evidence rather than
+// silently overwriting it when either per-session limit is reached.
+constexpr int kMaximumRawFrames = 2000;
+constexpr qint64 kMaximumRawFrameBytes = 512LL * 1024 * 1024;
 
 const QColor kBackground(18, 22, 27);
 const QColor kPlotBackground(7, 10, 13);
@@ -441,6 +451,8 @@ LaserTrajectoryWriter::LaserTrajectoryWriter(QObject* parent)
 
 void LaserTrajectoryWriter::beginSession(quint64 sessionId) {
   currentSessionId_ = sessionId;
+  rawFrameCount_ = 0;
+  rawFrameBytes_ = 0;
   QString error;
   if (!renderer_.startSession(&error)) {
     emit saveFailed(sessionId, error);
@@ -463,8 +475,111 @@ void LaserTrajectoryWriter::saveSegment(
   emit imageSaved(sessionId, result.segmentPath);
 }
 
+void LaserTrajectoryWriter::saveRawFrame(
+    quint64 sessionId, quint64 frameSequence, const QImage& image,
+    const QString& metadataJson) {
+  // Every request, including a stale queued request, must release the caller's
+  // single-frame backpressure slot. Encoding and all file I/O run on this
+  // writer's thread; the supplied frame is never resized or painted on.
+  const auto fail = [&](const QString& error) {
+    emit rawFrameSaved(sessionId, frameSequence, QString(), error);
+  };
+  if (sessionId == 0 || sessionId != currentSessionId_ ||
+      renderer_.sessionDirectory().isEmpty()) {
+    fail(QStringLiteral("raw_frame_invalid_session"));
+    return;
+  }
+  if (image.isNull()) {
+    fail(QStringLiteral("raw_frame_empty_image"));
+    return;
+  }
+  if (rawFrameCount_ >= kMaximumRawFrames ||
+      rawFrameBytes_ >= kMaximumRawFrameBytes) {
+    fail(QStringLiteral("raw_frame_archive_limit frames=%1 bytes=%2")
+             .arg(rawFrameCount_).arg(rawFrameBytes_));
+    return;
+  }
+
+  QJsonParseError parseError;
+  const QJsonDocument metadata = QJsonDocument::fromJson(
+      metadataJson.toUtf8(), &parseError);
+  if (parseError.error != QJsonParseError::NoError || !metadata.isObject()) {
+    fail(QStringLiteral("raw_frame_invalid_metadata: %1")
+             .arg(parseError.errorString()));
+    return;
+  }
+  const QString directory = QDir(renderer_.sessionDirectory()).filePath(
+      QStringLiteral("raw_frames"));
+  if (!QDir().mkpath(directory)) {
+    fail(QStringLiteral("raw_frame_directory_failed: %1").arg(directory));
+    return;
+  }
+  const QString imageName = QStringLiteral("frame_%1.png").arg(
+      frameSequence, 10, 10, QLatin1Char('0'));
+  const QString imagePath = QDir(directory).filePath(imageName);
+  if (QFileInfo::exists(imagePath)) {
+    fail(QStringLiteral("raw_frame_duplicate: %1").arg(imagePath));
+    return;
+  }
+
+  QByteArray png;
+  QBuffer pngBuffer(&png);
+  if (!pngBuffer.open(QIODevice::WriteOnly) || !image.save(&pngBuffer, "PNG")) {
+    fail(QStringLiteral("raw_frame_png_encode_failed"));
+    return;
+  }
+  QJsonObject record;
+  record.insert(QStringLiteral("schema_version"), 1);
+  // Strings preserve all 64 bits in tools whose JSON numbers use doubles.
+  record.insert(QStringLiteral("session_id"), QString::number(sessionId));
+  record.insert(QStringLiteral("frame_sequence"), QString::number(frameSequence));
+  record.insert(QStringLiteral("image"), imageName);
+  record.insert(QStringLiteral("image_width"), image.width());
+  record.insert(QStringLiteral("image_height"), image.height());
+  record.insert(QStringLiteral("image_format"), static_cast<int>(image.format()));
+  record.insert(QStringLiteral("metadata"), metadata.object());
+  QByteArray jsonLine = QJsonDocument(record).toJson(QJsonDocument::Compact);
+  jsonLine.append('\n');
+  const qint64 addedBytes = static_cast<qint64>(png.size()) + jsonLine.size();
+  if (addedBytes > kMaximumRawFrameBytes - rawFrameBytes_) {
+    fail(QStringLiteral("raw_frame_archive_limit frames=%1 bytes=%2 next_bytes=%3")
+             .arg(rawFrameCount_).arg(rawFrameBytes_).arg(addedBytes));
+    return;
+  }
+
+  QFile indexFile(QDir(directory).filePath(QStringLiteral("frames.jsonl")));
+  if (!indexFile.open(QIODevice::WriteOnly | QIODevice::Append)) {
+    fail(QStringLiteral("raw_frame_index_open_failed: %1")
+             .arg(indexFile.errorString()));
+    return;
+  }
+  QSaveFile imageFile(imagePath);
+  if (!imageFile.open(QIODevice::WriteOnly) ||
+      imageFile.write(png) != png.size() || !imageFile.commit()) {
+    fail(QStringLiteral("raw_frame_png_write_failed: %1")
+             .arg(imageFile.errorString()));
+    return;
+  }
+  const qint64 previousIndexSize = indexFile.size();
+  if (indexFile.write(jsonLine) != jsonLine.size() || !indexFile.flush()) {
+    const QString writeError = indexFile.errorString();
+    // Roll back only this request's appended record and newly-created image.
+    // Never leave a successful acknowledgement without matching metadata.
+    const bool indexRestored = indexFile.resize(previousIndexSize);
+    const bool imageRemoved = QFile::remove(imagePath);
+    fail(QStringLiteral("raw_frame_index_write_failed: %1 index_restored=%2 image_removed=%3")
+             .arg(writeError).arg(indexRestored ? 1 : 0).arg(imageRemoved ? 1 : 0));
+    return;
+  }
+  ++rawFrameCount_;
+  rawFrameBytes_ += addedBytes;
+  emit rawFrameSaved(sessionId, frameSequence, imagePath, QString());
+}
+
 void LaserTrajectoryWriter::shutdown() {
   currentSessionId_ = 0;
+  rawFrameCount_ = 0;
+  rawFrameBytes_ = 0;
   renderer_.reset();
 }
 

@@ -8,7 +8,12 @@
 namespace crawling {
 namespace {
 
-constexpr int kMotorCommunicationIntervalMs = 334;
+// The correction loop is fed by the raw image at roughly 20 Hz. A 334 ms
+// command period leaves the chassis moving several millimetres before a new
+// turn command reaches the motors, which is enough to overshoot a narrow weld.
+// Both wheels use independent RS485 ports, so 10 Hz leaves bus margin while
+// keeping the steering feedback responsive.
+constexpr int kMotorCommunicationIntervalMs = 100;
 constexpr double kMotionEpsilonMps = 1e-9;
 constexpr bool kMotorOutputEnabled = true;
 
@@ -93,7 +98,7 @@ void SynchronizedDriveController::connectAdapter(const DriveSettings& settings) 
                       .arg(wheelMotors_.lastRightHoldAngleHundredthDegree() / 100.0,
                            0, 'f', 2));
   emit logMessage(QStringLiteral(
-      "event=motor_communication_profile cyclic_hz=3 interval_ms=%1 "
+      "event=motor_communication_profile cyclic_hz=10 interval_ms=%1 "
       "feedback_timeout_ms=%2 mode=A2_REPLY_WHILE_MOVING_9C_WHILE_STOPPED")
                       .arg(kMotorCommunicationIntervalMs)
                       .arg(settings_.feedbackTimeoutMs));

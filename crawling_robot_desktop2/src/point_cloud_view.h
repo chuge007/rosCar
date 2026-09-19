@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <QImage>
+#include "laser_gap_detector.h"
 #include <QPoint>
 #include <QVector>
 #include <QVector3D>
@@ -14,6 +15,7 @@ class PointCloudView final : public QWidget {
  public slots:
   void setPoints(const QVector<QVector3D>& points);
   void setImage(const QImage& image);
+  void setDetectionImage(const QImage& image, const LaserGapDetection& detection);
   void setProjectionPlane(int plane);
  protected:
   void paintEvent(QPaintEvent* event) override;
@@ -23,6 +25,8 @@ class PointCloudView final : public QWidget {
   QVector<QVector3D> points_;
   QVector<QPoint> projectedPoints_;
   QImage image_;
+  LaserGapDetection detection_;
+  bool showDetection_ = false;
   double minHorizontal_ = 0.0;
   double maxHorizontal_ = 1.0;
   double minVertical_ = 0.0;

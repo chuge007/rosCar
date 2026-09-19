@@ -41,6 +41,11 @@ class DeviceController final : public QObject {
   void pointCloudProfileChanged(const QVector<QVector3D>& points);
   void pointCloudProfileReady();
   void cameraImageFrameChanged(const QImage& image);
+  // SDK identity and host receive time travel with the exact decoded image.
+  // receivedAtEpochMs is measured after fetch, before decoding; it is not the
+  // camera exposure time. Consumers can detect duplicates and queue delay.
+  void correctionCameraFrameReady(const QImage& image, quint32 sourceFrameNumber,
+                                  qint64 receivedAtEpochMs);
   void cameraImageReady();
   void logMessage(const QString& message);
  private slots:

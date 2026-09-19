@@ -193,6 +193,8 @@ class MainWindow final : public QMainWindow {
   QDoubleSpinBox* correctionSegmentBox_ = nullptr;
   QDoubleSpinBox* correctionKpBox_ = nullptr;
   QDoubleSpinBox* correctionKdBox_ = nullptr;
+  QSlider* correctionKpSlider_ = nullptr;
+  QSlider* correctionKdSlider_ = nullptr;
   QPushButton* autoStartButton_ = nullptr;
   QPushButton* autoStopButton_ = nullptr;
   QLabel* correctionStatusLabel_ = nullptr;

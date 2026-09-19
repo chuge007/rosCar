@@ -12,8 +12,11 @@
 
 namespace crawling {
 namespace {
-constexpr qint64 kMaximumBytes = 2 * 1024 * 1024;
-constexpr qint64 kRetainedBytes = 1536 * 1024;
+// Raw-image correction diagnostics are intentionally detailed enough to
+// replay the laser profile. Retain a complete correction run instead of
+// rotating away its initial survey after only a few minutes.
+constexpr qint64 kMaximumBytes = 16 * 1024 * 1024;
+constexpr qint64 kRetainedBytes = 12 * 1024 * 1024;
 QMutex& loggerMutex() { static QMutex mutex; return mutex; }
 quint64& logSequence() { static quint64 sequence = 0; return sequence; }
 }

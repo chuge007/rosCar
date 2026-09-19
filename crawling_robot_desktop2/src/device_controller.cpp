@@ -615,6 +615,8 @@ void DeviceController::captureCameraFrame() {
       // QImage is implicitly shared. A queued receiver keeps the decoded frame
       // alive while the GUI preview buffer takes ownership below.
       emit cameraImageFrameChanged(cameraImage);
+      emit correctionCameraFrameReady(cameraImage, frame->frame_number,
+                                      frameReceivedMs);
     }
     bool notifyPreview = false;
     if (!imagePreviewAvailable) {

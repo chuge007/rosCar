@@ -29,6 +29,7 @@
 #include <QScrollArea>
 #include <QSerialPortInfo>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSlider>
 #include <QSpinBox>
@@ -989,17 +990,65 @@ void MainWindow::buildInterface() {
   auto* correctionLayout = new QGridLayout(correctionGroup);
   const QStringList correctionLabels = {
       CRAWLING_TEXT("跟踪速度 (mm/s)"), CRAWLING_TEXT("分段距离 (mm)"),
-      CRAWLING_TEXT("角度比例 Kp"), CRAWLING_TEXT("角度微分 Kd")};
+      CRAWLING_TEXT("航向辅助 Kp"), CRAWLING_TEXT("转向阻尼 Kd")};
   correctionSpeedBox_ = makeDoubleSpin(5.0, 150.0, 1.0, 3, correctionGroup);
   correctionSpeedBox_->setValue(5.0);
   correctionSegmentBox_ = makeDoubleSpin(20.0, 2000.0, 10.0, 1, correctionGroup);
   correctionSegmentBox_->setValue(100.0);
   correctionKpBox_ = makeDoubleSpin(0.000, 10.000, 0.010, 3, correctionGroup);
   correctionKpBox_->setValue(3.0);
-  correctionKdBox_ = makeDoubleSpin(0.000, 5.000, 0.010, 3, correctionGroup);
+  correctionKdBox_ = makeDoubleSpin(0.000, 2.000, 0.010, 3, correctionGroup);
   correctionKdBox_->setValue(0.12);
+  const auto makeGainControl = [this, correctionGroup](
+      QDoubleSpinBox* box, QSlider*& slider, const QString& name,
+      const QString& description) {
+    auto* control = new QWidget(correctionGroup);
+    auto* layout = new QVBoxLayout(control);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(4);
+    auto* sliderRow = new QHBoxLayout;
+    slider = new QSlider(Qt::Horizontal, control);
+    // Integer ticks retain the existing 0.001 precision; keyboard arrows
+    // change by 0.01 and Page Up/Down change by 0.10.
+    slider->setRange(qRound(box->minimum() * 1000.0),
+                     qRound(box->maximum() * 1000.0));
+    slider->setSingleStep(10);
+    slider->setPageStep(100);
+    slider->setValue(qRound(box->value() * 1000.0));
+    slider->setTracking(true);
+    slider->setFocusPolicy(Qt::StrongFocus);
+    slider->setAccessibleName(name);
+    const QString tooltip = description + CRAWLING_TEXT(
+        "\n拖动调节；方向键每次 0.01，Page Up/Down 每次 0.10。"
+        "也可输入精确数值。修改后点击“保存并应用全部参数”或启动自动纠偏时生效。");
+    slider->setToolTip(tooltip);
+    box->setToolTip(tooltip);
+    box->setAccessibleName(name + CRAWLING_TEXT("数值"));
+    sliderRow->addWidget(new QLabel(QString::number(box->minimum(), 'f', 0), control));
+    sliderRow->addWidget(slider, 1);
+    sliderRow->addWidget(new QLabel(QString::number(box->maximum(), 'f', 0), control));
+    layout->addLayout(sliderRow);
+    layout->addWidget(box);
+    connect(slider, &QSlider::valueChanged, this, [box](int value) {
+      box->setValue(value / 1000.0);
+    });
+    connect(box, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+            [slider](double value) {
+              const QSignalBlocker blocker(slider);
+              slider->setValue(qRound(value * 1000.0));
+            });
+    return control;
+  };
+  QWidget* correctionKpControl = makeGainControl(
+      correctionKpBox_, correctionKpSlider_, CRAWLING_TEXT("航向辅助 Kp"),
+      CRAWLING_TEXT("范围 0 到 10。调节滚动点云航向误差的辅助响应；"
+                    "增大时小航向误差响应更强，0 表示关闭该比例辅助。"));
+  QWidget* correctionKdControl = makeGainControl(
+      correctionKdBox_, correctionKdSlider_, CRAWLING_TEXT("转向阻尼 Kd"),
+      CRAWLING_TEXT("范围 0 到 2。依据左右轮反馈的转动速度施加反向阻尼，"
+                    "帮助减小过冲；过大可能降低转向响应，0 表示关闭阻尼。"));
   const QList<QWidget*> correctionControls = {
-      correctionSpeedBox_, correctionSegmentBox_, correctionKpBox_, correctionKdBox_};
+      correctionSpeedBox_, correctionSegmentBox_, correctionKpControl, correctionKdControl};
   for (int column = 0; column < correctionLabels.size(); ++column) {
     correctionLayout->addWidget(new QLabel(correctionLabels.at(column), correctionGroup),
                                 0, column);
@@ -1116,13 +1165,20 @@ void MainWindow::bindController() {
   connect(devices_, &DeviceController::pointCloudProfileReady, this,
           &MainWindow::updatePointCloudReady, Qt::QueuedConnection);
   connect(devices_, &DeviceController::cameraImageReady, this, [this]() {
-    if (pointCloud_ && devices_) pointCloud_->setImage(devices_->takeLatestCameraImage());
+    if (devices_) {
+      const QImage image = devices_->takeLatestCameraImage();
+      if (pointCloud_ && !autoCorrectionActive_) pointCloud_->setImage(image);
+    }
     if (pointCloudGroup_) pointCloudGroup_->setTitle(CRAWLING_TEXT("线激光原始图像预览"));
   }, Qt::QueuedConnection);
   connect(pointCloudPlaneBox_, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &MainWindow::setPointCloudPlane);
-  connect(devices_, &DeviceController::cameraImageFrameChanged, correction_,
-          &LaserCorrectionController::processCameraImage, Qt::QueuedConnection);
+  connect(devices_, &DeviceController::correctionCameraFrameReady, correction_,
+          &LaserCorrectionController::processCameraFrame, Qt::QueuedConnection);
+  connect(correction_, &LaserCorrectionController::cameraObservationReady, this,
+          [this](const QImage& image, const LaserGapDetection& detection) {
+            if (pointCloud_) pointCloud_->setDetectionImage(image, detection);
+          });
   connect(correction_, &LaserCorrectionController::commandChanged, controller_,
           &SynchronizedDriveController::setInputCommand, Qt::QueuedConnection);
   connect(correction_, &LaserCorrectionController::statusChanged, this,
@@ -1274,18 +1330,23 @@ void MainWindow::stopAutoCorrection() {
 void MainWindow::updateCorrectionStatus(const LaserCorrectionStatus& status) {
   if (!correctionStatusLabel_) return;
   const QString gapPosition = status.gapValid
-                                  ? CRAWLING_TEXT("%1%（中心 %2 px，%3）")
-                                        .arg(status.gapCenterRatio * 100.0, 0, 'f', 1)
-                                        .arg((status.gapStartPx + status.gapEndPx) * 0.5,
-                                             0, 'f', 1)
-                                        .arg(status.horizontalLaser ? CRAWLING_TEXT("横向激光线")
-                                                                    : CRAWLING_TEXT("纵向激光线"))
+                                   ? CRAWLING_TEXT("线内 %1%，全图 %2%（基准 %3%，中心 %4 px，%5，%6）")
+                                         .arg(status.gapCenterRatio * 100.0, 0, 'f', 1)
+                                         .arg(status.gapAbsoluteCenterRatio * 100.0, 0, 'f', 1)
+                                         .arg(status.referenceGapAbsoluteCenterRatio * 100.0, 0, 'f', 1)
+                                         .arg((status.gapStartPx + status.gapEndPx) * 0.5,
+                                              0, 'f', 1)
+                                         .arg(status.edgeBreakFallback
+                                                  ? CRAWLING_TEXT("边缘推断")
+                                                  : CRAWLING_TEXT("双边缘原始图"))
+                                         .arg(status.horizontalLaser ? CRAWLING_TEXT("横向激光线")
+                                                                     : CRAWLING_TEXT("纵向激光线"))
                                   : CRAWLING_TEXT("--");
   const QString trajectoryImage = status.lastTrajectoryImage.isEmpty()
                                       ? CRAWLING_TEXT("等待本段完成")
                                       : QFileInfo(status.lastTrajectoryImage).fileName();
   correctionStatusLabel_->setText(
-      CRAWLING_TEXT("%1 [%2]\n断口：%3，位置：%4，左右边缘：%5 / %6 mm，置信度：%7\n分段：%8 mm，样本：%9，实际偏差角：%10°，航向误差：%11°，RMS：%12 mm，周期：%13\n命令：%14 mm/s，%15 deg/s，点云图：%16")
+       CRAWLING_TEXT("%1 [%2]\n断口：%3，位置：%4，车体左右边缘：%5 / %6 mm，置信度：%7\n分段：%8 mm，样本：%9，车体中心偏差：%10 mm，实际偏差角：%11°，航向误差：%12°，RMS：%13 mm，周期：%14\n命令：%15 mm/s，%16 deg/s，点云图：%17")
           .arg(status.reason)
           .arg(status.phase)
           .arg(status.gapValid ? CRAWLING_TEXT("有效") : CRAWLING_TEXT("无效"))
@@ -1295,12 +1356,13 @@ void MainWindow::updateCorrectionStatus(const LaserCorrectionStatus& status) {
           .arg(status.confidence, 0, 'f', 2)
           .arg(status.segmentProgressM * kMillimetersPerMeter, 0, 'f', 1)
           .arg(status.collectedSamples)
-          .arg(status.fittedAngleRad * kDegreesPerRadian, 0, 'f', 2)
-          .arg(status.headingErrorRad * kDegreesPerRadian, 0, 'f', 2)
-          .arg(status.fitRmsErrorM * kMillimetersPerMeter, 0, 'f', 2)
-          .arg(status.cycleCount)
-          .arg(status.linearCommandMps * kMillimetersPerMeter, 0, 'f', 1)
-          .arg(status.angularCommandRadps * kDegreesPerRadian, 0, 'f', 1)
+           .arg(status.laserCenterErrorM * kMillimetersPerMeter, 0, 'f', 1)
+           .arg(status.fittedAngleRad * kDegreesPerRadian, 0, 'f', 2)
+           .arg(status.headingErrorRad * kDegreesPerRadian, 0, 'f', 2)
+           .arg(status.fitRmsErrorM * kMillimetersPerMeter, 0, 'f', 2)
+           .arg(status.cycleCount)
+           .arg(status.linearCommandMps * kMillimetersPerMeter, 0, 'f', 1)
+           .arg(status.angularCommandRadps * kDegreesPerRadian, 0, 'f', 1)
           .arg(trajectoryImage));
   autoStartButton_->setEnabled(!status.active); autoStopButton_->setEnabled(status.active);
   autoCorrectionActive_ = status.active;

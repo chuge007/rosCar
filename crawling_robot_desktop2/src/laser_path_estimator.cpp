@@ -13,6 +13,12 @@ struct Line {
   double intercept = 0.0;
 };
 
+double edgeLongitudinal(const LaserEdgeSample& sample, bool leftEdge) {
+  const double coordinate = leftEdge ? sample.leftLongitudinalM
+                                     : sample.rightLongitudinalM;
+  return std::isfinite(coordinate) ? coordinate : sample.longitudinalM;
+}
+
 Line leastSquares(const QVector<LaserEdgeSample>& samples,
                   const QVector<int>& indices, bool leftEdge) {
   if (indices.size() < 2) return {};
@@ -21,7 +27,7 @@ Line leastSquares(const QVector<LaserEdgeSample>& samples,
   double sumY = 0.0;
   for (const int index : indices) {
     const LaserEdgeSample& sample = samples[index];
-    sumX += sample.longitudinalM;
+    sumX += edgeLongitudinal(sample, leftEdge);
     sumY += leftEdge ? sample.leftLateralM : sample.rightLateralM;
   }
   const double meanX = sumX / indices.size();
@@ -30,7 +36,7 @@ Line leastSquares(const QVector<LaserEdgeSample>& samples,
   double denominator = 0.0;
   for (const int index : indices) {
     const LaserEdgeSample& sample = samples[index];
-    const double x = sample.longitudinalM - meanX;
+    const double x = edgeLongitudinal(sample, leftEdge) - meanX;
     const double y = (leftEdge ? sample.leftLateralM
                                : sample.rightLateralM) - meanY;
     numerator += x * y;
@@ -57,9 +63,11 @@ double median(QVector<double> values) {
 double residual(const LaserEdgeSample& sample, const Line& left,
                 const Line& right) {
   const double leftError = sample.leftLateralM -
-                           (left.slope * sample.longitudinalM + left.intercept);
+                           (left.slope * edgeLongitudinal(sample, true) +
+                            left.intercept);
   const double rightError = sample.rightLateralM -
-                            (right.slope * sample.longitudinalM + right.intercept);
+                            (right.slope * edgeLongitudinal(sample, false) +
+                             right.intercept);
   return std::sqrt((leftError * leftError + rightError * rightError) * 0.5);
 }
 

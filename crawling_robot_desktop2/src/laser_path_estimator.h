@@ -3,12 +3,18 @@
 #include <QMetaType>
 #include <QVector>
 
+#include <limits>
+
 namespace crawling {
 
 struct LaserEdgeSample {
   double longitudinalM = 0.0;
   double leftLateralM = 0.0;
   double rightLateralM = 0.0;
+  // A rotated laser scan has different longitudinal coordinates at its two
+  // edges. Legacy/local samples omit these and use longitudinalM for both.
+  double leftLongitudinalM = std::numeric_limits<double>::quiet_NaN();
+  double rightLongitudinalM = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct LaserPathFit {

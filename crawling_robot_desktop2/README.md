@@ -6,11 +6,11 @@
 
 - 控制计算保持 50 Hz，双轮 RS485 正常通信限制为约 3 Hz；行驶时复用 `0xA2` 回复，静止时才用 `0x9C` 保活，结合双轮响应自适应同步、统一限速、命令/反馈看门狗和急停。
 - RIM302 实时显示姿态、三轴角速度、三轴加速度。
-- MV3DLP 实时采集并显示原始图像；点击一次“启动自动纠偏”后，程序按新鲜轮速反馈积分实际路程，自动完成首段前进采集、停稳、等路程原路返回、双边缘拟合，再按拟合角分段前进并持续微调。初始采集与后续更新的默认分段距离均为 100 mm。只要点云拟合有效就会纠偏；实际偏差角超过“最大纠偏目标角”时保留并显示实际角度，同时限幅控制目标、降低速度并继续柔和纠偏，不会因角度超限停止。跟踪时还会根据当前线速度限制角速度，默认保证内侧轮至少保持 35% 速度，避免低速时过度偏转。每个后续直线段都会边前进边采集，段末用新数据重新拟合后继续循环，直到点击“停止自动纠偏”；绝对编码器缩放异常不会再造成首段持续前进，持续无轮速进展则触发安全停止。每完成一个直线段，程序会把该段的连续激光线、缺口边缘、左右拟合线和道路中心线组合成一张 PNG，保存到程序旁独立的 `laser_trajectory_maps/<会话时间>/` 目录，并自动只保留最新 3 次自动纠偏会话。点云模式仍支持限量预览。
-- 激光图像检测默认提高了亮度对比度和最短连续激光段要求；投影使用最高三个采样值的平均抑制单点热噪声，并在连续运动中按上一帧断口中心、宽度和横/纵方向锁定候选。单帧跳到其他亮线时暂时沿用上一帧，避免噪声污染整段轨迹。相机 `Gain`/`ExposureTime` 保留设备当前值，待确认具体型号的有效范围后再调硬件参数。
+- MV3DLP 实时采集并显示原始图像；点击一次“启动自动纠偏”后，程序按新鲜轮速反馈积分路程，完成首段前进采集、停稳、等路程原路返回及双边缘拟合。初始采集与后续更新的默认分段距离均为 100 mm。后续跟踪以实时原图中的焊道中心偏差为主环，以滚动双边缘点云拟合方向为慢速辅助，持续前进并平滑调整双轮差速；段末拟合更新不要求停车。点云按行程采样，分别保留左右边缘旋转后的纵坐标，再转到当前车体系拟合，避免转弯时按固定世界 X 筛点造成更新停滞。角速度随线速度限制，默认内轮/外轮速度比不低于 45%。每段连续激光线、缺口边缘、左右拟合线和道路中心线保存为 `laser_trajectory_maps/<会话时间>/segment_XXXX.png`，只保留最新 3 次自动纠偏任务。点云模式仍支持限量预览。
+- 原图检测先寻找空间上连续、支持充分的主激光基线，在其附近的窄带内提取断口并填补小孔。焊道区域即使存在上下错位的强反射，也不会仅因该列仍有亮点而被填成正常激光线。检测结合上一帧位置、宽度及方向跟踪；失效时衰减旧中心的转向权重，持续无可信观测或回中无改善时重新定位，并要求连续 3 帧一致后接管。有效图像仍到达时保持低速前进，真正图像流超时、轮端反馈失效或持续无运动进展仍会停止。相机 `Gain`/`ExposureTime` 保留设备当前值。横向全幅 200 mm、激光前视距离 250 mm 目前是内部标称值，尚不能视为实机标定结果；毫米偏差和拟合角的准确性受此限制。
 - 主界面“车体状态”集中显示车体命令、双驱动轮反馈、轮端编码器、电机转速/控制量、IMU 和辅助设备状态；检测到夹子 CANopen 节点时会显示节点号。
 - 外部 Modbus 编码器和夹子轴实时反馈尚未迁移，界面会明确显示未接入，不会向未验证的夹子轴发送控制帧。
-- 单一滚动日志：`build/release/logs/robot_console.log`，最大 2 MiB，自动保留近期日志。
+- 单一滚动日志：`build/release/logs/robot_console.log`，最大 16 MiB，自动保留近期日志。自动纠偏期间 `CORRECTION.RAW_IMAGE` 约每 100 ms 记录基线位置、基线带/全图投影摘要、预处理亮段、检测结果和源帧身份；这些摘要用于解释检测，不能还原完整二维图像。完整图像以最高 5 Hz 异步保存到每任务目录下的 `raw_frames/`，由 `frames.jsonl` 关联 SDK 帧号、主机收帧时间、检测及控制状态；最多一张图像等待写入，每任务原图归档最多 2000 帧或 512 MiB，达到任一上限停止本任务原图归档，纠偏继续。PNG 无损保存的是 JPEG 解码后的 `QImage`，不等于传感器未经压缩的原始数据。复盘时需同时保留日志、PNG 和 JSONL；删除旧任务时对应原图归档一并清理。
 - `build_release.ps1` 会部署 Qt、MV3DLP SDK 和 MSVC x64 运行库；复制整个 `build/release` 文件夹到另一台 Windows x64 电脑即可运行。
 
 The implementation was derived from `D:\dev\CrawlingRobot` with these boundaries:
@@ -78,7 +78,7 @@ Click `IMU / LASER` in the main window:
 
 - RIM302 uses an independent RS485/RS422 serial adapter. Select its COM port and divider. The program opens it at the manual default of 115200 bps, configures continuous output, and displays roll/pitch/yaw, gyro Z, and acceleration Z from valid CRC-checked frames.
 - The MV3DLP camera connection runs in a separate worker thread. Click `Scan cameras`, select the returned serial number, and click `Connect camera`. The program uses the included SDK to acquire the original image; a rate-limited copy is sent to the gap detector while the latest frame is displayed. Its DLL tree is deployed to `mv3dlp_sdk` beside the executable.
-- Automatic correction requires a valid internal gap bounded by laser segments on both sides. Missing images, a continuously invalid gap, excessive deviation, or loss of drive feedback commands zero speed and stops correction.
+- Automatic correction first confirms an interruption of the main laser baseline. Live image centering supplies the main feedback, with a rolling edge fit supplying slower heading guidance. Missing detections fade in authority and trigger three-frame reacquisition while moving slowly; camera-stream loss, stale wheel feedback, or a motion stall still stops correction. The 200 mm image span and 250 mm lookahead are nominal internal values, not verified camera calibration.
 
 ## Build and run
 
@@ -100,6 +100,11 @@ The deployable executable is at `build\release\CrawlingRobotDesktop.exe`. `winde
 - feedback correction works in forward and reverse without flipping a wheel; and
 - legacy `1:1` gearbox settings migrate once to the installed `100:1` default;
 - automatic correction stays stopped after the survey return until a fresh valid laser-gap image arrives; and
+- baseline-gap detection rejects displaced bright reflections, handles tilted/vertical/diagonal stripes, and produces the same result with or without diagnostic output;
+- camera source identities reject duplicate or delayed frames; archived source pixels and metadata support detector replay;
+- parallel edge fits use each rotated edge's own longitudinal coordinate and retain outlier rejection and legacy sample compatibility;
 - MWD RS485 speed frame encoding, checksums, frame extraction, and feedback parsing match the supplied protocol.
 
 Build and run them with the same toolchain from `tests\build`.
+
+本次纠偏改动新增了上述相关回归测试并进行了静态检查；遵照 Qt 项目要求，未执行编译或测试，不能据此认定实机纠偏已经通过验证。

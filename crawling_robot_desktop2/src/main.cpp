@@ -79,6 +79,12 @@ int main(int argc, char* argv[]) {
       trajectoryWriter, &crawling::LaserTrajectoryWriter::saveFailed,
       correction, &crawling::LaserCorrectionController::trajectorySaveFailed,
       Qt::QueuedConnection);
+  QObject::connect(correction, &crawling::LaserCorrectionController::rawFrameReady,
+                   trajectoryWriter, &crawling::LaserTrajectoryWriter::saveRawFrame,
+                   Qt::QueuedConnection);
+  QObject::connect(trajectoryWriter, &crawling::LaserTrajectoryWriter::rawFrameSaved,
+                   correction, &crawling::LaserCorrectionController::rawFrameSaved,
+                   Qt::QueuedConnection);
   trajectoryWriterThread.start();
   crawling::AppLogger::write(
       QStringLiteral("SYSTEM.THREAD"),
@@ -104,8 +110,15 @@ int main(int argc, char* argv[]) {
                                           message.contains(CRAWLING_TEXT("拟合未通过")) ||
                                           message.contains(CRAWLING_TEXT("连续不一致"));
                      if (warning) crawling::AppLogger::warning(QStringLiteral("CORRECTION.CONTROL"), message);
-                     else crawling::AppLogger::write(QStringLiteral("CORRECTION.CONTROL"), message);
+                      else crawling::AppLogger::write(QStringLiteral("CORRECTION.CONTROL"), message);
                    });
+  QObject::connect(
+      correction,
+      &crawling::LaserCorrectionController::diagnosticLogMessage,
+      &application, [](const QString& message) {
+        crawling::AppLogger::write(QStringLiteral("CORRECTION.RAW_IMAGE"),
+                                   message);
+      });
 
   crawling::MainWindow window(controller, devices, correction);
   window.show();

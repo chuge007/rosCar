@@ -14,6 +14,7 @@ PointCloudView::PointCloudView(QWidget* parent) : QWidget(parent) {
 }
 
 void PointCloudView::setPoints(const QVector<QVector3D>& points) {
+  showDetection_ = false;
   image_ = QImage();
   points_ = points;
   rebuildProjectionCache();
@@ -21,6 +22,7 @@ void PointCloudView::setPoints(const QVector<QVector3D>& points) {
 }
 
 void PointCloudView::setImage(const QImage& image) {
+  showDetection_ = false;
   points_.clear();
   projectedPoints_.clear();
   image_ = image;
@@ -33,6 +35,13 @@ void PointCloudView::setProjectionPlane(int plane) {
   projectionPlane_ = nextPlane;
   rebuildProjectionCache();
   update();
+}
+
+void PointCloudView::setDetectionImage(
+    const QImage& image, const LaserGapDetection& detection) {
+  setImage(image);
+  detection_ = detection;
+  showDetection_ = true;
 }
 
 void PointCloudView::rebuildProjectionCache() {
@@ -96,6 +105,43 @@ void PointCloudView::paintEvent(QPaintEvent*) {
     // to the actual widget.
     painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     painter.drawImage(area, image_);
+    if (showDetection_) {
+      painter.save();
+      painter.setClipRect(area);
+      const auto screenPoint = [&](double along, double cross) {
+        const double x = detection_.horizontal ? along : cross;
+        const double y = detection_.horizontal ? cross : along;
+        return QPointF(area.left() + x * area.width() / std::max(1, image_.width() - 1),
+                       area.top() + y * area.height() / std::max(1, image_.height() - 1));
+      };
+      const double axisLast = detection_.horizontal ? image_.width() - 1 : image_.height() - 1;
+      const double crossLast = detection_.horizontal ? image_.height() - 1 : image_.width() - 1;
+      painter.setPen(QPen(QColor("#3de2ed"), 1, Qt::DashLine));
+      painter.drawLine(screenPoint(axisLast * 0.5, 0), screenPoint(axisLast * 0.5, crossLast));
+      if (detection_.baselineSupported) {
+        painter.setPen(QPen(QColor("#f6cb54"), 1, Qt::DashLine));
+        painter.drawLine(screenPoint(0, detection_.baselineOffsetPx),
+                         screenPoint(axisLast, detection_.baselineOffsetPx + detection_.baselineSlope * axisLast));
+      }
+      if (detection_.valid) {
+        const QColor gapColor(detection_.edgeBreakFallback ? "#ffaa44" : "#53ee82");
+        painter.setPen(QPen(gapColor, 2));
+        for (int along : {detection_.gapStartPx, detection_.gapEndPx}) {
+          painter.drawLine(screenPoint(along, 0), screenPoint(along, crossLast));
+        }
+        const double center = 0.5 * (detection_.gapStartPx + detection_.gapEndPx);
+        painter.setPen(QPen(gapColor, 1, Qt::DashLine));
+        painter.drawLine(screenPoint(center, 0), screenPoint(center, crossLast));
+      }
+      painter.setPen(detection_.valid ? QColor("#53ee82") : QColor("#ffaa44"));
+      painter.drawText(area.adjusted(8, 8, -8, -8), Qt::AlignTop | Qt::AlignLeft,
+          detection_.valid
+              ? CRAWLING_TEXT("检测焊缝 %1..%2 px / %3；青线=中心，黄线=主激光基线")
+                    .arg(detection_.gapStartPx).arg(detection_.gapEndPx)
+                    .arg(detection_.edgeBreakFallback ? CRAWLING_TEXT("单边推断") : CRAWLING_TEXT("双边实测"))
+              : CRAWLING_TEXT("当前帧未确认焊缝；青线=目标中心"));
+      painter.restore();
+    }
     painter.setPen(QColor("#9fb3bf"));
     painter.drawText(42, height() - 8,
                      CRAWLING_TEXT("原始图 %1 x %2，已铺满画布")

@@ -53,15 +53,21 @@ class LaserTrajectoryWriter final : public QObject {
                    const QVector<crawling::LaserEdgeSample>& scanSamples,
                    const crawling::LaserPathFit& fit, double segmentLengthM,
                    double lateralSpanM, const QString& label);
+  void saveRawFrame(quint64 sessionId, quint64 frameSequence,
+                    const QImage& image, const QString& metadataJson);
   void shutdown();
 
  signals:
   void sessionStarted(quint64 sessionId, const QString& directory);
   void imageSaved(quint64 sessionId, const QString& path);
   void saveFailed(quint64 sessionId, const QString& error);
+  void rawFrameSaved(quint64 sessionId, quint64 frameSequence,
+                     const QString& path, const QString& error);
 
  private:
   quint64 currentSessionId_ = 0;
+  int rawFrameCount_ = 0;
+  qint64 rawFrameBytes_ = 0;
   LaserTrajectoryRenderer renderer_;
 };
 
