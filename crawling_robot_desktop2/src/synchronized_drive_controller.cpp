@@ -211,9 +211,9 @@ void SynchronizedDriveController::requestEnable(bool enabled) {
   setState(DriveState::Enabled,
            CRAWLING_TEXT("\xE5\xba\x95\xE7\x9B\x98\xE5\xb7\xb2\xE4\xbd\xbf\xE8\x83\xbd\xEF\xbc\x8C\xE5\x8F\xaf\xE6\x8E\xa7\xE5\x88\xb6"));
   emit logMessage(QStringLiteral("Drive enabled: MWD RS485 wheel speed control is active"));
-  // Enabling only arms command processing. Keep both motors stopped until a
-  // real manual-jog or automatic-correction motion command arrives.
-  sendStopPair(true);
+  // The motor bus is already stopped and holding the current position after
+  // connect/reset. Enabling only arms command processing; avoid a duplicate
+  // position-hold transaction that can fail on a transient serial reply.
 }
 
 void SynchronizedDriveController::emergencyStop() {

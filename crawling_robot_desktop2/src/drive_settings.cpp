@@ -92,8 +92,8 @@ void DriveSettings::save(QSettings& settings) const {
   settings.setValue(CRAWLING_TEXT("imuBaudRate"), imuBaudRate);
   settings.setValue(CRAWLING_TEXT("imuOutputDivider"), imuOutputDivider);
   settings.setValue(CRAWLING_TEXT("laserSerialNumber"), laserSerialNumber);
-  settings.setValue(CRAWLING_TEXT("autoDetectPhysicalInterfaces"),
-                    autoDetectPhysicalInterfaces);
+  settings.setValue(CRAWLING_TEXT("autoConnectOnStartup"),
+                    autoConnectOnStartup);
   settings.setValue(CRAWLING_TEXT("manualJogPercent"), manualJogPercent);
   settings.setValue(CRAWLING_TEXT("clampSerialPort"), clampSerialPort);
   settings.setValue(CRAWLING_TEXT("clampSerialBaudRate"), clampSerialBaudRate);
@@ -144,9 +144,12 @@ DriveSettings DriveSettings::load(QSettings& settings) {
                      value.imuOutputDivider).toInt(),
       1, 200);
   value.laserSerialNumber = settings.value(CRAWLING_TEXT("laserSerialNumber"), value.laserSerialNumber).toString();
-  value.autoDetectPhysicalInterfaces =
-      settings.value(CRAWLING_TEXT("autoDetectPhysicalInterfaces"),
-                     value.autoDetectPhysicalInterfaces).toBool();
+  value.autoConnectOnStartup =
+      settings.value(
+          CRAWLING_TEXT("autoConnectOnStartup"),
+          settings.value(CRAWLING_TEXT("autoDetectPhysicalInterfaces"),
+                         value.autoConnectOnStartup))
+          .toBool();
   value.manualJogPercent = std::clamp(
       settings.value(CRAWLING_TEXT("manualJogPercent"),
                      value.manualJogPercent).toInt(),

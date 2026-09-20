@@ -80,11 +80,7 @@ class MainWindow final : public QMainWindow {
   void updateState(crawling::DriveState state, const QString& reason);
   void updateConnection(bool connected, const QString& message);
   void appendLog(const QString& message);
-  void autoDetectHardware();
-  void applySensorDetection(const QString& imuPort, int imuBaudRate,
-                            const QString& laserSerialNumber);
   void applyCanDetection(const crawling::HardwareDetectionResult& result);
-  void updateDeviceDetection(bool running, const QString& message);
   void updateCameraDevices(const QStringList& devices);
   void updateCameraConnection(bool connected, const QString& message);
   void updateCameraFrame(quint32 frameNumber, quint32 width, quint32 height,
@@ -101,7 +97,7 @@ class MainWindow final : public QMainWindow {
 
   void buildInterface();
   void bindController();
-  void connectConfiguredDevices(bool detectPhysicalInterfaces);
+  void connectConfiguredDevices();
   DriveSettings settingsFromUi() const;
   void settingsToUi(const DriveSettings& settings);
   void setMotionKey(MotionKey key, bool active);
@@ -127,7 +123,6 @@ class MainWindow final : public QMainWindow {
   QHash<int, quint64> motionPulseGeneration_;
   bool connected_ = false;
   bool cameraConnected_ = false;
-  bool connectDriveAfterDetection_ = false;
   bool isClosing_ = false;
   bool autoCorrectionActive_ = false;
   bool autoCorrectionStartPending_ = false;
@@ -194,14 +189,13 @@ class MainWindow final : public QMainWindow {
   QPushButton* enableButton_ = nullptr;
   QPushButton* stopButton_ = nullptr;
   QPushButton* emergencyButton_ = nullptr;
-  QCheckBox* autoDetectCheckBox_ = nullptr;
+  QCheckBox* autoConnectCheckBox_ = nullptr;
   QPushButton* imuConnectButton_ = nullptr;
   QPushButton* cameraConnectButton_ = nullptr;
   QLabel* imuConfigStateLabel_ = nullptr;
   QLabel* cameraConfigStateLabel_ = nullptr;
   QLabel* cameraFrameConfigLabel_ = nullptr;
   QLabel* clampConnectionLabel_ = nullptr;
-  bool autoDetectRunning_ = false;
   QPlainTextEdit* logOutput_ = nullptr;
   QPushButton* screenshotButton_ = nullptr;
   PointCloudView* pointCloud_ = nullptr;

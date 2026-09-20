@@ -189,7 +189,7 @@ MainWindow::MainWindow(SynchronizedDriveController* controller, DeviceController
   restoreGeometry(persistent.value(CRAWLING_TEXT("window/geometry")).toByteArray());
   updateState(DriveState::Disconnected, QStringLiteral("Connect the MWD RS485 motor bus to begin."));
   QTimer::singleShot(0, this, [this] {
-    connectConfiguredDevices(settings_.autoDetectPhysicalInterfaces);
+    if (settings_.autoConnectOnStartup) connectConfiguredDevices();
   });
 }
 
@@ -339,7 +339,7 @@ void MainWindow::disconnectAdapter() {
 }
 
 void MainWindow::connectAllConfiguredDevices() {
-  connectConfiguredDevices(false);
+  connectConfiguredDevices();
 }
 
 void MainWindow::disconnectAllDevices() {
@@ -351,7 +351,7 @@ void MainWindow::disconnectAllDevices() {
   appendLog(CRAWLING_TEXT("已请求断开电机、IMU 和激光相机"));
 }
 
-void MainWindow::connectConfiguredDevices(bool detectPhysicalInterfaces) {
+void MainWindow::connectConfiguredDevices() {
   settings_ = settingsFromUi();
   QSettings persistent(DriveSettings::persistentFilePath(), QSettings::IniFormat);
   settings_.save(persistent);
@@ -361,8 +361,7 @@ void MainWindow::connectConfiguredDevices(bool detectPhysicalInterfaces) {
       QStringLiteral("UI.OPERATION"),
       QStringLiteral("event=connect_all_request mode=%1 targets=DRIVE.MOTOR,IMU,CAMERA "
                      "left_port=%2 right_port=%3 imu_port=%4 camera_serial=%5")
-          .arg(detectPhysicalInterfaces ? QStringLiteral("startup_auto_detect")
-                                        : QStringLiteral("configured_manual"))
+          .arg(QStringLiteral("saved_configuration"))
           .arg(settings_.leftMotorSerialPort)
           .arg(settings_.rightMotorSerialPort)
           .arg(settings_.imuSerialPort)
@@ -393,18 +392,11 @@ void MainWindow::connectConfiguredDevices(bool detectPhysicalInterfaces) {
     emit connectionRequested(settings_);
   };
 
-  if (driveReady && !detectPhysicalInterfaces) {
+  if (driveReady) {
     connectDrive();
   }
-
-  if (detectPhysicalInterfaces) {
-    connectDriveAfterDetection_ = driveReady;
-    autoDetectHardware();
-  } else {
-    connectDriveAfterDetection_ = false;
-    connectConfiguredImu();
-    connectConfiguredCamera();
-  }
+  connectConfiguredImu();
+  connectConfiguredCamera();
 }
 
 void MainWindow::connectConfiguredImu() {
@@ -483,7 +475,7 @@ void MainWindow::applyAllParameters() {
   }
 
   if (connected_) {
-    connectConfiguredDevices(false);
+    connectConfiguredDevices();
   }
   const QString message = connected_
                               ? CRAWLING_TEXT("全部参数已保存并应用，电机、IMU 和相机已请求重新连接")
@@ -729,11 +721,11 @@ void MainWindow::buildInterface() {
   connectionLabel_ = new QLabel(CRAWLING_TEXT("\xE9\x80\x82""\xE9\x85\x8D""\xE5\x99\xA8""\xE6\x9C\xAA""\xE8\xBF\x9E""\xE6\x8E\xA5"""), central);
   connectionLabel_->setObjectName(CRAWLING_TEXT("connectionLabel"));
   header->addWidget(connectionLabel_);
-  autoDetectCheckBox_ = new QCheckBox(CRAWLING_TEXT("自动检测物理接口（启动时）"), central);
-  autoDetectCheckBox_->setToolTip(
-      CRAWLING_TEXT("勾选后启动软件时优先使用上次配置检测 IMU 和激光相机；"
-                    "电机始终按上次保存的左右串口配置连接。"));
-  header->addWidget(autoDetectCheckBox_);
+  autoConnectCheckBox_ = new QCheckBox(CRAWLING_TEXT("启动时自动连接"), central);
+  autoConnectCheckBox_->setToolTip(
+      CRAWLING_TEXT("仅按上次保存的电机、IMU 和激光相机参数连接；"
+                    "空配置或连接失败的设备会跳过，不会自动选择接口。"));
+  header->addWidget(autoConnectCheckBox_);
   auto* connectAllButton =
       new QPushButton(CRAWLING_TEXT("手动连接全部接口"), central);
   connect(connectAllButton, &QPushButton::clicked, this,
@@ -1275,12 +1267,12 @@ void MainWindow::buildInterface() {
     connect(box, QOverload<int>::of(&QComboBox::currentIndexChanged), this, markParametersDirty);
   }
   connect(laserSerialBox_, &QLineEdit::textChanged, this, markParametersDirty);
-  connect(autoDetectCheckBox_, &QCheckBox::toggled, this, markParametersDirty);
-  connect(autoDetectCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
-    settings_.autoDetectPhysicalInterfaces = checked;
+  connect(autoConnectCheckBox_, &QCheckBox::toggled, this, markParametersDirty);
+  connect(autoConnectCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+    settings_.autoConnectOnStartup = checked;
     QSettings persistent(DriveSettings::persistentFilePath(), QSettings::IniFormat);
     persistent.beginGroup(CRAWLING_TEXT("drive"));
-    persistent.setValue(CRAWLING_TEXT("autoDetectPhysicalInterfaces"), checked);
+    persistent.setValue(CRAWLING_TEXT("autoConnectOnStartup"), checked);
     persistent.endGroup();
     persistent.sync();
   });
@@ -1345,8 +1337,6 @@ void MainWindow::bindController() {
           &MainWindow::updateImu, Qt::QueuedConnection);
   connect(devices_, &DeviceController::imuConnectionChanged, this,
           &MainWindow::updateImuConnection, Qt::QueuedConnection);
-  connect(devices_, &DeviceController::deviceDetectionChanged, this,
-          &MainWindow::updateDeviceDetection, Qt::QueuedConnection);
   connect(devices_, &DeviceController::cameraDevicesChanged, this,
           &MainWindow::updateCameraDevices, Qt::QueuedConnection);
   connect(devices_, &DeviceController::cameraConnectionChanged, this,
@@ -1410,44 +1400,8 @@ void MainWindow::bindController() {
           &MainWindow::updateCorrectionStatus, Qt::QueuedConnection);
   connect(correction_, &LaserCorrectionController::logMessage, this,
           &MainWindow::appendLog, Qt::QueuedConnection);
-  connect(devices_, &DeviceController::sensorSettingsDetected, this,
-          &MainWindow::applySensorDetection, Qt::QueuedConnection);
   connect(controller_, &SynchronizedDriveController::canSettingsDetected, this,
           &MainWindow::applyCanDetection, Qt::QueuedConnection);
-}
-
-void MainWindow::autoDetectHardware() {
-  if (autoDetectRunning_) {
-    return;
-  }
-  settings_ = settingsFromUi();
-  autoDetectRunning_ = true;
-  if (autoDetectCheckBox_) autoDetectCheckBox_->setEnabled(false);
-  appendLog(CRAWLING_TEXT("开始自动检测并连接 IMU 与激光相机；电机按保存配置连接"));
-  AppLogger::write(QStringLiteral("UI.OPERATION"),
-                   QStringLiteral("event=auto_detect_request target=DEVICE.CONTROL preferred_imu=%1 preferred_camera=%2")
-                       .arg(settings_.imuSerialPort, settings_.laserSerialNumber));
-  QMetaObject::invokeMethod(
-      devices_, "autoDetectDevices", Qt::QueuedConnection,
-      Q_ARG(QString, settings_.imuSerialPort),
-      Q_ARG(QString, settings_.laserSerialNumber));
-}
-
-void MainWindow::applySensorDetection(const QString& imuPort, int imuBaudRate,
-                                      const QString& laserSerialNumber) {
-  if (!imuPort.isEmpty()) {
-    setComboToText(imuPortBox_, imuPort);
-    setComboToValue(imuBaudBox_, imuBaudRate);
-  }
-  if (!laserSerialNumber.isEmpty()) {
-    laserSerialBox_->setText(laserSerialNumber);
-  }
-  settings_ = settingsFromUi();
-  settingsToUi(settings_);
-  appendLog(CRAWLING_TEXT("\xE4\xBC\xA0""\xE6\x84\x9F""\xE5\x99\xA8""\xE9\x85\x8D""\xE7\xBD\xAE""\xE5\xB7\xB2""\xE5\x9B\x9E""\xE5\xA1\xAB""\xEF\xBC\x9A""IMU=%1\xEF\xBC\x8C""\xE6\xBF\x80""\xE5\x85\x89""=%2")
-                .arg(imuPort.isEmpty() ? CRAWLING_TEXT("\xE6\x9C\xAA""\xE6\xA3\x80""\xE6\xB5\x8B""\xE5\x88\xB0""") : imuPort)
-                .arg(laserSerialNumber.isEmpty() ? CRAWLING_TEXT("\xE6\x9C\xAA""\xE6\xA3\x80""\xE6\xB5\x8B""\xE5\x88\xB0""") : laserSerialNumber));
-  saveSettings();
 }
 
 void MainWindow::applyCanDetection(const HardwareDetectionResult& result) {
@@ -1478,23 +1432,6 @@ void MainWindow::applyCanDetection(const HardwareDetectionResult& result) {
   }
 }
 
-void MainWindow::updateDeviceDetection(bool running, const QString& message) {
-  autoDetectRunning_ = running;
-  if (autoDetectCheckBox_) autoDetectCheckBox_->setEnabled(!running);
-  Q_UNUSED(message);
-  if (!running) {
-    refreshPorts();
-    if (connectDriveAfterDetection_) {
-      connectDriveAfterDetection_ = false;
-      cancelMotionButtonPulses();
-      activeMotionKeys_.clear();
-      keyboardMotionKeys_.clear();
-      emit enableRequested(false);
-      emit connectionRequested(settings_);
-    }
-  }
-}
-
 void MainWindow::updateCameraDevices(const QStringList& devices) {
   if (!cameraDeviceBox_) return;
   const QString configured = laserSerialBox_->text().trimmed();
@@ -1512,10 +1449,6 @@ void MainWindow::updateCameraDevices(const QStringList& devices) {
     cameraDeviceBox_->setCurrentIndex(selected);
   } else {
     cameraDeviceBox_->setCurrentIndex(-1);
-  }
-  if (configured.isEmpty() && cameraDeviceBox_->count() > 0) {
-    cameraDeviceBox_->setCurrentIndex(0);
-    laserSerialBox_->setText(cameraDeviceBox_->currentText().section(" | ", 0, 0));
   }
 }
 
@@ -1708,7 +1641,7 @@ DriveSettings MainWindow::settingsFromUi() const {
   value.imuBaudRate = imuBaudBox_->currentData().toInt();
   value.imuOutputDivider = imuDividerBox_->currentData().toInt();
   value.laserSerialNumber = laserSerialBox_->text().trimmed();
-  value.autoDetectPhysicalInterfaces = autoDetectCheckBox_->isChecked();
+  value.autoConnectOnStartup = autoConnectCheckBox_->isChecked();
   value.manualJogPercent = speedSlider_->value();
   value.clampSerialPort = clampSerialPortBox_->currentData().toString();
   value.clampSerialBaudRate = clampSerialBaudBox_->currentData().toInt();
@@ -1746,7 +1679,7 @@ void MainWindow::settingsToUi(const DriveSettings& settings) {
   setComboToValue(imuBaudBox_, settings.imuBaudRate);
   setComboToValue(imuDividerBox_, settings.imuOutputDivider);
   laserSerialBox_->setText(settings.laserSerialNumber);
-  autoDetectCheckBox_->setChecked(settings.autoDetectPhysicalInterfaces);
+  autoConnectCheckBox_->setChecked(settings.autoConnectOnStartup);
   speedSlider_->setValue(settings.manualJogPercent);
   setComboToText(clampSerialPortBox_, settings.clampSerialPort);
   setComboToValue(clampSerialBaudBox_, settings.clampSerialBaudRate);

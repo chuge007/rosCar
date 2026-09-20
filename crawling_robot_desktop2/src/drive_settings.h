@@ -22,7 +22,7 @@ struct DriveSettings {
   int imuBaudRate = 115200;
   int imuOutputDivider = 10;
   QString laserSerialNumber;
-  bool autoDetectPhysicalInterfaces = true;
+  bool autoConnectOnStartup = true;
   int manualJogPercent = 30;
 
   QString clampSerialPort;
