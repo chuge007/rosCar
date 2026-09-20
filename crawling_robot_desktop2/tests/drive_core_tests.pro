@@ -7,6 +7,7 @@ TARGET = drive_core_tests
 include($$PWD/../opencv.pri)
 SOURCES += ../src/opencv_laser_contour.cpp
 HEADERS += ../src/opencv_laser_contour.h
+HEADERS += ../src/profile_weld_detector.h
 
 SOURCES += \
     drive_core_tests.cpp \

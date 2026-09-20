@@ -30,7 +30,9 @@ def detect(gray, offset=160., slope=0., half_width=6., expected_center=None,
                   (stats[1:, cv2.CC_STAT_AREA] >= max(10, width // 100)))
     plate = np.zeros(width, np.uint8)
     raised = np.full(width, -1.)
-    tolerance = np.clip(half_width * .5, 4, 12)
+    parent_window = np.clip(half_width * .5, 4, 12)
+    ridges = [[] for _ in range(width)]
+    parent_residuals = []
     for x in range(width):
         column = labels[:, x]
         cuts = np.r_[0, np.flatnonzero(column[1:] != column[:-1]) + 1, height]
@@ -39,10 +41,23 @@ def detect(gray, offset=160., slope=0., half_width=6., expected_center=None,
                 continue
             weights = smooth[a:b, x].astype(float)
             y = np.dot(np.arange(a, b), weights) / weights.sum()
-            rise = offset + slope * x - y
+            ridges[x].append(y)
+        residuals = [offset + slope*x-y for y in ridges[x]]
+        if residuals:
+            nearest = min(residuals, key=abs)
+            if abs(nearest) <= parent_window:
+                parent_residuals.append(nearest)
+    if len(parent_residuals) < max(24, width//20):
+        return None
+    noise = 1.4826 * sorted(abs(r) for r in parent_residuals)[len(parent_residuals)//4]
+    tolerance = max(1.5, noise*3)
+    minimum_rise = max(3., tolerance+max(1., noise))
+    for x in range(width):
+        for y in ridges[x]:
+            rise = offset + slope*x-y
             if abs(rise) <= tolerance:
                 plate[x] = 255
-            if max(8., tolerance * 1.5) <= rise <= height * .45:
+            if minimum_rise <= rise <= height * .45:
                 raised[x] = max(raised[x], y)
     present = np.flatnonzero(plate)
     if len(present) == 0 or present[-1] - present[0] < width // 4:
@@ -57,7 +72,7 @@ def detect(gray, offset=160., slope=0., half_width=6., expected_center=None,
     for a, b in zip(np.flatnonzero(transitions == 1), np.flatnonzero(transitions == -1)):
         a, b = int(a+first), int(b+first-1)
         length = b-a+1
-        if length < max(12, int(width*.02)) or a-first < shoulder or last-b < shoulder:
+        if length < max(6, int(np.ceil(width*.006))) or a-first < shoulder or last-b < shoulder:
             continue
         if min(np.count_nonzero(plate[max(first,a-2*shoulder):a]),
                np.count_nonzero(plate[b+1:min(last+1,b+1+2*shoulder)])) < shoulder:
@@ -72,8 +87,12 @@ def detect(gray, offset=160., slope=0., half_width=6., expected_center=None,
         if abs(vx) < 1e-6 or abs(vy/vx - slope) > .3:
             continue
         residual = np.abs(points[:,1] - (cy + vy/vx * (points[:,0]-cx)))
-        inliers = np.count_nonzero(residual <= max(6., (offset+slope*cx-cy)*.12))
-        if inliers < len(xs)*.75:
+        rise = offset+slope*cx-cy
+        weak = rise < 8 or length < width*.02
+        if rise < minimum_rise or (weak and (coverage < .8 or holes.max() > length*.15)):
+            continue
+        inliers = np.count_nonzero(residual <= (max(1.,noise*2) if weak else max(6.,rise*.12)))
+        if inliers < len(xs)*(.9 if weak else .75):
             continue
         center = (a+b)*.5/(width-1)
         if expected_center is not None and abs(center-expected_center) > .06:
@@ -102,6 +121,8 @@ def weld(parent=False, downward=False, end=760):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', default=str(root/'tmp/opencv_contour_verification.json'))
+    parser.add_argument('--csv', required=True)
+    parser.add_argument('--raw', required=True)
     args = parser.parse_args()
     tests = {
         'fragmented_short_shoulder': (weld(), {}, True),
@@ -112,6 +133,20 @@ def main():
         'wrong_identity': (weld(), {'expected_center': .2}, False),
         'wrong_width': (weld(), {'expected_width': .1}, False),
     }
+    for rise in (3, 5, 12, 90):
+        for span in (10, 24, 100, 420):
+            gray = np.full((240,800),12,np.uint8)
+            start, end = 190, 190+span-1
+            for x in range(20,781):
+                y = 160-rise if start <= x <= end else 160
+                gray[y-2:y+3,x] = 210
+            tests['height_%d_width_%d' % (rise,span)] = (gray, {}, True)
+    for amplitude in (1, 2, 4):
+        gray = np.full((240,800),12,np.uint8)
+        for x in range(20,781):
+            y = 160 + (amplitude if (x//10)%2 else -amplitude)
+            gray[y-2:y+3,x] = 210
+        tests['parent_noise_%d' % amplitude] = (gray, {}, False)
     results = {}
     for name, (gray, kwargs, expected) in tests.items():
         result = detect(gray, **kwargs)
@@ -121,7 +156,7 @@ def main():
     assert abs(contour['start']-420)<=2 and abs(contour['end']-760)<=2
     # Independently inspect supplied physical profiles; do not map their X
     # into image pixels without calibration or assume these files are synced.
-    csv = root/'release/logs/Image_Profile_20260920_11_10_41_929.csv'
+    csv = Path(args.csv)
     points = np.loadtxt(csv, delimiter=',')
     valid = points[np.isfinite(points).all(axis=1) & np.any(points != 0, axis=1)]
     resets = np.flatnonzero(np.diff(valid[:,0]) < -1000)+1
@@ -135,13 +170,13 @@ def main():
         summaries.append(dict(points=len(frame), baseline=baseline,
             raised_points=len(raised),
             raised_x_range=[float(raised[:,0].min()),float(raised[:,0].max())] if len(raised) else None))
-    raw = root/'release/logs/Image_Origin_20260920_11_10_45_633.raw'
+    raw = Path(args.raw)
     data = raw.read_bytes()
     report = dict(opencv=cv2.__version__, synthetic_cases=results,
         cpp_tests_executed=False, profiles=summaries,
         raw=dict(bytes=len(data), header_dimensions=struct.unpack_from('<II',data,0x70),
                  decoded=False, reason='Vendor container; no verified RAW decoder. SDK live frames are decoded separately.'),
-        files_synchronized=False, timestamp_difference_seconds=3.704)
+        files_synchronized=False, csv_file=str(csv), raw_file=str(raw))
     Path(args.output).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     print('OpenCV',cv2.__version__,':',len(tests),'offline cases passed; profiles:',len(summaries))
     print('Report:',args.output)

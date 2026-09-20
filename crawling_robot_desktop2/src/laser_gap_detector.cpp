@@ -1192,15 +1192,41 @@ LaserGapDetection LaserGapDetector::detect(const QImage& image,
     result.baselineOffsetPx = baseline.offsetPx;
     result.baselineSlope = baseline.slope;
     result.baselineHalfWidthPx = baseline.halfWidthPx;
-    // Retain a measured dark gap. When it is missing, OpenCV verifies the
-    // actual elevated stripe, including interrupted broad weld plateaus.
-    // Never bypass an existing temporal identity/width rejection.
-    if (horizontal && config.allowOpenCvContour &&
-        (!result.valid || result.edgeBreakFallback) &&
-        !result.continuityRejected && !result.widthRejected) {
+    // Always inspect geometric evidence: a small, valid dark speckle must
+    // not prevent finding a broad raised weld elsewhere on the same stripe.
+    // OpenCV applies the same identity gates to its own candidate; rejection
+    // of an unrelated dark hole must not suppress that independent search.
+    if (horizontal && config.allowOpenCvContour) {
       const auto contour = OpenCvLaserContour::detect(grayscale, baseline.offsetPx,
           baseline.slope, baseline.halfWidthPx, config);
-      if (contour.valid) result = contour;
+      if (contour.valid) {
+        const double gapWidth = result.gapEndPx - result.gapStartPx + 1.0;
+        const double contourWidth = contour.gapEndPx - contour.gapStartPx + 1.0;
+        const bool agrees = result.valid &&
+            std::abs(result.absoluteCenterRatio - contour.absoluteCenterRatio) <=
+                std::max(0.01, contourWidth / grayscale.width() * 0.15) &&
+            std::min(gapWidth, contourWidth) >= std::max(gapWidth, contourWidth) * 0.50;
+        if (!result.valid || result.edgeBreakFallback ||
+            (!agrees && contourWidth >= gapWidth * 2.0)) {
+          result = contour;
+        } else {
+          result.contourSupported = true;
+          result.contourStartPx = contour.gapStartPx;
+          result.contourEndPx = contour.gapEndPx;
+          result.contourConfidence = contour.confidence;
+          result.contourAgreesWithGap = agrees;
+          result.contourConflict = !agrees;
+          // Keep a measured dark gap when it is materially more confident
+          // than the auxiliary raised-contour estimate. A contour can cover
+          // shoulders or reflections and must not turn a usable observation
+          // into a false missing-detection stop. Only a similarly confident
+          // contradiction is ambiguous enough to reject.
+          if (!agrees && result.confidence < contour.confidence * 1.15) {
+            result.valid = false;
+            result.continuityRejected = true;
+          }
+        }
+      }
     }
     return result;
   };

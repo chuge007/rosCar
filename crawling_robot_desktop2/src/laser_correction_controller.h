@@ -10,6 +10,7 @@
 #include <QObject>
 #include <QTimer>
 #include <QVector>
+#include <QVector3D>
 
 namespace crawling {
 
@@ -130,6 +131,8 @@ class LaserCorrectionController final : public QObject {
   void setEnabled(bool enabled);
   void shutdown();
   void processCameraImage(const QImage& image);
+  void processProfileFrame(const QVector<QVector3D>& points, quint32 sourceFrameNumber,
+                           qint64 receivedAtEpochMs);
   void processCameraFrame(const QImage& image, quint32 sourceFrameNumber,
                           qint64 receivedAtEpochMs);
   void processDriveTelemetry(const crawling::DriveTelemetry& telemetry);
@@ -150,6 +153,9 @@ class LaserCorrectionController final : public QObject {
                       const QImage& image, const QString& metadataJson);
   void cameraObservationReady(const QImage& image,
                                const crawling::LaserGapDetection& detection);
+  void profileObservationReady(const QVector<QVector3D>& points,
+                               const crawling::LaserGapDetection& detection,
+                               quint32 sourceFrameNumber, qint64 receivedAtEpochMs);
   void trajectorySessionRequested(quint64 sessionId);
   void trajectorySegmentReady(
       quint64 sessionId,
@@ -161,6 +167,7 @@ class LaserCorrectionController final : public QObject {
   void watchdogTick();
 
  private:
+  void processObservation(const QImage& image, const QVector<QVector3D>* profile);
   enum class Phase {
     Idle,
     AwaitingInputs,

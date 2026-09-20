@@ -11,10 +11,12 @@
 #include <QHash>
 #include <QPointF>
 #include <QSet>
+#include <QStringList>
 #include <QVector>
 #include <QVector3D>
 
 class QComboBox;
+class QCheckBox;
 class QDoubleSpinBox;
 class QGroupBox;
 class QKeyEvent;
@@ -31,9 +33,7 @@ namespace crawling {
 
 class SynchronizedDriveController;
 class DeviceController;
-class DeviceWindow;
 class PointCloudView;
-class QCheckBox;
 
 class MainWindow final : public QMainWindow {
   Q_OBJECT
@@ -61,6 +61,11 @@ class MainWindow final : public QMainWindow {
   void refreshPorts();
   void connectAdapter();
   void disconnectAdapter();
+  void connectAllConfiguredDevices();
+  void disconnectAllDevices();
+  void connectConfiguredImu();
+  void connectConfiguredCamera();
+  void scanConfiguredCamera();
   void saveSettings();
   void applyAllParameters();
   void enableDrive();
@@ -75,11 +80,15 @@ class MainWindow final : public QMainWindow {
   void updateState(crawling::DriveState state, const QString& reason);
   void updateConnection(bool connected, const QString& message);
   void appendLog(const QString& message);
-  void showDevices();
   void autoDetectHardware();
   void applySensorDetection(const QString& imuPort, int imuBaudRate,
                             const QString& laserSerialNumber);
   void applyCanDetection(const crawling::HardwareDetectionResult& result);
+  void updateDeviceDetection(bool running, const QString& message);
+  void updateCameraDevices(const QStringList& devices);
+  void updateCameraConnection(bool connected, const QString& message);
+  void updateCameraFrame(quint32 frameNumber, quint32 width, quint32 height,
+                         quint64 pointCount);
   void updatePointCloudReady();
   void setPointCloudPlane(int plane);
   void startAutoCorrection();
@@ -92,6 +101,7 @@ class MainWindow final : public QMainWindow {
 
   void buildInterface();
   void bindController();
+  void connectConfiguredDevices(bool detectPhysicalInterfaces);
   DriveSettings settingsFromUi() const;
   void settingsToUi(const DriveSettings& settings);
   void setMotionKey(MotionKey key, bool active);
@@ -106,7 +116,6 @@ class MainWindow final : public QMainWindow {
 
   SynchronizedDriveController* controller_ = nullptr;
   DeviceController* devices_ = nullptr;
-  DeviceWindow* deviceWindow_ = nullptr;
   LaserCorrectionController* correction_ = nullptr;
   DriveSettings settings_;
   QTimer* inputTimer_ = nullptr;
@@ -117,21 +126,23 @@ class MainWindow final : public QMainWindow {
   QHash<int, qint64> motionButtonPressMs_;
   QHash<int, quint64> motionPulseGeneration_;
   bool connected_ = false;
+  bool cameraConnected_ = false;
+  bool connectDriveAfterDetection_ = false;
   bool isClosing_ = false;
   bool autoCorrectionActive_ = false;
   bool autoCorrectionStartPending_ = false;
+  quint64 correctionStartNoticeGeneration_ = 0;
   DriveState currentState_ = DriveState::Disconnected;
 
-  QComboBox* serialPortBox_ = nullptr;
-  QComboBox* serialBaudBox_ = nullptr;
   QComboBox* leftMotorPortBox_ = nullptr;
   QComboBox* leftMotorBaudBox_ = nullptr;
   QComboBox* rightMotorPortBox_ = nullptr;
   QComboBox* rightMotorBaudBox_ = nullptr;
-  QComboBox* canBitrateBox_ = nullptr;
   QComboBox* imuPortBox_ = nullptr;
   QComboBox* imuBaudBox_ = nullptr;
+  QComboBox* imuDividerBox_ = nullptr;
   QLineEdit* laserSerialBox_ = nullptr;
+  QComboBox* cameraDeviceBox_ = nullptr;
   QComboBox* clampSerialPortBox_ = nullptr;
   QComboBox* clampSerialBaudBox_ = nullptr;
   QComboBox* clampCanBitrateBox_ = nullptr;
@@ -183,7 +194,12 @@ class MainWindow final : public QMainWindow {
   QPushButton* enableButton_ = nullptr;
   QPushButton* stopButton_ = nullptr;
   QPushButton* emergencyButton_ = nullptr;
-  QPushButton* autoDetectButton_ = nullptr;
+  QCheckBox* autoDetectCheckBox_ = nullptr;
+  QPushButton* imuConnectButton_ = nullptr;
+  QPushButton* cameraConnectButton_ = nullptr;
+  QLabel* imuConfigStateLabel_ = nullptr;
+  QLabel* cameraConfigStateLabel_ = nullptr;
+  QLabel* cameraFrameConfigLabel_ = nullptr;
   QLabel* clampConnectionLabel_ = nullptr;
   bool autoDetectRunning_ = false;
   QPlainTextEdit* logOutput_ = nullptr;

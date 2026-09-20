@@ -1,5 +1,9 @@
 # OpenCV weld recovery
 
+Live correction now uses SDK profile X/Z data; see `profile_weld_detection.md`.
+The image-based path below is retained for independent tests, not connected to
+the live correction input in `MainWindow`.
+
 The live source remains `DeviceController::correctionCameraFrameReady`: an
 SDK image decoded at original dimensions, independently of desktop preview
 scaling/throttling. No preview point cloud or screenshot enters perception.
@@ -16,10 +20,17 @@ Native link/toolchain compatibility has not been verified by a build.
 ## Detection
 
 The existing fitted plate baseline and measured dark-gap detector remain.
-When there is no measured gap (or only an inferred edge), OpenCV performs
+OpenCV checks every supported horizontal baseline, even if a dark gap was
+found, and performs
 median denoising, Otsu thresholding with a contrast floor, connected-component
 filtering, short-hole morphology, and robust Huber line fitting of elevated
 stripe points. Geometry always uses the original image coordinates.
+
+A raised candidate at least twice the width of a contradictory dark gap can
+replace that small gap. Comparable contradictory candidates are ambiguous
+and rejected; agreeing measurements retain the dark-gap result. Both paths
+independently enforce the identity gates. During reacquisition the last
+measured position bounds the search to prevent remote speckles taking over.
 
 A candidate requires real plate shoulders on both sides, an elevated stripe
 over at least 40% of the interval, no single missing interval above 40%, and
@@ -47,7 +58,7 @@ and later valid normal-gap observations ending in `containment_not_recovering`.
 Those are separate failure modes. Introducing a detector alone does not prove
 that steering converges; the existing response-weight reduction is unchanged.
 
-`python tools/verify_opencv_contour.py` uses the installed OpenCV Python binding
+`python tools/verify_opencv_contour.py --csv <profile.csv> --raw <origin.raw>` uses the installed OpenCV Python binding
 for seven offline geometric cases and analyzes the supplied 11:10 CSV. This is
 an algorithm experiment, **not execution of the C++/Qt detector**. Its report is
 `tmp/opencv_contour_verification.json`. `tests/opencv_laser_contour_tests.pro`

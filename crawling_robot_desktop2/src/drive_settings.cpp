@@ -90,7 +90,11 @@ void DriveSettings::save(QSettings& settings) const {
   settings.setValue(CRAWLING_TEXT("canBitrate"), canBitrate);
   settings.setValue(CRAWLING_TEXT("imuSerialPort"), imuSerialPort);
   settings.setValue(CRAWLING_TEXT("imuBaudRate"), imuBaudRate);
+  settings.setValue(CRAWLING_TEXT("imuOutputDivider"), imuOutputDivider);
   settings.setValue(CRAWLING_TEXT("laserSerialNumber"), laserSerialNumber);
+  settings.setValue(CRAWLING_TEXT("autoDetectPhysicalInterfaces"),
+                    autoDetectPhysicalInterfaces);
+  settings.setValue(CRAWLING_TEXT("manualJogPercent"), manualJogPercent);
   settings.setValue(CRAWLING_TEXT("clampSerialPort"), clampSerialPort);
   settings.setValue(CRAWLING_TEXT("clampSerialBaudRate"), clampSerialBaudRate);
   settings.setValue(CRAWLING_TEXT("clampCanBitrate"), clampCanBitrate);
@@ -135,7 +139,18 @@ DriveSettings DriveSettings::load(QSettings& settings) {
   value.canBitrate = settings.value(CRAWLING_TEXT("canBitrate"), value.canBitrate).toInt();
   value.imuSerialPort = settings.value(CRAWLING_TEXT("imuSerialPort"), value.imuSerialPort).toString();
   value.imuBaudRate = settings.value(CRAWLING_TEXT("imuBaudRate"), value.imuBaudRate).toInt();
+  value.imuOutputDivider = std::clamp(
+      settings.value(CRAWLING_TEXT("imuOutputDivider"),
+                     value.imuOutputDivider).toInt(),
+      1, 200);
   value.laserSerialNumber = settings.value(CRAWLING_TEXT("laserSerialNumber"), value.laserSerialNumber).toString();
+  value.autoDetectPhysicalInterfaces =
+      settings.value(CRAWLING_TEXT("autoDetectPhysicalInterfaces"),
+                     value.autoDetectPhysicalInterfaces).toBool();
+  value.manualJogPercent = std::clamp(
+      settings.value(CRAWLING_TEXT("manualJogPercent"),
+                     value.manualJogPercent).toInt(),
+      5, 100);
   value.clampSerialPort = settings.value(CRAWLING_TEXT("clampSerialPort"), value.clampSerialPort).toString();
   value.clampSerialBaudRate = settings.value(CRAWLING_TEXT("clampSerialBaudRate"), value.clampSerialBaudRate).toInt();
   value.clampCanBitrate = settings.value(CRAWLING_TEXT("clampCanBitrate"), value.clampCanBitrate).toInt();

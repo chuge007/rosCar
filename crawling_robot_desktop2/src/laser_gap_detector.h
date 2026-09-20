@@ -99,6 +99,10 @@ struct LaserGapDetection {
   bool contourSupported = false;
   bool contourFallback = false;
   bool opencvContour = false;
+  bool profileContour = false; // SDK X/Z scan; *Px fields denote scan indices.
+  double profileNoise = 0.0; // Native Z units, not pixel height or probability.
+  double profileBaselineSlope = 0.0;
+  double profileBaselineOffset = 0.0;
   bool contourAgreesWithGap = false;
   bool contourConflict = false;
   // Retained for source compatibility. Auxiliary contours are never dominant.

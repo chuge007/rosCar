@@ -7,6 +7,8 @@
 #include <QVector3D>
 #include <QWidget>
 
+class QPainter;
+
 namespace crawling {
 class PointCloudView final : public QWidget {
   Q_OBJECT
@@ -16,11 +18,23 @@ class PointCloudView final : public QWidget {
   void setPoints(const QVector<QVector3D>& points);
   void setImage(const QImage& image);
   void setDetectionImage(const QImage& image, const LaserGapDetection& detection);
+  void setProfileMode(bool active);
+  void setProfileObservation(const QVector<QVector3D>& points,
+                             const LaserGapDetection& detection,
+                             quint32 sourceFrameNumber, qint64 receivedAtEpochMs);
   void setProjectionPlane(int plane);
  protected:
   void paintEvent(QPaintEvent* event) override;
  private:
   void rebuildProjectionCache();
+  void paintProfile(QPainter& painter, const QRect& area);
+
+  bool profileMode_ = true;
+  QVector<QVector3D> scanPoints_;
+  LaserGapDetection scanDetection_;
+  quint32 scanFrameNumber_ = 0;
+  qint64 scanReceivedAtMs_ = 0;
+  bool profileUpdatePending_ = false;
 
   QVector<QVector3D> points_;
   QVector<QPoint> projectedPoints_;

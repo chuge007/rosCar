@@ -10,3 +10,4 @@ SOURCES += opencv_laser_contour_tests.cpp \
     ../src/laser_correction_controller.cpp ../src/laser_path_estimator.cpp \
     ../src/laser_seam_trajectory.cpp
 HEADERS += ../src/laser_correction_controller.h
+HEADERS += ../src/profile_weld_detector.h

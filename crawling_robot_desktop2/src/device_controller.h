@@ -27,6 +27,8 @@ class DeviceController final : public QObject {
   void autoDetectDevices(const QString& preferredImuPort, const QString& preferredLaserSerial);
   void scanCamera();
   void connectCamera(const QString& serialNumber);
+  void prepareCorrectionProfile();
+  void restoreOriginalPreview();
   void disconnectCamera();
   void shutdown();
  signals:
@@ -46,13 +48,18 @@ class DeviceController final : public QObject {
   // camera exposure time. Consumers can detect duplicates and queue delay.
   void correctionCameraFrameReady(const QImage& image, quint32 sourceFrameNumber,
                                   qint64 receivedAtEpochMs);
+  void correctionProfileFrameReady(const QVector<QVector3D>& points,
+                                   quint32 sourceFrameNumber, qint64 receivedAtEpochMs);
   void cameraImageReady();
+  void correctionProfilePrepared(bool ready);
+  void cameraProfileModeChanged(bool active);
   void logMessage(const QString& message);
  private slots:
   void readImu();
   void checkImuHealth();
   void captureCameraFrame();
  private:
+  void startProfilePreview();
   void resetCameraDiagnostics();
   QSerialPort imuPort_;
   Rim302FrameParser imuParser_;
@@ -60,6 +67,10 @@ class DeviceController final : public QObject {
   QTimer* cameraTimer_ = nullptr;
   std::unique_ptr<mv3dlp::Driver> camera_;
   qint64 lastPointCloudEmitMs_ = -1000;
+  qint64 lastCorrectionProfileEmitMs_ = -1000;
+  bool correctionProfilePreparing_ = false;
+  bool correctionProfileMode_ = false;
+  quint64 profilePrepareGeneration_ = 0;
   qint64 lastPreviewImageEmitMs_ = -1000;
   qint64 cameraAcquisitionStartedMs_ = 0;
   qint64 lastCameraFrameMs_ = 0;

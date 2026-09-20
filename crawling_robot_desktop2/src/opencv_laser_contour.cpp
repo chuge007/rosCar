@@ -37,8 +37,9 @@ LaserGapDetection OpenCvLaserContour::detect(
     }
     cv::Mat plate = cv::Mat::zeros(1, width, CV_8UC1);
     std::vector<double> raised(width, -1.0);
-    const double tolerance = std::clamp(halfWidth * 0.5, 4.0, 12.0);
-    const double minimumRise = std::max(8.0, tolerance * 1.5);
+    std::vector<std::vector<double>> ridges(width);
+    std::vector<double> parentResiduals;
+    const double parentWindow = std::clamp(halfWidth * 0.5, 4.0, 12.0);
     for (int x = 0; x < width; ++x) {
       const double baseline = offset + slope * x;
       for (int y = 0; y < image.height();) {
@@ -53,7 +54,26 @@ LaserGapDetection OpenCvLaserContour::detect(
         }
         if (weight <= 0 || y - start > std::max(12, image.height() / 12)) continue;
         const double center = moment / weight;
-        const double rise = baseline - center;
+        ridges[x].push_back(center);
+      }
+      double nearest = parentWindow + 1.0;
+      for (double center : ridges[x])
+        if (std::abs(baseline - center) < std::abs(nearest)) nearest = baseline - center;
+      if (std::abs(nearest) <= parentWindow) parentResiduals.push_back(nearest);
+    }
+    if (parentResiduals.size() < size_t(std::max(24, width / 20))) return result;
+    // Stripe thickness is not centroid noise. Estimate noise from the parent
+    // stripe so a clean, shallow displacement can still form a real gap.
+    // Keep the externally fitted baseline: a wide shallow weld can occupy
+    // most near-baseline samples. Use the closest quartile for parent noise.
+    for (double& residual : parentResiduals) residual = std::abs(residual);
+    std::sort(parentResiduals.begin(), parentResiduals.end());
+    const double noise = 1.4826 * parentResiduals[parentResiduals.size() / 4];
+    const double tolerance = std::max(1.5, noise * 3.0);
+    const double minimumRise = std::max(3.0, tolerance + std::max(1.0, noise));
+    for (int x = 0; x < width; ++x) {
+      for (double center : ridges[x]) {
+        const double rise = offset + slope * x - center;
         if (std::abs(rise) <= tolerance) plate.at<uchar>(0, x) = 255;
         if (rise >= minimumRise && rise <= image.height() * 0.45 &&
             (raised[x] < 0 || center > raised[x])) raised[x] = center;
@@ -78,7 +98,7 @@ LaserGapDetection OpenCvLaserContour::detect(
       const int start = x;
       while (x <= last && !closed.at<uchar>(0, x)) ++x;
       const int end = x - 1, length = end - start + 1;
-      if (length < std::max(12, int(width * std::max(0.02, config.minimumGapRatio))) ||
+      if (length < std::max(6, int(std::ceil(width * config.minimumGapRatio))) ||
           start - first < shoulder || last - end < shoulder) continue;
       int leftSupport = 0, rightSupport = 0;
       for (int j = 1; j <= shoulder * 2; ++j) {
@@ -105,11 +125,16 @@ LaserGapDetection OpenCvLaserContour::detect(
       if (std::abs(topSlope - slope) > 0.30) continue;
       int inliers = 0;
       const double rise = offset + slope * fitted[2] - fitted[3];
+      const bool weakGeometry = rise < 8.0 || length < width * 0.02;
+      if (rise < minimumRise ||
+          (weakGeometry && (coverage < 0.80 || longestHole > length * 0.15))) continue;
+      const double fitTolerance = weakGeometry ? std::max(1.0, noise * 2.0) :
+                                                 std::max(6.0, rise * 0.12);
       for (const auto& point : points) {
         if (std::abs(point.y - (fitted[3] + topSlope * (point.x - fitted[2]))) <=
-            std::max(6.0, rise * 0.12)) ++inliers;
+            fitTolerance) ++inliers;
       }
-      if (inliers < points.size() * 0.75) continue;
+      if (inliers < points.size() * (weakGeometry ? 0.90 : 0.75)) continue;
       const double center = (start + end) * 0.5 / (width - 1);
       const double normalizedWidth = double(length) / (width - 1);
       if (config.expectedAbsoluteCenterRatio >= 0 &&

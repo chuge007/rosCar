@@ -1,4 +1,5 @@
 #include "laser_correction_controller.h"
+#include "profile_weld_detector.h"
 #include "utf8_compat.h"
 
 #include <QStringList>
@@ -290,11 +291,7 @@ void LaserCorrectionController::setEnabled(bool enabled) {
                     "不能可靠回中则停止，边界保护优先于柔性纠偏")
           .arg(kInitialGapConfirmationFrames)
           .arg(kScanContainmentMarginRatio * 100.0, 0, 'f', 0));
-  emit logMessage(settings_.detector.allowOpenCvContour
-      ? CRAWLING_TEXT("定位方式：相机原尺寸图像，主基线缺口 + OpenCV 断续凸起轮廓；轮廓需连续五帧确认")
-      : settings_.detector.allowDisplacedContourFallback
-      ? CRAWLING_TEXT("定位方式：相机原尺寸主基线缺口优先，辅助轮廓仅低权补充")
-      : CRAWLING_TEXT("定位方式：相机原尺寸主基线缺口及双边中心；凸起轮廓接管已关闭"));
+  emit logMessage(CRAWLING_TEXT("定位方式：SDK 原始轮廓点 X/Z，母材基线与自适应凸起分段；不使用预览抽样点，连续三帧确认"));
   emit logMessage(CRAWLING_TEXT(
       "纠偏连续运行策略：实时原始图负责快速回中，连续拼接点云负责慢速航向；"
       "前进纠偏保持设置速度，短时无效时衰减旧转向；"
@@ -365,7 +362,38 @@ void LaserCorrectionController::processCameraFrame(
 }
 
 void LaserCorrectionController::processCameraImage(const QImage& image) {
-  if (image.isNull() || boundaryStopLatched_) return;
+  processObservation(image, nullptr);
+}
+
+void LaserCorrectionController::processProfileFrame(
+    const QVector<QVector3D>& points, quint32 sourceFrameNumber, qint64 receivedAtEpochMs) {
+  const qint64 age = QDateTime::currentMSecsSinceEpoch() - receivedAtEpochMs;
+  if (points.size() < 32 || age < 0 || age > settings_.imageTimeoutMs) return;
+  if (!status_.active || boundaryStopLatched_) {
+    // Live inspection is independent of robot enable and the stop latch.
+    // Do not refresh control state or reuse old tracking priors while idle.
+    auto config = settings_.detector;
+    config.expectedAbsoluteCenterRatio = -1;
+    config.expectedAbsoluteGapWidthRatio = -1;
+    config.referenceAbsoluteCenterRatio = -1;
+    emit profileObservationReady(points, ProfileWeldDetector::detect(points, config),
+                                  sourceFrameNumber, receivedAtEpochMs);
+    return;
+  }
+  if (sourceFrameNumberValid_ && sourceFrameNumber == sourceFrameNumber_) return;
+  sourceFrameNumber_ = sourceFrameNumber;
+  sourceFrameNumberValid_ = true;
+  sourceReceivedAtEpochMs_ = receivedAtEpochMs;
+  processingSourceFrame_ = true;
+  processObservation(QImage(), &points);
+  processingSourceFrame_ = false;
+}
+
+void LaserCorrectionController::processObservation(
+    const QImage& image, const QVector<QVector3D>* profile) {
+  if ((!profile && image.isNull()) || boundaryStopLatched_) return;
+  const int observationWidth = profile ? profile->size() : image.width();
+  const int observationHeight = profile ? 1 : image.height();
   boundaryObservationReliable_ = false;
   const qint64 now = clock_.elapsed();
   const qint64 queueAgeMs = processingSourceFrame_
@@ -391,13 +419,17 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
     beginSeamReacquisition(CRAWLING_TEXT("真实双边缘持续缺失，解除旧候选锁定"));
   }
   LaserGapDetectorConfig detectorConfig = settings_.detector;
-  // Global re-localization unlocks position, not the laser orientation or
-  // the scale of a confirmed seam. Otherwise a 30 px speckle hole can replace
-  // a 500 px weld just because the latter is temporarily clipped at the edge.
+  // Re-localization broadens the local search while preserving the last
+  // measured corridor, orientation and minimum seam scale.
   detectorConfig.referenceAbsoluteCenterRatio = -1.0;
   if (gapTrackerValid_) {
     detectorConfig.expectedAxis = trackedGapHorizontal_ ? 1 : 2;
     if (reacquisitionPending_) {
+      // Reacquire within the last measured corridor, not anywhere in the
+      // image. A stable speckle at the other edge is not the same weld.
+      detectorConfig.referenceAbsoluteCenterRatio = trackedGapAbsoluteCenterRatio_;
+      detectorConfig.maximumReferenceCenterDriftRatio = std::min(
+          0.15, std::max(0.08, detectorConfig.maximumAbsoluteCenterJumpRatio * 2.0));
       const double previousAbsoluteWidth = trackedGapWidthRatio_ *
           std::max(0.0, trackedLineEndRatio_ - trackedLineStartRatio_);
       detectorConfig.minimumGapRatio = std::max(
@@ -491,14 +523,27 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
   QElapsedTimer detectorTimer;
   detectorTimer.start();
   const LaserGapDetection detection =
-      LaserGapDetector::detect(image, detectorConfig, rawFrameDiagnosticOutput);
+      profile ? ProfileWeldDetector::detect(*profile, detectorConfig) :
+                LaserGapDetector::detect(image, detectorConfig, rawFrameDiagnosticOutput);
   const bool realTwoEdge = detection.valid && !detection.edgeBreakFallback &&
                            !detection.contourFallback;
   lastDetectorDurationMs_ = detectorTimer.elapsed();
   QElapsedTimer publicationTimer;
   publicationTimer.start();
-  if (status_.active) emit cameraObservationReady(image, detection);
-  if (rawFrameDiagnosticOutput) {
+  if (status_.active && !profile) emit cameraObservationReady(image, detection);
+  if (status_.active && profile)
+    emit profileObservationReady(*profile, detection, sourceFrameNumber_, sourceReceivedAtEpochMs_);
+  if (profile && cameraFrameSequence_ % 10 == 1) {
+    emit diagnosticLogMessage(QStringLiteral(
+        "event=laser_profile_detection source=sdk_xz sdk_frame=%1 samples=%2 valid=%3 "
+        "start_index=%4 end_index=%5 center_ratio=%6 confidence=%7 continuity_rejected=%8 width_rejected=%9 "
+        "noise_z=%10 baseline_slope=%11 baseline_offset_z=%12 grow_sigma=3 seed_sigma=5")
+        .arg(sourceFrameNumber_).arg(profile->size()).arg(detection.valid)
+        .arg(detection.gapStartPx).arg(detection.gapEndPx).arg(detection.absoluteCenterRatio)
+        .arg(detection.confidence).arg(detection.continuityRejected).arg(detection.widthRejected)
+        .arg(detection.profileNoise).arg(detection.profileBaselineSlope).arg(detection.profileBaselineOffset));
+  }
+  if (rawFrameDiagnosticOutput && !profile) {
     logRawFrameDiagnostic(rawFrameDiagnostic, detection, detectorConfig, now);
     queueRawFrame(image, rawFrameDiagnostic, detection, detectorConfig, now);
   }
@@ -579,7 +624,7 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
         // the old weld into an unrelated edge. Keep its last measured
         // envelope and deadline until the candidate is confirmed.
         updateScanBoundaryObservation(detection,
-            detection.horizontal ? image.width() : image.height(), lastImageMs_, false);
+            detection.horizontal ? observationWidth : observationHeight, lastImageMs_, false);
         if (stopIfScanBoundaryUnsafe(now)) return;
         publishStatus();
         return;
@@ -601,7 +646,8 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
               .arg(detection.absoluteCenterRatio * 100.0, 0, 'f', 2)
               .arg(candidateWidthRatio * 100.0, 0, 'f', 2)
               .arg(confirmableContour ? CRAWLING_TEXT("辅助轮廓，不写入暗缺口拟合点")
-                                       : CRAWLING_TEXT("真实双边缺口")));
+                                       : detection.profileContour ? CRAWLING_TEXT("SDK 原始轮廓凸起双边界")
+                                                                  : CRAWLING_TEXT("真实双边缺口")));
     }
   }
   if (detection.valid && !reacquisitionPending_) {
@@ -616,7 +662,7 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
   // An unconfirmed fallback cannot bypass the multi-frame identity gate.
   if (reacquisitionPending_) status_.gapValid = false;
   if (status_.gapValid && lineSpanPx > 0) {
-    const int axisLength = detection.horizontal ? image.width() : image.height();
+    const int axisLength = detection.horizontal ? observationWidth : observationHeight;
     latestImageAxisLengthPx_ = axisLength;
     latestLineStartPx_ = detection.lineStartPx;
     latestLineEndPx_ = detection.lineEndPx;
@@ -946,7 +992,7 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
     trackedGapWidthRatio_ =
         static_cast<double>(detection.gapEndPx - detection.gapStartPx + 1) /
         std::max(1, detection.lineEndPx - detection.lineStartPx + 1);
-    const int axisLength = detection.horizontal ? image.width() : image.height();
+    const int axisLength = detection.horizontal ? observationWidth : observationHeight;
     trackedLineStartRatio_ =
         static_cast<double>(detection.lineStartPx) / std::max(1, axisLength - 1);
     trackedLineEndRatio_ =
@@ -1031,7 +1077,9 @@ void LaserCorrectionController::logDetectionDiagnostic(
                     "置信度 %11，支撑点 %12，无效帧 %13，沿用帧 %14，"
                     "轮廓候选 %15（%16..%17 px，置信度 %18，冲突=%19）")
           .arg(phaseName(phase_))
-          .arg(detection.opencvContour
+          .arg(detection.profileContour
+                   ? CRAWLING_TEXT("sdk_profile_height")
+                   : detection.opencvContour
                    ? CRAWLING_TEXT("opencv_raised_contour")
                    : detection.contourFallback
                    ? CRAWLING_TEXT("contour_fallback")
@@ -2806,7 +2854,7 @@ bool LaserCorrectionController::stopIfImageTimedOut(qint64 now) {
             .arg(lastCommandMs_ < 0 ? -1 : now - lastCommandMs_)
             .arg(lastWatchdogTickMs_ < 0 ? -1 : now - lastWatchdogTickMs_)
             .arg(lastDetectorDurationMs_).arg(lastFrameQueueAgeMs_);
-    stop(CRAWLING_TEXT("激光原始图像超时，已停止自动纠偏"));
+    stop(CRAWLING_TEXT("激光采集数据超时，已停止自动纠偏"));
     emit diagnosticLogMessage(timeoutSnapshot);
     return true;
   }

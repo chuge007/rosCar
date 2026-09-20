@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <stdexcept>
 #include <utility>
 
 namespace crawling {
@@ -278,40 +279,11 @@ void DeviceController::connectCamera(const QString& serialNumber) {
       return;
     }
     if (camera_->isConnected()) {
-      // Auto-detect may already have opened this camera. Reuse that handle
-      // instead of issuing a second OpenDeviceBySN call.
-      if (!camera_->isAcquiring()) {
-        camera_->startAcquisition();
-        resetCameraDiagnostics();
-      }
-      cameraTimer_->start();
-      emit cameraConnectionChanged(true, QStringLiteral("Camera already connected; reusing existing handle"));
-      AppLogger::write(QStringLiteral("CAMERA.CONNECTION"),
-                       QStringLiteral("event=connect_complete result=REUSED serial=%1 acquiring=%2 timer_ms=%3")
-                           .arg(serial)
-                           .arg(camera_->isAcquiring()).arg(cameraTimer_->interval()));
+      startProfilePreview();
+      emit cameraConnectionChanged(true, QStringLiteral("Camera already connected; live profile preview active"));
       return;
     }
     camera_->connectBySerial(serial.toStdString());
-    // This HFR camera reports ImageMode=7 as its point-cloud/profile mode
-    // (see the SDK's IsHFRProfileMode path).  Keep that mode instead of
-    // forcing ImageMode=4, which is the non-HFR point-cloud mode on other
-    // cameras.  The driver consumes the per-profile callback, so we do not
-    // wait for the 2000-row range image assembled by the image callback.
-    QString model;
-    for (const auto& device : camera_->enumerateDevices()) {
-      if (QString::fromStdString(device.serial_number) == serial) {
-        model = QString::fromStdString(device.model_name);
-        break;
-      }
-    }
-    // Request the camera's original image stream. The application can convert
-    // depth frames for its lightweight preview, but the device is no longer
-    // asked to generate a point-cloud/range-image output first.
-    camera_->setAcquisitionMode(mv3dlp::AcquisitionMode::original_image);
-    AppLogger::write(QStringLiteral("CAMERA.CONFIG"),
-                     QStringLiteral("event=set_acquisition_mode result=OK serial=%1 model=%2 mode=original_image")
-                         .arg(serial).arg(model));
     // These parameters are optional across the two camera firmware families.
     // Apply them when supported, but never fail an otherwise valid connection.
     try {
@@ -330,11 +302,8 @@ void DeviceController::connectCamera(const QString& serialNumber) {
       AppLogger::warning(QStringLiteral("CAMERA.CONFIG"),
                          QStringLiteral("event=set_frame_rate result=UNSUPPORTED fallback=camera_default"));
     }
-    // Disable frame triggering so the camera free-runs continuously. The
-    // range-image callback is assembled by the camera from its profile lines;
-    // setting the acquisition rate prevents an old one-shot/external-trigger
-    // configuration from stretching the interval between completed images.
-    camera_->startAcquisition();
+    correctionProfileMode_ = false;
+    startProfilePreview();
     resetCameraDiagnostics();
     cameraTimer_->start();
     const QString message = CRAWLING_TEXT("\xE7\xBA\xBF""\xE6\xBF\x80""\xE5\x85\x89""\xE7\x9B\xB8""\xE6\x9C\xBA""\xE5\xB7\xB2""\xE8\xBF\x9E""\xE6\x8E\xA5""\xEF\xBC\x9A""%1").arg(serial);
@@ -351,7 +320,89 @@ void DeviceController::connectCamera(const QString& serialNumber) {
                          .arg(serial, message));
   }
 }
+void DeviceController::startProfilePreview() {
+  if (!camera_ || !camera_->isConnected()) throw std::runtime_error("Camera is not connected");
+  if (correctionProfileMode_ && camera_->isAcquiring()) {
+    cameraTimer_->start();
+    return;
+  }
+  // Query the connected device, not a model-name/serial-number heuristic.
+  // Both known models use mode 4; depth mode 7 may batch thousands of rows
+  // and is not a safe automatic replacement for per-scan correction input.
+  std::vector<std::uint32_t> supportedModes;
+  try {
+    supportedModes = camera_->supportedAcquisitionModes();
+    QStringList modes;
+    for (const auto mode : supportedModes) modes.append(QString::number(mode));
+    AppLogger::write(QStringLiteral("CAMERA.CONFIG"),
+        QStringLiteral("event=profile_capabilities supported_image_modes=%1 requested=4 sdk=%2")
+            .arg(modes.join(QLatin1Char(',')), QString::fromStdString(camera_->sdkVersion())));
+  } catch (const std::exception& e) {
+    // Older SDKs may permit SetParam but not this capability query. Keep
+    // the previously working path; SetParam and the first scan must succeed.
+    AppLogger::warning(QStringLiteral("CAMERA.CONFIG"),
+        QStringLiteral("event=profile_capabilities result=UNAVAILABLE fallback=validated_mode_4 error=%1")
+            .arg(QString::fromLocal8Bit(e.what())));
+  }
+  if (!supportedModes.empty() &&
+      std::find(supportedModes.begin(), supportedModes.end(), 4u) == supportedModes.end())
+    throw std::runtime_error("Camera does not advertise per-profile ImageMode=4");
+  cameraTimer_->stop();
+  if (camera_->isAcquiring()) camera_->stopAcquisition();
+  camera_->setAcquisitionMode(mv3dlp::AcquisitionMode::point_cloud_image);
+  camera_->startAcquisition();
+  correctionProfileMode_ = true;
+  lastCorrectionProfileEmitMs_ = -1000;
+  cameraTimer_->start();
+  emit cameraProfileModeChanged(true);
+}
+
+void DeviceController::prepareCorrectionProfile() {
+  const quint64 generation = ++profilePrepareGeneration_;
+  correctionProfilePreparing_ = true;
+  try {
+    emit logMessage(CRAWLING_TEXT("\xE5\x87\x86\xE5\xA4\x87\x20\x53\x44\x4B\x20\xE8\xBD\xAE\xE5\xBB\x93\xE8\xBE\x93\xE5\x85\xA5\xEF\xBC\x9A\xE6\xB2\xBF\xE7\x94\xA8\xE5\xAE\x9E\xE6\x97\xB6\xE8\xBD\xAE\xE5\xBB\x93\xE6\xB5\x81\xEF\xBC\x8C\xE7\xAD\x89\xE5\xBE\x85\xE6\x96\xB0\xE7\x9A\x84\xE5\xAE\x8C\xE6\x95\xB4\xE6\x89\xAB\xE6\x8F\x8F"));
+    startProfilePreview();
+    // Require a newly delivered scan, even when the idle preview was running.
+    lastCorrectionProfileEmitMs_ = -1000;
+    QTimer::singleShot(2000, this, [this, generation]() {
+      if (generation != profilePrepareGeneration_ || !correctionProfilePreparing_) return;
+      correctionProfilePreparing_ = false;
+      emit logMessage(CRAWLING_TEXT("\x53\x44\x4B\x20\xE8\xBD\xAE\xE5\xBB\x93\xE6\xB5\x81\xE6\x9C\xAA\xE5\x88\xB0\xE8\xBE\xBE\xEF\xBC\x8C\xE7\xBA\xA0\xE5\x81\x8F\xE6\x9C\xAA\xE5\x90\xAF\xE5\x8A\xA8\xEF\xBC\x9B\xE8\xAF\xB7\xE6\xA3\x80\xE6\x9F\xA5\xE7\x9B\xB8\xE6\x9C\xBA\xE9\x87\x87\xE9\x9B\x86\xE7\x8A\xB6\xE6\x80\x81"));
+      emit correctionProfilePrepared(false);
+    });
+  } catch (const std::exception& e) {
+    correctionProfilePreparing_ = false;
+    const QString detail = QString::fromLocal8Bit(e.what());
+    emit logMessage(CRAWLING_TEXT("\xE8\xBD\xAE\xE5\xBB\x93\xE9\x87\x87\xE9\x9B\x86\xE5\x87\x86\xE5\xA4\x87\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x9A") + detail);
+    AppLogger::error(QStringLiteral("CAMERA.ACQUISITION"),
+                     QStringLiteral("event=profile_prepare result=FAILED error=") + detail);
+    emit correctionProfilePrepared(false);
+  }
+}
+
+// Retain the existing queued slot name for compatibility. Stopping correction
+// now keeps native profile preview running; never switch the camera to images.
+void DeviceController::restoreOriginalPreview() {
+  ++profilePrepareGeneration_;
+  correctionProfilePreparing_ = false;
+  try {
+    if (!camera_ || !camera_->isConnected()) return;
+    startProfilePreview();
+    emit logMessage(CRAWLING_TEXT("\xE7\xBA\xA0\xE5\x81\x8F\xE5\xB7\xB2\xE5\x81\x9C\xE6\xAD\xA2\xEF\xBC\x8C\x53\x44\x4B\x20\xE5\x8E\x9F\xE5\xA7\x8B\xE8\xBD\xAE\xE5\xBB\x93\xE5\xAE\x9E\xE6\x97\xB6\xE9\xA2\x84\xE8\xA7\x88\xE7\xBB\xA7\xE7\xBB\xAD\xE8\xBF\x90\xE8\xA1\x8C"));
+  } catch (const std::exception& e) {
+    const QString detail = QString::fromLocal8Bit(e.what());
+    emit logMessage(CRAWLING_TEXT("\xE6\x81\xA2\xE5\xA4\x8D\xE8\xBD\xAE\xE5\xBB\x93\xE9\xA2\x84\xE8\xA7\x88\xE5\xA4\xB1\xE8\xB4\xA5\xEF\xBC\x9A") + detail);
+    AppLogger::error(QStringLiteral("CAMERA.ACQUISITION"),
+                     QStringLiteral("event=profile_preview_restore result=FAILED error=") + detail);
+  }
+}
+
 void DeviceController::disconnectCamera() {
+  ++profilePrepareGeneration_;
+  correctionProfilePreparing_ = false;
+  correctionProfileMode_ = false;
+  emit cameraProfileModeChanged(false);
   const bool wasConnected = camera_ && camera_->isConnected();
   const bool wasAcquiring = camera_ && camera_->isAcquiring();
   bool disconnectSucceeded = true;
@@ -494,6 +545,25 @@ void DeviceController::captureCameraFrame() {
         frame->type == mv3dlp::FrameType::profile_abc32) {
       const auto cloud = camera_->convertDepthToPointCloud(*frame);
       pointCount = cloud.points.size();
+      // Deliver the latest complete scan BEFORE preview decimation. Preserve
+      // invalid slots and original column order; never concatenate scan rows.
+      if (correctionProfileMode_ && frameReceivedMs - lastCorrectionProfileEmitMs_ >= 33 &&
+          cloud.width >= 32 && cloud.height > 0 &&
+          size_t(cloud.width) * cloud.height <= cloud.points.size()) {
+        QVector<QVector3D> rawProfile;
+        rawProfile.reserve(int(cloud.width));
+        const size_t rowStart = size_t(cloud.height - 1) * cloud.width;
+        for (size_t col = 0; col < cloud.width; ++col) {
+          const auto& p = cloud.points[rowStart + col];
+          rawProfile.append(QVector3D(p.x, p.y, p.z));
+        }
+        emit correctionProfileFrameReady(rawProfile, frame->frame_number, frameReceivedMs);
+        lastCorrectionProfileEmitMs_ = frameReceivedMs;
+        if (correctionProfilePreparing_) {
+          correctionProfilePreparing_ = false;
+          emit correctionProfilePrepared(true);
+        }
+      }
       // Keep acquisition at the camera rate, but limit the amount of data
       // copied into the GUI event queue. The control heartbeat must not be
       // delayed by repeated multi-thousand-point queued signal arguments.
