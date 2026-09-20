@@ -6,7 +6,15 @@ $vcVars = 'C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Aux
 $qmake = 'D:\qt\5.12.4\msvc2017_64\bin\qmake.exe'
 $deploy = 'D:\qt\5.12.4\msvc2017_64\bin\windeployqt.exe'
 $laserRuntime = Join-Path (Split-Path -Parent $projectRoot) 'modules\mv3dlp_laser_profile\windows_x64\bin'
-$vcRuntime = 'C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Redist\MSVC\14.16.27012\x64\Microsoft.VC141.CRT'
+# OpenCV's vc16 DLL needs the newer unified VC runtime, including
+# vcruntime140_1.dll. Do not overwrite it with the old VS2017 private CRT.
+$vcRuntime = Join-Path $env:WINDIR 'System32'
+$vcRuntimeFiles = @('msvcp140.dll', 'concrt140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+foreach ($runtimeFile in $vcRuntimeFiles) {
+    if (!(Test-Path -LiteralPath (Join-Path $vcRuntime $runtimeFile))) {
+        throw "Install the current Microsoft Visual C++ x64 redistributable: missing $runtimeFile"
+    }
+}
 
 if (!(Test-Path -LiteralPath $vcVars) -or !(Test-Path -LiteralPath $qmake)) {
     throw 'Qt 5.12.4/MSVC2017 x64 toolchain was not found at the configured paths.'
@@ -33,7 +41,9 @@ try {
     if (!(Test-Path -LiteralPath $vcRuntime)) {
         throw "MSVC x64 runtime was not found: $vcRuntime"
     }
-    Get-ChildItem -LiteralPath $vcRuntime -File | Copy-Item -Destination (Join-Path $buildRoot 'release') -Force
+    foreach ($runtimeFile in $vcRuntimeFiles) {
+        Copy-Item -LiteralPath (Join-Path $vcRuntime $runtimeFile) -Destination (Join-Path $buildRoot 'release') -Force
+    }
 } finally {
     Pop-Location
 }

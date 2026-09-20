@@ -32,7 +32,8 @@ struct LaserCorrectionSettings {
   // convention is fixed in the controller; this is no longer a UI setting.
   int steeringSign = 1;
   double targetSpeedMps = 0.005;
-  // Keep making forward progress while correcting a large heading error.
+  // Legacy configuration fields retained for compatibility. Cruise speed
+  // no longer scales with heading, boundary margin or observation quality.
   double minSpeedScale = 0.60;
   double speedReductionGain = 0.5;
   // Blend each newly fitted path into the current target instead of changing
@@ -186,6 +187,10 @@ class LaserCorrectionController final : public QObject {
                             double previousRightSpeedMps);
   bool stopIfMotionStalled(qint64 now);
   bool stopIfImageTimedOut(qint64 now);
+  bool stopIfScanBoundaryUnsafe(qint64 now);
+  void updateScanBoundaryObservation(const LaserGapDetection& detection,
+                                     int axisLengthPx, qint64 receivedMs,
+                                     bool identityConfirmed = true);
   void advanceFromTelemetry(qint64 now);
   void appendCurrentEdgeSample();
   void logRawFrameDiagnostic(const LaserRawFrameDiagnostic& diagnostic,
@@ -206,6 +211,8 @@ class LaserCorrectionController final : public QObject {
   double updateForwardSpeedSupervisor(qint64 now, double deltaSeconds,
                                       double boundaryScale);
   double laserBoundaryMargin(qint64 now) const;
+  double boundaryPredictionDisplacement(qint64 now) const;
+  int boundaryReturnDirection(qint64 now) const;
   void applyCommand(double targetLinearMps, double targetAngularRadps,
                     double deltaSeconds,
                     double curvatureLimitRadPerM = -1.0);
@@ -306,10 +313,8 @@ class LaserCorrectionController final : public QObject {
   int pendingFitDirectionCount_ = 0;
   double currentLinearMps_ = 0.0;
   double currentAngularRadps_ = 0.0;
-  // One supervisory loop owns forward-speed authority.  Perception quality
-  // and laser-boundary protection produce constraints, but they are merged
-  // once here instead of being multiplied independently in the steering
-  // controller.
+  // Cruise diagnostics remain compatible with older logs. All scale fields
+  // stay at one; perception and boundary risk trigger the separate stop gate.
   double speedSupervisorScale_ = 1.0;
   double speedSupervisorBoundaryScale_ = 1.0;
   double speedSupervisorObservationScale_ = 1.0;
@@ -342,6 +347,23 @@ class LaserCorrectionController final : public QObject {
   double pendingInitialGapAbsoluteCenterRatio_ = 0.5;
   double pendingInitialGapWidthRatio_ = 0.0;
   bool boundaryProtectionLogged_ = false;
+  bool boundaryContainmentActive_ = false;
+  // Independent raw-pixel safety observation. Reacquisition/segment changes
+  // must not clear a known edge risk or let inferred centers renew its age.
+  bool boundaryObservationReliable_ = false;
+  bool boundaryStopLatched_ = false;
+  qint64 boundaryObservationMs_ = -1;
+  double boundaryLineStartRatio_ = 0.0;
+  double boundaryLineEndRatio_ = 1.0;
+  double boundaryGapStartRatio_ = 0.5;
+  double boundaryGapEndRatio_ = 0.5;
+  // Kept separately: inferred edges and trajectory predictions may widen
+  // the warning envelope, but must not masquerade as a fresh measurement.
+  double boundaryMeasuredMarginRatio_ = 0.5;
+  double boundarySignedRateRatioPerS_ = 0.0;
+  qint64 boundaryRecoveryStartedMs_ = -1;
+  double boundaryRecoveryStartMargin_ = 0.0;
+  int boundaryRecoveryDirection_ = 0;
   bool centerRecoveryWindowActive_ = false;
   bool centerRecoveryProtectionLogged_ = false;
   bool centerResponseUntrusted_ = false;

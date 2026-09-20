@@ -7,6 +7,7 @@
 #include "point_cloud_view.h"
 
 #include <algorithm>
+#include <cmath>
 #include <QApplication>
 #include <QComboBox>
 #include <QCloseEvent>
@@ -1183,7 +1184,7 @@ void MainWindow::bindController() {
             if (pointCloud_) pointCloud_->setDetectionImage(image, detection);
           }, Qt::QueuedConnection);
   connect(correction_, &LaserCorrectionController::commandChanged, controller_,
-          &SynchronizedDriveController::setInputCommand, Qt::QueuedConnection);
+          &SynchronizedDriveController::setCorrectionCommand, Qt::QueuedConnection);
   connect(correction_, &LaserCorrectionController::statusChanged, this,
           &MainWindow::updateCorrectionStatus, Qt::QueuedConnection);
   connect(correction_, &LaserCorrectionController::logMessage, this,
@@ -1309,6 +1310,25 @@ void MainWindow::startAutoCorrection() {
   settings.wheelRadiusM = settings_.wheelRadiusM;
   settings.trackWidthM = settings_.trackWidthM;
   settings.minimumInnerWheelRatio = settings_.minimumInnerWheelRatio;
+  const double motorWheelLimitMps =
+      WheelMotorConfig::kMaximumSynchronizedMotorSpeedDps *
+      settings_.wheelRadiusM * kRadiansPerDegree /
+      settings_.motorOutputToWheelRatio;
+  const double correctionSpeedLimitMps = std::min(
+      {settings_.maximumLinearSpeedMps, settings_.maximumWheelSpeedMps,
+       motorWheelLimitMps});
+  if (!std::isfinite(settings.targetSpeedMps) ||
+      !std::isfinite(correctionSpeedLimitMps) ||
+      settings.targetSpeedMps <= 0.0 ||
+      settings.targetSpeedMps > correctionSpeedLimitMps) {
+    AppLogger::warning(QStringLiteral("UI.OPERATION"),
+        QStringLiteral("event=start_auto_correction result=REJECTED reason=speed_limit requested_mps=%1 limit_mps=%2")
+            .arg(settings.targetSpeedMps).arg(correctionSpeedLimitMps));
+    appendLog(CRAWLING_TEXT("纠偏速度 %1 mm/s 超过当前可用范围（上限 %2 mm/s），未启动；请调整纠偏速度。")
+                  .arg(settings.targetSpeedMps * kMillimetersPerMeter, 0, 'f', 1)
+                  .arg(correctionSpeedLimitMps * kMillimetersPerMeter, 0, 'f', 1));
+    return;
+  }
   QSettings persistent(DriveSettings::persistentFilePath(), QSettings::IniFormat);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/speed"), settings.targetSpeedMps);
   persistent.setValue(CRAWLING_TEXT("laserCorrection/segmentLength"), settings.segmentLengthM);
@@ -1357,7 +1377,7 @@ void MainWindow::updateCorrectionStatus(const LaserCorrectionStatus& status) {
                                          .arg(status.detectionHeld
                                                   ? CRAWLING_TEXT("沿用/预测")
                                                   : status.contourFallback
-                                                      ? CRAWLING_TEXT("轮廓辅助")
+                                                      ? CRAWLING_TEXT("凸起轮廓")
                                                       : status.edgeBreakFallback
                                                           ? CRAWLING_TEXT("边缘推断")
                                                           : CRAWLING_TEXT("双边缘原始图"))

@@ -49,6 +49,13 @@ struct LaserGapDetectorConfig {
   // If one weld edge is occluded or broken, the visible side can be used with
   // the previous line span/gap geometry to keep the trajectory continuous.
   bool allowEdgeBreakFallback = true;
+  // The baseline interruption and its two measured edges are the normal
+  // weld locator. Displaced ridges are disabled by default; optional use is
+  // limited to low-confidence recovery when no intensity gap is available.
+  bool allowDisplacedContourFallback = false;
+  // OpenCV checks a fragmented elevated stripe between measured shoulders.
+  // This is independent of the older strict/continuous contour fallback.
+  bool allowOpenCvContour = true;
   double edgeBreakGapRatio = 0.04;
   // At a laser boundary only a short portion of one side may remain visible.
   double minimumEdgeBreakRunRatio = 0.025;
@@ -85,17 +92,16 @@ struct LaserGapDetection {
   int supportingSamples = 0;
   bool continuityRejected = false;
   bool edgeBreakFallback = false;
-  // A raised/occluded weld can move the laser return outside the fitted
-  // baseline band, so no two-sided intensity gap is present. In that case
-  // contourFallback identifies a sustained displaced laser ridge. It is an
-  // auxiliary observation and intentionally carries a lower confidence than
-  // a measured two-edge gap.
+  // Auxiliary geometry from original camera pixels. OpenCV recovery is on
+  // by default; the older strict continuous-ridge fallback remains opt-in.
+  // A ridge never replaces a valid measured gap. Pixel displacement is not
+  // calibrated physical height.
   bool contourSupported = false;
   bool contourFallback = false;
+  bool opencvContour = false;
   bool contourAgreesWithGap = false;
   bool contourConflict = false;
-  // At acquisition, a much wider supported contour can be the main weld
-  // while a smaller, perfectly dark hole is only surface noise.
+  // Retained for source compatibility. Auxiliary contours are never dominant.
   bool contourDominant = false;
   double contourConfidence = 0.0;
   int contourStartPx = -1;
@@ -133,9 +139,8 @@ struct LaserRawFrameDiagnostic {
   QVector<int> rawProfile;
   QVector<int> filteredProfile;
   QVector<bool> presentProfile;
-  // Samples whose strongest laser ridge is persistently displaced from the
-  // fitted baseline. This is the raw-image contour signal used to recover a
-  // raised weld when the baseline stripe itself is temporarily absent.
+  // Samples with a persistent ridge along the baseline's image-up normal.
+  // Downward returns and dark holes are not raised-contour measurements.
   QVector<bool> contourProfile;
   int contourMinimumRunSamples = 0;
   int contourDisplacementThresholdPx = 0;

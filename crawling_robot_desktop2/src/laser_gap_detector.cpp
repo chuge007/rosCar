@@ -1,4 +1,5 @@
 #include "laser_gap_detector.h"
+#include "opencv_laser_contour.h"
 
 #include <QVector>
 
@@ -77,9 +78,9 @@ struct BaselineProjection {
   int contourLineEndSample = -1;
 };
 
-// Derive a geometric contour from the same raw image used by the baseline
-// detector. A weld raised above the plate may have no dark interruption in
-// the fitted stripe, but its laser return remains a bright, displaced ridge.
+// Derive a raised weld from original camera pixels. Positive height here is
+// the signed distance along the plate baseline's image-up normal; it is a
+// pixel displacement, not a calibrated physical height from the SDK.
 QVector<Run> collectRuns(const QVector<bool>& present);
 void closeSmallHoles(QVector<bool>* present, int maximumHole);
 void removeShortRuns(QVector<bool>* present, int minimumRun);
@@ -89,6 +90,10 @@ void detectDisplacedContour(const QImage& grayscale, int sampleStep,
                             const LaserGapDetectorConfig& config,
                             BaselineProjection* output) {
   if (!output || !output->valid || output->profile.isEmpty()) return;
+  // For a vertical stripe, image up is along the scan, not its cross-axis.
+  // Do not reinterpret a left/right return as a physical rise without a
+  // calibrated mounting convention. Intensity-gap recovery remains usable.
+  if (!horizontal) return;
   const int axisLength = horizontal ? grayscale.width() : grayscale.height();
   const int crossLength = horizontal ? grayscale.height() : grayscale.width();
   const int count = output->profile.size();
@@ -117,8 +122,8 @@ void detectDisplacedContour(const QImage& grayscale, int sampleStep,
                       : grayscale.constScanLine(axis)[cross];
   };
   QVector<bool> contour(count, false);
-  QVector<bool> negativeContour(count, false);
-  QVector<bool> positiveContour(count, false);
+  QVector<double> raisedHeight(count, -1.0);
+  const double normalScale = std::sqrt(1.0 + output->slope * output->slope);
   const int searchRadius = std::max(
       displacementThreshold + 4, static_cast<int>(std::lround(crossLength * 0.22)));
   for (int i = 0; i < count; ++i) {
@@ -149,26 +154,26 @@ void detectDisplacedContour(const QImage& grayscale, int sampleStep,
       }
       const int width = cross - start;
       if (width <= std::max(12, crossLength / 10) && weight > 0.0 &&
-          peak - backgroundLevel >= config.minimumContrast &&
-          std::abs(moment / weight - prediction) >= displacementThreshold) {
-        if (moment / weight < prediction) negativeContour[i] = true;
-        else positiveContour[i] = true;
+          peak - backgroundLevel >= config.minimumContrast) {
+        const double height = (prediction - moment / weight) / normalScale;
+        if (height >= displacementThreshold &&
+            (raisedHeight[i] < 0.0 || height < raisedHeight[i])) {
+          // Follow the nearest raised ridge instead of the brightest remote
+          // reflection. The run checks below require continuity and the two
+          // plate shoulders, not just a bright region above the baseline.
+          raisedHeight[i] = height;
+          contour[i] = true;
+        }
       }
     }
   }
-  // A raised or recessed surface has a consistent displacement sign; never
-  // join alternating upper/lower reflections into one artificial contour.
-  for (QVector<bool>* side : {&negativeContour, &positiveContour}) {
-    closeSmallHoles(side, holeLimit);
-    removeShortRuns(side, minimumRun);
-    closeSmallHoles(side, holeLimit);
-  }
-  for (int i = 0; i < count; ++i) {
-    contour[i] = negativeContour[i] || positiveContour[i];
-  }
+  // Only the image-up normal is a raised weld. A dark interruption or a
+  // below-baseline return must never be relabelled as raised geometry.
+  closeSmallHoles(&contour, holeLimit);
+  removeShortRuns(&contour, minimumRun);
+  closeSmallHoles(&contour, holeLimit);
   output->contourProfile = contour;
-  QVector<Run> runs = collectRuns(negativeContour);
-  runs += collectRuns(positiveContour);
+  const QVector<Run> runs = collectRuns(contour);
   if (runs.isEmpty()) return;
 
   int firstBaseline = -1;
@@ -192,6 +197,7 @@ void detectDisplacedContour(const QImage& grayscale, int sampleStep,
   int bestStart = -1;
   int bestEnd = -1;
   int bestSupport = 0;
+  double bestContinuity = 0.0;
   for (const Run& run : runs) {
     const int start = std::max(firstBaseline, run.start);
     const int end = std::min(lastBaseline, run.end);
@@ -209,17 +215,46 @@ void detectDisplacedContour(const QImage& grayscale, int sampleStep,
       if (output->ridgeCrossPx[i] >= 0) ++rightSupport;
     }
     const int exteriorSupport = leftSupport + rightSupport;
-    // Both shoulders are measured for this observation. A single visible
-    // shoulder remains admissible only at the established optical boundary;
-    // the ordinary interior case must have shoulders on both sides.
-    const double runCenterRatio =
-        (static_cast<double>(start + end) * 0.5 - firstBaseline) /
-        std::max(1, lineSpan - 1);
-    const bool nearBoundary = runCenterRatio < 0.18 || runCenterRatio > 0.82;
-    if ((!nearBoundary && (leftSupport < minimumExteriorSupport ||
-                           rightSupport < minimumExteriorSupport)) ||
-        (nearBoundary && std::max(leftSupport, rightSupport) <
-                              minimumExteriorSupport)) continue;
+    if (leftSupport < minimumExteriorSupport ||
+        rightSupport < minimumExteriorSupport) continue;
+    // Remote scattered pixels do not establish a shoulder. Require a
+    // continuous supported plate section close to each end of the rise.
+    const int shoulderWindow = std::max(minimumExteriorSupport * 3,
+                                         holeLimit * 2 + 1);
+    const auto continuousShoulder = [&](int from, int to, int direction) {
+      int contiguous = 0;
+      int longest = 0;
+      for (int i = from; direction > 0 ? i <= to : i >= to; i += direction) {
+        if (output->ridgeCrossPx[i] >= 0) {
+          longest = std::max(longest, ++contiguous);
+        } else {
+          contiguous = 0;
+        }
+      }
+      return longest >= minimumExteriorSupport;
+    };
+    if (!continuousShoulder(start - 1,
+                            std::max(firstBaseline, start - shoulderWindow), -1) ||
+        !continuousShoulder(end + 1,
+                            std::min(lastBaseline, end + shoulderWindow), 1)) continue;
+    int measuredRaised = 0;
+    int continuousPairs = 0;
+    int measuredPairs = 0;
+    int previousRaised = -1;
+    const double maximumHeightStep = std::max(6.0, output->halfWidthPx * 1.5);
+    for (int i = start; i <= end; ++i) {
+      if (raisedHeight[i] < 0.0) continue;
+      ++measuredRaised;
+      if (previousRaised >= 0) {
+        ++measuredPairs;
+        if (std::abs(raisedHeight[i] - raisedHeight[previousRaised]) <=
+            maximumHeightStep * (i - previousRaised)) ++continuousPairs;
+      }
+      previousRaised = i;
+    }
+    const double continuity = static_cast<double>(continuousPairs) /
+        std::max(1, measuredPairs);
+    if (measuredRaised < width * 0.85 || continuity < 0.90) continue;
     int unsupportedBaseline = 0;
     for (int i = start; i <= end; ++i) {
       if (output->ridgeCrossPx[i] < 0) ++unsupportedBaseline;
@@ -259,6 +294,7 @@ void detectDisplacedContour(const QImage& grayscale, int sampleStep,
       bestStart = start;
       bestEnd = end;
       bestSupport = exteriorSupport;
+      bestContinuity = continuity;
     }
   }
   if (bestStart < 0) return;
@@ -272,14 +308,11 @@ void detectDisplacedContour(const QImage& grayscale, int sampleStep,
       static_cast<double>(bestEnd - bestStart + 1) /
           std::max(1, lineSpan / 3),
       0.0, 1.0);
-  // Keep the auxiliary path below a normal measured gap's authority. The
-  // controller can use it to avoid losing the seam, then wait for a fresh
-  // two-edge observation before restoring full steering authority.
-  // Keep this below the controller's geometry-sample threshold. A contour
-  // recovery can hold the live center loop, but must not enter the stitched
-  // path fit until a normal two-edge frame corroborates it.
-  output->contourConfidence = std::min(0.075, 0.035 +
-      0.025 * widthScore + 0.025 * supportScore);
+  // A displaced ridge is only auxiliary evidence. Keep its authority below
+  // a measured two-edge baseline gap, even when both shoulders are visible.
+  output->contourConfidence = std::min(0.075,
+      0.030 + 0.015 * widthScore + 0.015 * supportScore +
+          0.015 * bestContinuity);
 }
 
 // Keep the long parent stripe, including a slope, separate from elevated or
@@ -495,8 +528,10 @@ BaselineProjection projectLaserBaseline(const QImage& grayscale,
     }
     output.profile[i] = (top[0] + top[1] + top[2]) / 3;
   }
-  detectDisplacedContour(grayscale, sampleStep, backgroundLevel, horizontal,
-                         config, &output);
+  if (config.allowDisplacedContourFallback) {
+    detectDisplacedContour(grayscale, sampleStep, backgroundLevel, horizontal,
+                           config, &output);
+  }
   return output;
 }
 
@@ -1116,7 +1151,6 @@ LaserGapDetection LaserGapDetector::detect(const QImage& image,
       result.contourEndPx = std::min(axisLength - 1,
           (baseline.contourEndSample + 1) * kSampleStep - 1);
       result.contourConfidence = baseline.contourConfidence;
-      bool contourPreferredByTrack = false;
       if (result.valid && !result.edgeBreakFallback) {
         const double gapCenter = (result.gapStartPx + result.gapEndPx) * 0.5;
         const double contourCenter =
@@ -1129,66 +1163,14 @@ LaserGapDetection LaserGapDetector::detect(const QImage& image,
             std::min(gapWidth, contourWidth) >=
                 std::max(gapWidth, contourWidth) * 0.50;
         result.contourConflict = !result.contourAgreesWithGap;
-        const bool hasTrackedIdentity = config.expectedAbsoluteCenterRatio >= 0.0 ||
-                                        config.expectedCenterRatio >= 0.0;
-        result.contourDominant = !hasTrackedIdentity &&
-            baseline.contourConfidence >= 0.060 &&
-            gapWidth < contourWidth * std::clamp(config.dominantGapMinimumRatio, 0.2, 0.8);
-        if (result.contourConflict &&
-            (config.expectedAbsoluteGapWidthRatio > 0.0 ||
-             (config.expectedGapWidthRatio > 0.0 &&
-              config.expectedLineStartRatio >= 0.0 &&
-              config.expectedLineEndRatio > config.expectedLineStartRatio)) &&
-            config.expectedAbsoluteCenterRatio >= 0.0 &&
-            config.expectedAbsoluteCenterRatio <= 1.0) {
-          const double expectedWidth = config.expectedAbsoluteGapWidthRatio > 0.0
-              ? config.expectedAbsoluteGapWidthRatio *
-                    std::max(1, axisLength - 1)
-              : config.expectedGapWidthRatio *
-                    (config.expectedLineEndRatio -
-                     config.expectedLineStartRatio) *
-                    std::max(1, axisLength - 1);
-          const double expectedCenter = config.expectedAbsoluteCenterRatio *
-              std::max(1, axisLength - 1);
-          const double gapWidthError =
-              std::abs(gapWidth - expectedWidth) / std::max(1.0, expectedWidth);
-          const double contourWidthError =
-              std::abs(contourWidth - expectedWidth) / std::max(1.0, expectedWidth);
-          // Candidate association may prefer a raised contour over a small
-          // surviving dark hole, but only using an established seam identity.
-          // A contour is deliberately capped at 0.075 confidence.  Therefore
-          // it must never replace an ordinary two-edge observation merely
-          // because its expected width is a better numerical match: require
-          // the raw observation to be genuinely weak and the contour to have
-          // strong geometric support.  The absolute-center/width gates above
-          // retain continuity with the confirmed seam identity. The result
-          // remains an auxiliary observation with reduced control authority.
-          constexpr double kMaximumRawConfidenceForContourOverride = 0.10;
-          constexpr double kMinimumContourConfidenceForOverride = 0.060;
-          const bool rawObservationIsWeak =
-              result.confidence < kMaximumRawConfidenceForContourOverride;
-          const bool contourObservationIsStrong =
-              baseline.contourConfidence >= kMinimumContourConfidenceForOverride;
-          contourPreferredByTrack =
-              rawObservationIsWeak && contourObservationIsStrong &&
-              gapWidthError > 0.45 &&
-              contourWidthError + 0.25 < gapWidthError &&
-              std::abs(contourCenter - expectedCenter) <=
-                  std::abs(gapCenter - expectedCenter) + axisLength * 0.01;
-        }
       }
-      // A trusted two-sided intensity gap remains the primary observation.
-      // Use the same-image contour when that observation is missing, is a
-      // single inferred edge, or is weak and disagrees with the known seam
-      // identity. No stale center is manufactured: both ends below are
-      // measured from the current raw image.
-      if (!result.valid || result.edgeBreakFallback || contourPreferredByTrack ||
-          result.contourDominant) {
+      // Preserve the measured baseline-gap identity, including a visible-edge
+      // recovery. Opt-in contours may fill a missing observation, but must not
+      // bypass a rejected center/width association or replace a valid gap.
+      if (!result.valid && !result.continuityRejected && !result.widthRejected) {
         result.valid = true;
         result.contourFallback = true;
         result.edgeBreakFallback = false;
-        result.continuityRejected = false;
-        result.widthRejected = false;
         result.gapStartPx = result.contourStartPx;
         result.gapEndPx = result.contourEndPx;
         result.lineStartPx = baseline.contourLineStartSample * kSampleStep;
@@ -1210,6 +1192,16 @@ LaserGapDetection LaserGapDetector::detect(const QImage& image,
     result.baselineOffsetPx = baseline.offsetPx;
     result.baselineSlope = baseline.slope;
     result.baselineHalfWidthPx = baseline.halfWidthPx;
+    // Retain a measured dark gap. When it is missing, OpenCV verifies the
+    // actual elevated stripe, including interrupted broad weld plateaus.
+    // Never bypass an existing temporal identity/width rejection.
+    if (horizontal && config.allowOpenCvContour &&
+        (!result.valid || result.edgeBreakFallback) &&
+        !result.continuityRejected && !result.widthRejected) {
+      const auto contour = OpenCvLaserContour::detect(grayscale, baseline.offsetPx,
+          baseline.slope, baseline.halfWidthPx, config);
+      if (contour.valid) result = contour;
+    }
     return result;
   };
   LaserGapDetection horizontal =
@@ -1254,6 +1246,13 @@ LaserGapDetection LaserGapDetector::detect(const QImage& image,
     horizontal.continuityRejected =
         horizontal.continuityRejected || vertical.continuityRejected;
     return returnWithDiagnostic(horizontal, horizontalDiagnostic);
+  }
+  // Even with auxiliary recovery explicitly enabled, a measured baseline
+  // gap on either axis takes precedence over a displaced-ridge fallback.
+  if (horizontal.contourFallback != vertical.contourFallback) {
+    return horizontal.contourFallback
+        ? returnWithDiagnostic(vertical, verticalDiagnostic)
+        : returnWithDiagnostic(horizontal, horizontalDiagnostic);
   }
   const double horizontalSpan = static_cast<double>(
       horizontal.lineEndPx - horizontal.lineStartPx + 1) / grayscale.width();

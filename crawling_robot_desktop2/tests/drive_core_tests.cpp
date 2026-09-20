@@ -39,11 +39,12 @@ QImage gapImage(int centerX) {
   return image;
 }
 
-QImage gapImageWithLine(int centerX, int lineStart, int lineEnd) {
+QImage gapImageWithLine(int centerX, int lineStart, int lineEnd,
+                       int halfWidth = 25) {
   QImage image(400, 120, QImage::Format_Grayscale8);
   image.fill(20);
-  const int gapStart = centerX - 25;
-  const int gapEnd = centerX + 25;
+  const int gapStart = centerX - halfWidth;
+  const int gapEnd = centerX + halfWidth;
   for (int y = 58; y <= 62; ++y) {
     uchar* row = image.scanLine(y);
     for (int x = lineStart; x < gapStart; ++x) row[x] = 245;
@@ -79,7 +80,9 @@ QImage displacedReflectionGapImage(bool vertical, double baselineSlope) {
 }
 
 QImage shallowRaisedContourImage(bool vertical, bool keepParentStripe,
-                                 bool addCompetingGap = false) {
+                                 bool addCompetingGap = false,
+                                 int displacementPx = -6,
+                                 double baselineSlope = 0.0) {
   QImage image(vertical ? 120 : 400, vertical ? 400 : 120,
                QImage::Format_Grayscale8);
   image.fill(20);
@@ -87,11 +90,12 @@ QImage shallowRaisedContourImage(bool vertical, bool keepParentStripe,
     image.scanLine(vertical ? axis : cross)[vertical ? cross : axis] = 180;
   };
   for (int axis = 20; axis <= 380; ++axis) {
+    const int baseline = qRound(60.0 + baselineSlope * (axis - 200));
     const bool raised = axis >= 140 && axis <= 260;
     const bool competingGap = addCompetingGap && axis >= 65 && axis <= 95;
     if ((!raised || keepParentStripe) && !competingGap) {
       for (int thickness = -2; thickness <= 2; ++thickness) {
-        paint(axis, 60 + thickness);
+        paint(axis, baseline + thickness);
       }
     }
     if (raised) {
@@ -99,7 +103,7 @@ QImage shallowRaisedContourImage(bool vertical, bool keepParentStripe,
       // intensity is enough to look continuous, but the geometric ridge is
       // 6 px away and therefore is not on the parent stripe.
       for (int thickness = -2; thickness <= 2; ++thickness) {
-        paint(axis, 66 + thickness);
+        paint(axis, baseline + displacementPx + thickness);
       }
     }
   }
@@ -149,6 +153,14 @@ bool startTrackingWithMeasuredGap(LaserCorrectionController& controller,
   }
   controller.processDriveTelemetry(
       enabledTelemetry(0.0, 0.0, settings.wheelRadiusM));
+  // An already marginal but measured weld bypasses the straight survey and
+  // starts the independent live centering loop immediately.
+  if (latestStatus.phase == QStringLiteral("分段跟踪")) {
+    controller.processCameraImage(image);
+    controller.processDriveTelemetry(
+        enabledTelemetry(0.0, 0.0, settings.wheelRadiusM));
+    return latestStatus.active && latestStatus.linearCommandMps > 0.0;
+  }
   if (!feedUntilCorrectionPhase(controller, settings, latestStatus,
                                 QStringLiteral("返回前停稳"), image,
                                 settings.targetSpeedMps) ||
@@ -179,6 +191,9 @@ class DriveCoreTests final : public QObject {
   void translatingTurnKeepsBothWheelsMovingForward();
   void translatingLeftTurnMirrorsWheelRatio();
   void speedLimitPreservesWheelRatio();
+  void correctionWheelCommandsPreserveMeanAfterSynchronization();
+  void correctionWheelCommandsKeepMeanAtHardLimit();
+  void correctionWheelCommandsRejectUnattainableOrInvalidMean();
   void feedbackSynchronizerThrottlesTheFasterSide();
   void feedbackSynchronizerKeepsReverseDirection();
   void staleFeedbackDisablesSynchronization();
@@ -195,10 +210,13 @@ class DriveCoreTests final : public QObject {
   void imageGapDetectorHandlesDiagonalBaseline();
   void imageGapDetectorDiagnosticsDoNotChangeDetection();
   void imageGapDetectorUsesShallowRaisedContour();
+  void imageGapDetectorRejectsDownwardAndVerticalContours();
+  void imageGapDetectorFollowsRaisedContourOnTiltedBaseline();
+  void imageGapDetectorRejectsFragmentedUpperReflections();
   void imageGapDetectorRejectsParallelReflectionAsContour();
   void imageGapDetectorRecordsContourConflict();
   void imageGapDetectorContourKeepsStrictIdentityGate();
-  void imageGapDetectorPrefersDominantRaisedWeldOverSmallDarkHole();
+  void imageGapDetectorDefaultsToBaselineGapWithoutContourTakeover();
   void imageGapDetectorKeepsAbsoluteCenterWhenLineSpanChanges();
   void imageGapDetectorAllowsLocalCenterJumpWhenAbsoluteCenterStable();
   void imageGapDetectorFillsSmallHolesAndKeepsDominantGap();
@@ -230,12 +248,24 @@ class DriveCoreTests final : public QObject {
   void correctionControllerReacquiresRejectedWiderGap();
   void correctionControllerBridgesTransientLaserDropout();
   void correctionControllerSurveysReturnsAndTracks();
-  void correctionControllerAllowsAccumulatedSurveyCenterDrift();
+  void correctionControllerAllowsAccumulatedCenterDrift();
   void correctionControllerPreservesSurveyDuringReturnReacquisition();
   void correctionControllerTracksAfterOnePoorSurveyWithMissingGap();
   void correctionControllerKeepsRequestedSurveyAndTrackingSpeed();
-  void correctionControllerConfirmsRaisedContourWithoutInventingFitPoints();
+  void correctionControllerUsesBaselineGapWithoutContourTakeover();
   void correctionControllerProtectsFullGapEnvelope();
+  void correctionControllerProtectsFullGapEnvelope_data();
+  void correctionControllerStopsAfterBoundaryRecoveryFails_data();
+  void correctionControllerStopsAfterBoundaryRecoveryFails();
+  void correctionControllerDoesNotStopOnPredictedMarginAlone();
+  void correctionControllerRecentersInsteadOfStraightSurvey_data();
+  void correctionControllerRecentersInsteadOfStraightSurvey();
+  void correctionControllerStartsWithMeasuredOffCenterWideWeld();
+  void correctionControllerDoesNotForceTurnForCenteredWideWeld();
+  void correctionControllerSteersBetweenTelemetryReplies();
+  void correctionControllerStopsOnUnobservedScanBoundary();
+  void correctionControllerStopsOnOutwardMeasuredWheelResponse();
+  void correctionControllerUsesPredictedThreatenedScanEdge();
   void correctionControllerSupervisesDetectionDropoutSpeed_data();
   void correctionControllerSupervisesDetectionDropoutSpeed();
   void protocolEncodesAndDecodesSpeedFrames();
@@ -657,30 +687,80 @@ void DriveCoreTests::imageGapDetectorKeepsAbsoluteCenterWhenLineSpanChanges() {
 }
 
 void DriveCoreTests::imageGapDetectorUsesShallowRaisedContour() {
-  for (bool vertical : {false, true}) {
-    LaserRawFrameDiagnostic diagnostic;
-    const LaserGapDetection result = LaserGapDetector::detect(
-        shallowRaisedContourImage(vertical, false), {}, &diagnostic);
-    QVERIFY(result.valid);
-    QCOMPARE(result.horizontal, !vertical);
+  LaserRawFrameDiagnostic diagnostic;
+  LaserGapDetectorConfig config;
+  config.allowDisplacedContourFallback = true;
+  const LaserGapDetection result = LaserGapDetector::detect(
+      shallowRaisedContourImage(false, false), config, &diagnostic);
+  QVERIFY(result.valid && result.horizontal);
+  QVERIFY(result.contourSupported && !result.contourDominant);
+  QVERIFY(result.contourFallback);
+  QVERIFY(!result.edgeBreakFallback);
+  QVERIFY(std::abs(result.gapStartPx - 140) <= 4);
+  QVERIFY(std::abs(result.gapEndPx - 260) <= 4);
+  QVERIFY(std::abs(result.absoluteCenterRatio - 200.0 / 399.0) < 0.01);
+  QVERIFY(result.confidence > 0.0);
+  QVERIFY(result.confidence <= 0.075 + 1e-9);
+  QCOMPARE(diagnostic.contourProfile.size(), diagnostic.rawProfile.size());
+  QVERIFY(diagnostic.contourProfile.at(100));
+  QVERIFY(diagnostic.presentProfile.at(100));
+  QVERIFY(diagnostic.ridgeCrossPx.at(100) < result.baselineOffsetPx);
+  QVERIFY(diagnostic.contourDisplacementThresholdPx >= 5);
+}
+
+void DriveCoreTests::imageGapDetectorRejectsDownwardAndVerticalContours() {
+  LaserGapDetectorConfig config;
+  config.allowDisplacedContourFallback = true;
+  const auto below = LaserGapDetector::detect(
+      shallowRaisedContourImage(false, false, false, 6), config);
+  QVERIFY(!below.contourSupported);
+  QVERIFY(!below.contourFallback);
+  QVERIFY(!below.contourDominant);
+  const auto vertical = LaserGapDetector::detect(
+      shallowRaisedContourImage(true, false), config);
+  QVERIFY(!vertical.contourSupported);
+  QVERIFY(!vertical.contourFallback);
+  QVERIFY(!vertical.contourDominant);
+}
+
+void DriveCoreTests::imageGapDetectorFollowsRaisedContourOnTiltedBaseline() {
+  LaserGapDetectorConfig config;
+  config.allowDisplacedContourFallback = true;
+  for (double slope : {-0.08, 0.08}) {
+    const auto result = LaserGapDetector::detect(
+        shallowRaisedContourImage(false, false, false, -6, slope), config);
+    QVERIFY(result.valid && !result.contourDominant);
     QVERIFY(result.contourSupported);
-    QVERIFY(result.contourFallback);
-    QVERIFY(!result.edgeBreakFallback);
+    if (result.contourFallback) QVERIFY(result.confidence <= 0.075 + 1e-9);
+    QVERIFY(std::abs(result.baselineSlope - slope) < 0.025);
     QVERIFY(std::abs(result.gapStartPx - 140) <= 4);
     QVERIFY(std::abs(result.gapEndPx - 260) <= 4);
-    QVERIFY(std::abs(result.absoluteCenterRatio - 200.0 / 399.0) < 0.01);
-    QVERIFY(result.confidence > 0.05);
-    QVERIFY(result.confidence <= 0.075 + 1e-9);
-    QCOMPARE(diagnostic.contourProfile.size(), diagnostic.rawProfile.size());
-    QVERIFY(diagnostic.contourProfile.at(100));
-    QVERIFY(diagnostic.presentProfile.at(100));
-    QVERIFY(diagnostic.contourDisplacementThresholdPx >= 5);
   }
 }
 
+void DriveCoreTests::imageGapDetectorRejectsFragmentedUpperReflections() {
+  QImage image(400, 120, QImage::Format_Grayscale8);
+  image.fill(20);
+  for (int x = 20; x <= 380; ++x) {
+    const bool upperFragment = x >= 140 && x <= 260 && (x / 8) % 2 == 0;
+    const int ridge = upperFragment ? 54 : 60;
+    for (int thickness = -2; thickness <= 2; ++thickness) {
+      image.scanLine(ridge + thickness)[x] = 180;
+    }
+  }
+  LaserGapDetectorConfig config;
+  config.allowDisplacedContourFallback = true;
+  const auto result = LaserGapDetector::detect(image, config);
+  QVERIFY(!result.contourSupported);
+  QVERIFY(!result.contourFallback);
+  QVERIFY(!result.contourDominant);
+}
+
 void DriveCoreTests::imageGapDetectorRejectsParallelReflectionAsContour() {
+  LaserGapDetectorConfig config;
+  config.allowDisplacedContourFallback = true;
   const LaserGapDetection result = LaserGapDetector::detect(
-      shallowRaisedContourImage(false, true));
+      shallowRaisedContourImage(false, true), config);
   // A second stripe beside an intact parent stripe has no measured raised
   // plate region; treating every off-band return as a weld would be unsafe.
   QVERIFY(!result.valid);
@@ -698,35 +778,42 @@ void DriveCoreTests::imageGapDetectorRecordsContourConflict() {
       if (!darkGap && !raised) image.scanLine(y)[x] = 180;
     }
     if (raised) {
-      for (int y = 64; y <= 68; ++y) image.scanLine(y)[x] = 180;
+      for (int y = 52; y <= 56; ++y) image.scanLine(y)[x] = 180;
     }
   }
-  const LaserGapDetection result = LaserGapDetector::detect(image);
+  LaserGapDetectorConfig config;
+  config.allowDisplacedContourFallback = true;
+  const LaserGapDetection result = LaserGapDetector::detect(image, config);
   QVERIFY(result.valid);
   QVERIFY(result.contourSupported);
   QVERIFY(result.contourConflict);
   QVERIFY(!result.contourAgreesWithGap);
-  // Without a tracked weld identity there is no evidence to arbitrarily
-  // replace one measured feature with another. Expose the conflict instead.
-  QVERIFY(!result.contourFallback);
+  // Auxiliary ridge diagnostics cannot replace the valid baseline gap.
+  QVERIFY(!result.contourFallback && !result.contourDominant);
   QVERIFY(std::abs(result.gapStartPx - 100) <= 4);
   QVERIFY(std::abs(result.gapEndPx - 160) <= 4);
   QVERIFY(std::abs(result.contourStartPx - 230) <= 4);
   QVERIFY(std::abs(result.contourEndPx - 270) <= 4);
 }
 
-void DriveCoreTests::imageGapDetectorPrefersDominantRaisedWeldOverSmallDarkHole() {
+void DriveCoreTests::imageGapDetectorDefaultsToBaselineGapWithoutContourTakeover() {
+  LaserRawFrameDiagnostic diagnostic;
+  const auto shallow = LaserGapDetector::detect(
+      shallowRaisedContourImage(false, false), {}, &diagnostic);
+  QVERIFY(!shallow.valid);
+  QVERIFY(!shallow.contourSupported && !shallow.contourFallback);
+  QVERIFY(diagnostic.contourProfile.isEmpty());
   const auto result = LaserGapDetector::detect(
       shallowRaisedContourImage(false, false, true));
-  QVERIFY(result.valid && result.contourFallback);
-  QVERIFY(result.contourDominant && result.contourConflict);
-  QVERIFY(std::abs(result.gapStartPx - 140) <= 4);
-  QVERIFY(std::abs(result.gapEndPx - 260) <= 4);
-  QVERIFY(result.confidence <= 0.075 + 1e-9);
+  QVERIFY(result.valid && !result.contourFallback);
+  QVERIFY(!result.contourDominant && !result.contourSupported);
+  QVERIFY(std::abs(result.gapStartPx - 65) <= 4);
+  QVERIFY(std::abs(result.gapEndPx - 95) <= 4);
 }
 
 void DriveCoreTests::imageGapDetectorContourKeepsStrictIdentityGate() {
   LaserGapDetectorConfig config;
+  config.allowDisplacedContourFallback = true;
   config.expectedAxis = 1;
   config.expectedCenterRatio = 0.2;
   config.expectedAbsoluteCenterRatio = 0.2;
@@ -1360,10 +1447,10 @@ void DriveCoreTests::correctionControllerReacquiresRejectedWiderGap() {
   const int oldEnd = latestStatus.gapEndPx;
   const double oldCenter = latestStatus.gapAbsoluteCenterRatio;
 
-  QImage widerGap = gapImage(250);
+  QImage widerGap = gapImage(230);
   for (int y = 58; y <= 62; ++y) {
     uchar* row = widerGap.scanLine(y);
-    for (int x = 190; x <= 310; ++x) row[x] = 20;
+    for (int x = 170; x <= 290; ++x) row[x] = 20;
   }
   const LaserGapDetection unconstrained = LaserGapDetector::detect(widerGap);
   QVERIFY(unconstrained.valid);
@@ -1633,7 +1720,7 @@ void DriveCoreTests::correctionControllerSurveysReturnsAndTracks() {
   QVERIFY(commandSpy.last().at(0).toDouble() > 0.0);
 }
 
-void DriveCoreTests::correctionControllerAllowsAccumulatedSurveyCenterDrift() {
+void DriveCoreTests::correctionControllerAllowsAccumulatedCenterDrift() {
   LaserCorrectionController controller;
   LaserCorrectionStatus latestStatus;
   connect(&controller, &LaserCorrectionController::statusChanged,
@@ -1643,6 +1730,7 @@ void DriveCoreTests::correctionControllerAllowsAccumulatedSurveyCenterDrift() {
   LaserCorrectionSettings settings;
   settings.segmentLengthM = 0.10;
   settings.targetSpeedMps = 0.20;
+  settings.maxLinearAccelerationMps2 = 100.0;
   settings.settleTimeMs = 100;
   settings.imageTimeoutMs = 1000;
   settings.telemetryTimeoutMs = 1000;
@@ -1656,31 +1744,27 @@ void DriveCoreTests::correctionControllerAllowsAccumulatedSurveyCenterDrift() {
       enabledTelemetry(0.0, 0.0, settings.wheelRadiusM));
   QCOMPARE(latestStatus.phase, QStringLiteral("首段采集"));
 
-  // Each displacement is small, but the accumulated 80 px exceeds the old
+  // Each displacement is small, but the accumulated 60 px exceeds the old
   // fixed startup-reference gate of 10% of the 400 px image. Every accepted
   // center must be the current measurement, never the held startup gap.
-  for (int center = 204; center <= 280; center += 4) {
+  for (int center = 204; center <= 260; center += 4) {
     controller.processCameraImage(gapImage(center));
+    controller.processDriveTelemetry(
+        enabledTelemetry(0.0, 0.0, settings.wheelRadiusM));
+    QVERIFY(latestStatus.active);
     QVERIFY(latestStatus.gapValid);
     QVERIFY(!latestStatus.detectionHeld);
     QVERIFY(!latestStatus.edgeBreakFallback);
     QVERIFY(std::abs(latestStatus.gapAbsoluteCenterRatio - center / 399.0) <
             0.005);
   }
-  QVERIFY(feedUntilCorrectionPhase(controller, settings, latestStatus,
-                                  QStringLiteral("返回前停稳"), gapImage(280),
-                                  settings.targetSpeedMps));
-  QVERIFY(feedUntilCorrectionPhase(controller, settings, latestStatus,
-                                  QStringLiteral("原路返回"), gapImage(280),
-                                  0.0));
-
-  // The same continuity rule must hold on return, including movement past
-  // the startup center in the opposite direction.
-  for (int center = 276; center >= 120; center -= 4) {
+  // Crossing the early containment margin may interrupt the survey. Neither
+  // that transition nor movement past the startup center may freeze identity.
+  for (int center = 256; center >= 140; center -= 4) {
     controller.processCameraImage(gapImage(center));
     controller.processDriveTelemetry(
         enabledTelemetry(0.0, 0.0, settings.wheelRadiusM));
-    QCOMPARE(latestStatus.phase, QStringLiteral("原路返回"));
+    QVERIFY(latestStatus.active);
     QVERIFY(latestStatus.gapValid);
     QVERIFY(!latestStatus.detectionHeld);
     QVERIFY(!latestStatus.edgeBreakFallback);
@@ -1726,9 +1810,9 @@ void DriveCoreTests::correctionControllerPreservesSurveyDuringReturnReacquisitio
                                   QStringLiteral("原路返回"), gapImage(200),
                                   0.0));
 
-  QImage widerGap = gapImage(250);
+  QImage widerGap = gapImage(200);
   for (int y = 58; y <= 62; ++y) {
-    for (int x = 190; x <= 310; ++x) widerGap.scanLine(y)[x] = 20;
+    for (int x = 140; x <= 260; ++x) widerGap.scanLine(y)[x] = 20;
   }
   const LaserGapDetection replacement = LaserGapDetector::detect(widerGap);
   QVERIFY(replacement.valid && !replacement.edgeBreakFallback);
@@ -1897,59 +1981,54 @@ void DriveCoreTests::correctionControllerKeepsRequestedSurveyAndTrackingSpeed() 
   controller.setEnabled(false);
 }
 
-void DriveCoreTests::correctionControllerConfirmsRaisedContourWithoutInventingFitPoints() {
+void DriveCoreTests::correctionControllerUsesBaselineGapWithoutContourTakeover() {
   LaserCorrectionController controller;
   LaserCorrectionStatus latest;
   connect(&controller, &LaserCorrectionController::statusChanged,
           [&latest](const LaserCorrectionStatus& status) { latest = status; });
-  QSignalSpy diagnosticSpy(&controller, &LaserCorrectionController::diagnosticLogMessage);
   LaserCorrectionSettings settings;
-  settings.segmentLengthM = 0.02;
-  settings.targetSpeedMps = 0.030;
-  settings.settleTimeMs = 100;
   settings.imageTimeoutMs = 1000;
   settings.telemetryTimeoutMs = 1000;
   const QImage contour = shallowRaisedContourImage(false, false);
-  QVERIFY(LaserGapDetector::detect(contour).contourFallback);
+  QVERIFY(!settings.detector.allowDisplacedContourFallback);
+  QVERIFY(!LaserGapDetector::detect(contour, settings.detector).valid);
   controller.setSettings(settings);
   controller.setEnabled(true);
   controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
-  for (int frame = 0; frame < 4; ++frame) {
+  // More than the former five-frame contour confirmation must still leave
+  // the default gap-only mode stationary until real gap edges arrive.
+  for (int frame = 0; frame < 8; ++frame) {
     controller.processCameraImage(contour);
     QCOMPARE(latest.phase, QStringLiteral("等待输入"));
     QCOMPARE(latest.linearCommandMps, 0.0);
+    QVERIFY(!latest.contourFallback);
   }
-  controller.processCameraImage(contour);
+  const QImage gap = gapImage(200);
+  for (int frame = 0; frame < 3; ++frame) controller.processCameraImage(gap);
   QCOMPARE(latest.phase, QStringLiteral("首段采集"));
-  QVERIFY(latest.contourFallback);
-  QCOMPARE(latest.collectedSamples, 0);
-  controller.setEnabled(false);
-
-  // First establish a real two-edge identity of the same physical width.
-  // A sustained raised contour must stay usable after the old 1.8 s timer,
-  // while all geometric fit points remain from the real observations only.
-  QVERIFY(startTrackingWithMeasuredGap(controller, settings, latest,
-                                      displacedReflectionGapImage(false, 0.0)));
-  const int realSamples = latest.collectedSamples;
-  diagnosticSpy.clear();
-  QElapsedTimer interval;
-  interval.start();
-  while (interval.elapsed() < 2100) {
-    QTest::qWait(25);
-    controller.processCameraImage(contour);
-    controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
-    QVERIFY(latest.active && latest.gapValid);
-    QVERIFY(latest.contourFallback && !latest.detectionHeld);
-    QVERIFY(latest.linearCommandMps > 0.0);
-    QCOMPARE(latest.collectedSamples, realSamples);
-  }
-  for (const QList<QVariant>& entry : diagnosticSpy) {
-    QVERIFY(!entry.first().toString().contains(QStringLiteral("event=seam_reacquisition ")));
-  }
+  QVERIFY(latest.gapValid && !latest.contourFallback);
+  QVERIFY(latest.collectedSamples > 0);
   controller.setEnabled(false);
 }
 
+void DriveCoreTests::correctionControllerProtectsFullGapEnvelope_data() {
+  QTest::addColumn<int>("center");
+  QTest::addColumn<int>("lineStart");
+  QTest::addColumn<int>("lineEnd");
+  QTest::addColumn<int>("halfWidth");
+  QTest::addColumn<int>("returnDirection");
+  QTest::newRow("right-real-laser-end") << 240 << 0 << 300 << 25 << 1;
+  QTest::newRow("left-real-laser-end") << 160 << 100 << 399 << 25 << -1;
+  QTest::newRow("right-complete-wide-weld") << 230 << 0 << 320 << 60 << 1;
+  QTest::newRow("left-complete-wide-weld") << 170 << 80 << 399 << 60 << -1;
+}
+
 void DriveCoreTests::correctionControllerProtectsFullGapEnvelope() {
+  QFETCH(int, center);
+  QFETCH(int, lineStart);
+  QFETCH(int, lineEnd);
+  QFETCH(int, halfWidth);
+  QFETCH(int, returnDirection);
   LaserCorrectionController controller;
   LaserCorrectionStatus latest;
   connect(&controller, &LaserCorrectionController::statusChanged,
@@ -1958,51 +2037,410 @@ void DriveCoreTests::correctionControllerProtectsFullGapEnvelope() {
   LaserCorrectionSettings settings;
   settings.segmentLengthM = 0.02;
   settings.targetSpeedMps = 0.030;
+  settings.maxLinearAccelerationMps2 = 100.0;
   settings.settleTimeMs = 100;
   settings.imageTimeoutMs = 1000;
   settings.telemetryTimeoutMs = 1000;
-  const QImage image = gapImageWithLine(340, 0, 399);
+  const QImage initial = gapImageWithLine(center, 0, 399, halfWidth);
+  settings.derivativeGain = 2.0;
+  QVERIFY(startTrackingWithMeasuredGap(controller, settings, latest, initial));
+  diagnostics.clear();
+  const QImage image = gapImageWithLine(center, lineStart, lineEnd, halfWidth);
   const auto detection = LaserGapDetector::detect(image);
   QVERIFY(detection.valid && !detection.edgeBreakFallback);
-  QVERIFY(1.0 - detection.absoluteCenterRatio > 0.10);
-  QVERIFY((399.0 - detection.gapEndPx) / 399.0 < 0.10);
-  QVERIFY(startTrackingWithMeasuredGap(controller, settings, latest, image));
+  const double span = detection.lineEndPx - detection.lineStartPx;
+  const double envelopeMargin = std::min(
+      detection.gapStartPx - detection.lineStartPx,
+      detection.lineEndPx - detection.gapEndPx) / span;
+  const double centerMargin = std::min(detection.normalizedCenter,
+                                       1.0 - detection.normalizedCenter);
+  QVERIFY(centerMargin > 0.15);
+  QVERIFY(envelopeMargin > 0.04 && envelopeMargin < 0.15);
+  // The actual illuminated span contracts while the weld remains at the
+  // same camera pixels. The complete weld edge needs immediate inward
+  // authority even though its center is still comfortably inside the span.
   QElapsedTimer interval;
   interval.start();
   while (interval.elapsed() < 600) {
     QTest::qWait(20);
     controller.processCameraImage(image);
-    controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+    auto telemetry = enabledTelemetry(0, 0, settings.wheelRadiusM);
+    // Yaw damping opposes the required recovery direction. It must not
+    // reverse the final boundary command as it did in the field log.
+    telemetry.left.wheelSpeedMps = returnDirection * 0.02;
+    telemetry.right.wheelSpeedMps = -returnDirection * 0.02;
+    controller.processDriveTelemetry(telemetry);
+    QVERIFY(latest.active);
+    QVERIFY(latest.angularCommandRadps * returnDirection > 0.0);
+    QVERIFY(std::abs(latest.linearCommandMps - settings.targetSpeedMps) < 1e-8);
   }
   QVERIFY(latest.active);
-  QVERIFY(latest.linearCommandMps < settings.targetSpeedMps * 0.95);
-  QVERIFY(latest.linearCommandMps >= settings.targetSpeedMps * 0.45 - 1e-8);
-  QVERIFY(latest.angularCommandRadps > 0.0);
   bool sawEnvelope = false;
   const QString prefix = QStringLiteral("event=laser_control_output json=");
   for (const QList<QVariant>& entry : diagnostics) {
     const QString text = entry.first().toString();
     if (!text.startsWith(prefix)) continue;
     const auto record = QJsonDocument::fromJson(text.mid(prefix.size()).toUtf8()).object();
-    QVERIFY(record.value(QStringLiteral("boundary_envelope_margin_ratio")).toDouble() < 0.10);
+    QVERIFY(record.value(QStringLiteral("boundary_envelope_margin_ratio")).toDouble() < 0.15);
     sawEnvelope = true;
   }
   QVERIFY(sawEnvelope);
   controller.setEnabled(false);
 }
 
+void DriveCoreTests::correctionControllerDoesNotStopOnPredictedMarginAlone() {
+  LaserCorrectionController controller;
+  LaserCorrectionStatus latest;
+  connect(&controller, &LaserCorrectionController::statusChanged,
+          [&latest](const LaserCorrectionStatus& status) { latest = status; });
+  LaserCorrectionSettings settings;
+  settings.segmentLengthM = 1.0;
+  settings.targetSpeedMps = 0.030;
+  settings.maxLinearAccelerationMps2 = 0.005;
+  settings.imageTimeoutMs = 1000;
+  settings.telemetryTimeoutMs = 1000;
+  const QImage initial = gapImageWithLine(240, 0, 399);
+  controller.setSettings(settings);
+  controller.setEnabled(true);
+  controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  for (int frame = 0; frame < 3; ++frame) controller.processCameraImage(initial);
+  // Stay under the same containment direction beyond its 1.5 s recovery
+  // deadline. Outward image drift predicts an edge loss, but the actual
+  // right shoulder retains at least 13% of the scan throughout.
+  for (int frame = 0; frame < 100; ++frame) {
+    QTest::qWait(20);
+    const int center = 240 + frame * 80 / 99;
+    const QImage image = gapImageWithLine(center, 0, 399);
+    const auto detection = LaserGapDetector::detect(image);
+    QVERIFY(detection.valid && !detection.edgeBreakFallback);
+    QVERIFY((detection.lineEndPx - detection.gapEndPx) /
+        double(detection.lineEndPx - detection.lineStartPx) > 0.04);
+    controller.processCameraImage(image);
+    controller.processDriveTelemetry(
+        enabledTelemetry(0, settings.targetSpeedMps, settings.wheelRadiusM));
+    QVERIFY2(latest.active, qPrintable(latest.reason));
+    QCOMPARE(latest.phase, QStringLiteral("首段采集"));
+  }
+  QVERIFY(latest.angularCommandRadps > 0.0);
+  controller.setEnabled(false);
+}
+
+void DriveCoreTests::correctionControllerStopsAfterBoundaryRecoveryFails_data() {
+  QTest::addColumn<int>("lineStart");
+  QTest::addColumn<int>("lineEnd");
+  QTest::addColumn<int>("halfWidth");
+  QTest::addColumn<int>("lastCenter");
+  QTest::addColumn<bool>("measuredAtCritical");
+  QTest::newRow("right-measured-critical") << 20 << 399 << 25 << 359 << true;
+  QTest::newRow("left-measured-critical") << 0 << 379 << 25 << 39 << true;
+  QTest::newRow("right-narrow-laser-loses-support") << 100 << 300 << 25 << 270 << false;
+  QTest::newRow("left-narrow-laser-loses-support") << 100 << 300 << 25 << 130 << false;
+  QTest::newRow("wide-weld-right-edge") << 0 << 399 << 60 << 324 << true;
+  QTest::newRow("wide-weld-left-edge") << 0 << 399 << 60 << 74 << true;
+}
+
+void DriveCoreTests::correctionControllerStopsAfterBoundaryRecoveryFails() {
+  QFETCH(int, lineStart);
+  QFETCH(int, lineEnd);
+  QFETCH(int, halfWidth);
+  QFETCH(int, lastCenter);
+  QFETCH(bool, measuredAtCritical);
+  LaserCorrectionController controller;
+  LaserCorrectionStatus latest;
+  connect(&controller, &LaserCorrectionController::statusChanged,
+          [&latest](const LaserCorrectionStatus& status) { latest = status; });
+  QSignalSpy commands(&controller, &LaserCorrectionController::commandChanged);
+  LaserCorrectionSettings settings;
+  settings.segmentLengthM = 0.02;
+  settings.targetSpeedMps = 0.030;
+  settings.settleTimeMs = 100;
+  settings.imageTimeoutMs = 1000;
+  settings.telemetryTimeoutMs = 1000;
+  const QImage finalImage = gapImageWithLine(lastCenter, lineStart, lineEnd, halfWidth);
+  const LaserGapDetection finalDetection = LaserGapDetector::detect(finalImage, settings.detector);
+  if (measuredAtCritical) {
+    // The 2 px sampling leaves seven samples on the weaker shoulder. The
+    // shorter opposite shoulder keeps confidence above the 0.060 boundary
+    // observation gate; detector validity alone does not establish this.
+    QVERIFY(finalDetection.valid && !finalDetection.edgeBreakFallback);
+    QVERIFY(finalDetection.confidence >= 0.060);
+    const double margin = std::min(
+        finalDetection.gapStartPx - finalDetection.lineStartPx,
+        finalDetection.lineEndPx - finalDetection.gapEndPx) /
+        static_cast<double>(finalDetection.lineEndPx - finalDetection.lineStartPx);
+    QVERIFY(margin > 0.0 && margin <= 0.04);
+  } else {
+    // A 200 px illuminated span reaches insufficient sample support before
+    // the 4% threshold. This case must fail through observation age instead.
+    QVERIFY(!finalDetection.valid || finalDetection.confidence < 0.060);
+  }
+  const QImage centered = gapImageWithLine(200, lineStart, lineEnd, halfWidth);
+  QVERIFY(startTrackingWithMeasuredGap(controller, settings, latest, centered));
+  const int direction = lastCenter > 200 ? 1 : -1;
+  for (int center = 200; latest.active &&
+       (center - lastCenter) * direction <= 0; center += direction * 2) {
+    controller.processCameraImage(
+        gapImageWithLine(center, lineStart, lineEnd, halfWidth));
+    controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  }
+  // Reliable critical observations get a response deadline; insufficient
+  // shoulder support gets the independent observation deadline.
+  QElapsedTimer deadline;
+  deadline.start();
+  while (latest.active && deadline.elapsed() < 2200) {
+    QTest::qWait(20);
+    controller.processCameraImage(finalImage);
+    controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  }
+  QVERIFY(!latest.active);
+  QCOMPARE(commands.last().at(0).toDouble(), 0.0);
+  QCOMPARE(commands.last().at(1).toDouble(), 0.0);
+  const QString stoppedReason = latest.reason;
+  QVERIFY(stoppedReason.contains(measuredAtCritical
+      ? QStringLiteral("containment_not_recovering")
+      : QStringLiteral("unreliable_seam_near_boundary")));
+  QVERIFY(!stoppedReason.isEmpty());
+  for (int frame = 0; frame < 5; ++frame) {
+    controller.processCameraImage(centered);
+    controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  }
+  QVERIFY(!latest.active);
+  QCOMPARE(latest.linearCommandMps, 0.0);
+  QCOMPARE(latest.reason, stoppedReason);
+  // Fresh camera frames cannot silently restart a stopped chassis.
+  controller.setEnabled(true);
+  for (int frame = 0; frame < 3; ++frame) controller.processCameraImage(centered);
+  controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  QVERIFY(latest.active);
+  controller.setEnabled(false);
+}
+
+void DriveCoreTests::correctionControllerRecentersInsteadOfStraightSurvey_data() {
+  QTest::addColumn<bool>("duringReturn");
+  QTest::newRow("forward-survey") << false;
+  QTest::newRow("reverse-survey") << true;
+}
+
+void DriveCoreTests::correctionControllerRecentersInsteadOfStraightSurvey() {
+  QFETCH(bool, duringReturn);
+  LaserCorrectionController controller;
+  LaserCorrectionStatus latest;
+  connect(&controller, &LaserCorrectionController::statusChanged,
+          [&latest](const LaserCorrectionStatus& status) { latest = status; });
+  QSignalSpy commands(&controller, &LaserCorrectionController::commandChanged);
+  LaserCorrectionSettings settings;
+  settings.segmentLengthM = 0.02;
+  settings.targetSpeedMps = 0.030;
+  settings.maxLinearAccelerationMps2 = 100.0;
+  settings.settleTimeMs = 100;
+  settings.imageTimeoutMs = 1000;
+  settings.telemetryTimeoutMs = 1000;
+  const QImage safe = gapImageWithLine(240, 0, 399);
+  controller.setSettings(settings);
+  controller.setEnabled(true);
+  for (int frame = 0; frame < 3; ++frame) controller.processCameraImage(safe);
+  controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  QCOMPARE(latest.phase, QStringLiteral("首段采集"));
+  if (duringReturn) {
+    QVERIFY(feedUntilCorrectionPhase(controller, settings, latest,
+        QStringLiteral("返回前停稳"), safe, settings.targetSpeedMps));
+    QVERIFY(feedUntilCorrectionPhase(controller, settings, latest,
+        QStringLiteral("原路返回"), safe, 0.0));
+  }
+  const QImage nearEdge = gapImageWithLine(240, 0, 300);
+  controller.processCameraImage(nearEdge);
+  controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  QVERIFY(latest.active);
+  // Containment may steer either survey leg, but cannot skip its distance
+  // or either settled direction change.
+  QCOMPARE(latest.phase, duringReturn ? QStringLiteral("原路返回")
+                                     : QStringLiteral("首段采集"));
+  controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  QVERIFY(latest.active);
+  QVERIFY(latest.angularCommandRadps > 0.0);
+  const double surveySpeed = duringReturn ? -settings.targetSpeedMps
+                                         : settings.targetSpeedMps;
+  QVERIFY(std::abs(latest.linearCommandMps - surveySpeed) < 1e-8);
+  if (!duringReturn) {
+    QVERIFY(feedUntilCorrectionPhase(controller, settings, latest,
+        QStringLiteral("返回前停稳"), nearEdge, settings.targetSpeedMps));
+    QVERIFY(feedUntilCorrectionPhase(controller, settings, latest,
+        QStringLiteral("原路返回"), nearEdge, 0.0));
+  }
+  QVERIFY(feedUntilCorrectionPhase(controller, settings, latest,
+      QStringLiteral("跟踪前停稳"), nearEdge, -settings.targetSpeedMps));
+  QVERIFY(feedUntilCorrectionPhase(controller, settings, latest,
+      QStringLiteral("分段跟踪"), nearEdge, 0.0));
+  controller.setEnabled(false);
+}
+
+void DriveCoreTests::correctionControllerStartsWithMeasuredOffCenterWideWeld() {
+  LaserCorrectionController controller;
+  LaserCorrectionStatus latest;
+  connect(&controller, &LaserCorrectionController::statusChanged,
+          [&latest](const LaserCorrectionStatus& status) { latest = status; });
+  QSignalSpy commands(&controller, &LaserCorrectionController::commandChanged);
+  QSignalSpy diagnostics(&controller, &LaserCorrectionController::diagnosticLogMessage);
+  LaserCorrectionSettings settings;
+  settings.targetSpeedMps = 0.030;
+  settings.maxLinearAccelerationMps2 = 100.0;
+  settings.imageTimeoutMs = 1000;
+  settings.telemetryTimeoutMs = 1000;
+  // Reproduce the field observation: center 24.2%, width about 26%. Both
+  // shoulders are visible; the 11% left envelope margin calls for a left
+  // recentering turn, not a "not detected" stop before first motion.
+  const QImage image = gapImageWithLine(97, 0, 399, 52);
+  const LaserGapDetection detection = LaserGapDetector::detect(image);
+  QVERIFY(detection.valid && !detection.edgeBreakFallback);
+  QVERIFY(std::abs(detection.absoluteCenterRatio - 0.242) < 0.01);
+  controller.setSettings(settings);
+  controller.setEnabled(true);
+  controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  for (int frame = 0; frame < 3; ++frame) controller.processCameraImage(image);
+  controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  QVERIFY(latest.active);
+  QVERIFY(latest.gapValid && !latest.detectionHeld);
+  QCOMPARE(latest.phase, QStringLiteral("首段采集"));
+  QVERIFY(latest.angularCommandRadps < 0.0);
+  QVERIFY(std::abs(latest.linearCommandMps - settings.targetSpeedMps) < 1e-8);
+  for (const QList<QVariant>& entry : diagnostics) {
+    QVERIFY(!entry.first().toString().contains(QStringLiteral("event=scan_boundary_stop")));
+  }
+  controller.setEnabled(false);
+}
+
+void DriveCoreTests::correctionControllerDoesNotForceTurnForCenteredWideWeld() {
+  LaserCorrectionController controller;
+  LaserCorrectionStatus latest;
+  connect(&controller, &LaserCorrectionController::statusChanged,
+          [&latest](const LaserCorrectionStatus& status) { latest = status; });
+  QSignalSpy commands(&controller, &LaserCorrectionController::commandChanged);
+  LaserCorrectionSettings settings;
+  settings.targetSpeedMps = 0.030;
+  settings.maxLinearAccelerationMps2 = 100.0;
+  settings.imageTimeoutMs = 1000;
+  settings.telemetryTimeoutMs = 1000;
+  const QImage centeredWide = gapImageWithLine(200, 0, 399, 110);
+  const LaserGapDetection detection = LaserGapDetector::detect(centeredWide);
+  QVERIFY(detection.valid && !detection.edgeBreakFallback);
+  QVERIFY(detection.confidence >= 0.060);
+  // Both margins are about 22%: a 55%-wide weld cannot satisfy the ordinary
+  // 29% release threshold even exactly centered. Containment must not invent
+  // a left/right turn when neither edge is more threatened.
+  QVERIFY((detection.gapEndPx - detection.gapStartPx) > 210);
+  QVERIFY(startTrackingWithMeasuredGap(controller, settings, latest, centeredWide));
+  commands.clear();
+  QElapsedTimer interval;
+  interval.start();
+  while (interval.elapsed() < 250) {
+    QTest::qWait(20);
+    controller.processCameraImage(centeredWide);
+    controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+    QVERIFY(latest.active);
+  }
+  QVERIFY(!commands.isEmpty());
+  for (const QList<QVariant>& command : commands) {
+    QVERIFY(std::abs(command.at(0).toDouble() - settings.targetSpeedMps) < 1e-8);
+    QVERIFY(std::abs(command.at(1).toDouble()) < 1e-8);
+  }
+  controller.setEnabled(false);
+}
+
+void DriveCoreTests::correctionControllerSteersBetweenTelemetryReplies() {
+  LaserCorrectionController controller;
+  LaserCorrectionStatus latest;
+  connect(&controller, &LaserCorrectionController::statusChanged,
+          [&latest](const LaserCorrectionStatus& status) { latest = status; });
+  QSignalSpy commands(&controller, &LaserCorrectionController::commandChanged);
+  LaserCorrectionSettings settings;
+  settings.segmentLengthM = 0.02;
+  settings.targetSpeedMps = 0.030;
+  settings.maxLinearAccelerationMps2 = 100.0;
+  settings.settleTimeMs = 100;
+  settings.imageTimeoutMs = 1000;
+  settings.telemetryTimeoutMs = 200;
+  QVERIFY(startTrackingWithMeasuredGap(controller, settings, latest,
+                                      gapImageWithLine(200, 0, 399)));
+  QVERIFY(std::abs(commands.last().at(1).toDouble()) < 1e-8);
+  commands.clear();
+
+  // The weld stays at the same camera pixel, but the right optical endpoint
+  // contracts. No further motor reply is delivered: camera feedback must
+  // still change the command on the next control heartbeat.
+  const QImage nearEdge = gapImageWithLine(200, 0, 280);
+  controller.processCameraImage(nearEdge);
+  QTest::qWait(80);
+  QVERIFY(latest.active);
+  QVERIFY(!commands.isEmpty());
+  QVERIFY(commands.last().at(1).toDouble() > 0.0);
+  QVERIFY(std::abs(commands.last().at(0).toDouble() - settings.targetSpeedMps) < 1e-8);
+
+  // Fresh reliable images cannot renew the timestamp of the old motor
+  // reply. Expiring that feedback still stops instead of steering forever.
+  QElapsedTimer feedbackDeadline;
+  feedbackDeadline.start();
+  while (latest.active && feedbackDeadline.elapsed() < 400) {
+    controller.processCameraImage(nearEdge);
+    QTest::qWait(20);
+  }
+  QVERIFY(!latest.active);
+  QVERIFY(latest.reason.contains(QStringLiteral("轮端里程反馈超时")));
+  QCOMPARE(commands.last().at(0).toDouble(), 0.0);
+  QCOMPARE(commands.last().at(1).toDouble(), 0.0);
+}
+
+void DriveCoreTests::correctionControllerStopsOnUnobservedScanBoundary() {
+  LaserCorrectionController controller;
+  LaserCorrectionStatus latest;
+  connect(&controller, &LaserCorrectionController::statusChanged,
+          [&latest](const LaserCorrectionStatus& status) { latest = status; });
+  QSignalSpy commands(&controller, &LaserCorrectionController::commandChanged);
+  LaserCorrectionSettings settings;
+  settings.segmentLengthM = 0.02;
+  settings.targetSpeedMps = 0.030;
+  settings.settleTimeMs = 100;
+  settings.imageTimeoutMs = 1000;
+  settings.telemetryTimeoutMs = 1000;
+  QVERIFY(startTrackingWithMeasuredGap(controller, settings, latest,
+                                      gapImageWithLine(240, 0, 399)));
+  controller.processCameraImage(gapImageWithLine(240, 0, 300));
+  controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  QVERIFY(latest.active);
+  QVERIFY(latest.angularCommandRadps > 0.0);
+  QImage blank(400, 120, QImage::Format_Grayscale8);
+  blank.fill(20);
+  controller.processCameraImage(blank);
+  controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  // One missed frame cannot cancel an otherwise measured recovery arc.
+  QVERIFY(latest.active);
+  QVERIFY(latest.angularCommandRadps > 0.0);
+  controller.processCameraImage(gapImageWithLine(240, 0, 300));
+  controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  QVERIFY(latest.active);
+  QVERIFY(!latest.detectionHeld);
+  QElapsedTimer missing;
+  missing.start();
+  while (latest.active && missing.elapsed() < 800) {
+    QTest::qWait(20);
+    controller.processCameraImage(blank);
+    controller.processDriveTelemetry(enabledTelemetry(0, 0, settings.wheelRadiusM));
+  }
+  QVERIFY(!latest.active);
+  QCOMPARE(commands.last().at(0).toDouble(), 0.0);
+  QCOMPARE(commands.last().at(1).toDouble(), 0.0);
+}
+
 void DriveCoreTests::correctionControllerSupervisesDetectionDropoutSpeed_data() {
   QTest::addColumn<int>("dropoutMs");
-  QTest::addColumn<double>("minimumSpeedRatio");
-  QTest::addColumn<double>("finalMaximumSpeedRatio");
-  QTest::newRow("short-held-frame-keeps-requested-speed") << 250 << 1.0 << 1.0;
-  QTest::newRow("long-dropout-has-one-nonzero-floor") << 3400 << 0.45 << 0.46;
+  QTest::addColumn<bool>("mustStop");
+  QTest::newRow("short-held-frame-keeps-requested-speed") << 250 << false;
+  QTest::newRow("short-degraded-observation-keeps-requested-speed") << 700 << false;
+  QTest::newRow("long-dropout-stops-without-blind-crawl") << 1300 << true;
 }
 
 void DriveCoreTests::correctionControllerSupervisesDetectionDropoutSpeed() {
   QFETCH(int, dropoutMs);
-  QFETCH(double, minimumSpeedRatio);
-  QFETCH(double, finalMaximumSpeedRatio);
+  QFETCH(bool, mustStop);
   LaserCorrectionController controller;
   LaserCorrectionStatus latestStatus;
   connect(&controller, &LaserCorrectionController::statusChanged,
@@ -2041,21 +2479,28 @@ void DriveCoreTests::correctionControllerSupervisesDetectionDropoutSpeed() {
     controller.processCameraImage(blank);
     controller.processDriveTelemetry(
         enabledTelemetry(0.0, feedbackSpeedMps, settings.wheelRadiusM));
-    QVERIFY(latestStatus.active);
-    QCOMPARE(latestStatus.phase, QStringLiteral("分段跟踪"));
     sawHeldDetection = sawHeldDetection || latestStatus.detectionHeld;
     QVERIFY(!commandSpy.isEmpty());
     feedbackSpeedMps = commandSpy.last().at(0).toDouble();
+    if (!latestStatus.active) {
+      QVERIFY(mustStop);
+      break;
+    }
+    QCOMPARE(latestStatus.phase, QStringLiteral("分段跟踪"));
     QTest::qWait(20);
   }
   QVERIFY(sawHeldDetection);
   for (const QList<QVariant>& command : commandSpy) {
     const double linear = command.at(0).toDouble();
-    QVERIFY(linear >= settings.targetSpeedMps * minimumSpeedRatio - 1e-8);
-    QVERIFY(linear <= settings.targetSpeedMps + 1e-8);
+    // The allowed outcomes are configured cruising speed and a hard stop.
+    // Observation uncertainty must not silently produce a slow blind crawl.
+    QVERIFY(std::abs(linear - settings.targetSpeedMps) < 1e-8 ||
+            (mustStop && std::abs(linear) < 1e-8));
   }
-  QVERIFY(commandSpy.last().at(0).toDouble() <=
-          settings.targetSpeedMps * finalMaximumSpeedRatio + 1e-8);
+  QCOMPARE(latestStatus.active, !mustStop);
+  QVERIFY(std::abs(commandSpy.last().at(0).toDouble() -
+      (mustStop ? 0.0 : settings.targetSpeedMps)) < 1e-8);
+  if (mustStop) QCOMPARE(commandSpy.last().at(1).toDouble(), 0.0);
 
   bool sawSupervisorRecord = false;
   const QString prefix = QStringLiteral("event=laser_control_output json=");
@@ -2069,11 +2514,238 @@ void DriveCoreTests::correctionControllerSupervisesDetectionDropoutSpeed() {
              settings.targetSpeedMps);
     QCOMPARE(record.value(QStringLiteral("speed_supervisor_boundary_scale")).toDouble(),
              1.0);
-    QVERIFY(record.value(QStringLiteral("speed_supervisor_target_mps")).toDouble() >=
-            settings.targetSpeedMps * minimumSpeedRatio - 1e-8);
+    QCOMPARE(record.value(QStringLiteral("speed_supervisor_target_mps")).toDouble(),
+             settings.targetSpeedMps);
     sawSupervisorRecord = true;
   }
   if (dropoutMs > 500) QVERIFY(sawSupervisorRecord);
+  controller.setEnabled(false);
+}
+
+void DriveCoreTests::correctionWheelCommandsPreserveMeanAfterSynchronization() {
+  // Direction and steering changes must not make the response synchronizer
+  // silently lower the configured chassis-centre command.
+  for (const double linear : {-0.030, 0.030}) {
+    for (const double angular : {-0.035, 0.0, 0.035}) {
+      const auto requested = DifferentialMixer::mix(linear, angular, 0.30, 0.50);
+      WheelSynchronizer synchronizer;
+      const auto synchronized = synchronizer.update(
+          requested.leftMps, requested.rightMps,
+          requested.leftMps * 0.95, requested.rightMps * 0.80,
+          requested.leftMps, requested.rightMps, true, 0.1, SynchronizerConfig{});
+      WheelTargets pair;
+      pair.leftMps = synchronized.leftMps;
+      pair.rightMps = synchronized.rightMps;
+      const auto restored = DifferentialMixer::preserveLinearSpeed(
+          pair, linear, 0.30, 0.50, 0.1658, 1.0);
+      QVERIFY(restored.has_value());
+      QVERIFY(std::abs((restored->leftMps + restored->rightMps) * 0.5 - linear) < 1e-12);
+      QVERIFY(std::abs(restored->leftMps / restored->rightMps -
+                       synchronized.leftMps / synchronized.rightMps) < 1e-12);
+      QVERIFY(restored->leftMps * linear > 0.0);
+      QVERIFY(restored->rightMps * linear > 0.0);
+    }
+  }
+}
+
+void DriveCoreTests::correctionWheelCommandsKeepMeanAtHardLimit() {
+  for (const double direction : {-1.0, 1.0}) {
+    WheelTargets requested;
+    requested.leftMps = direction * 0.15;
+    requested.rightMps = direction * 0.09;
+    const auto limited = DifferentialMixer::preserveLinearSpeed(
+        requested, direction * 0.12, 0.30, 0.50, 0.13, 1.0);
+    QVERIFY(limited.has_value());
+    QVERIFY(std::abs(limited->linearMps - direction * 0.12) < 1e-12);
+    QVERIFY(std::abs(limited->leftMps - direction * 0.13) < 1e-12);
+    QVERIFY(std::abs(limited->rightMps - direction * 0.11) < 1e-12);
+    QVERIFY(std::max(std::abs(limited->leftMps), std::abs(limited->rightMps)) <= 0.13 + 1e-12);
+  }
+  // With no wheel-speed headroom only straight motion is feasible; changing
+  // the requested mean to manufacture steering headroom is forbidden.
+  const auto fullSpeed = DifferentialMixer::preserveLinearSpeed(
+      DifferentialMixer::mix(0.13, 0.4, 0.30, 0.50),
+      0.13, 0.30, 0.50, 0.13, 1.0);
+  QVERIFY(fullSpeed.has_value());
+  QCOMPARE(fullSpeed->leftMps, 0.13);
+  QCOMPARE(fullSpeed->rightMps, 0.13);
+  QCOMPARE(fullSpeed->angularRadps, 0.0);
+}
+
+void DriveCoreTests::correctionWheelCommandsRejectUnattainableOrInvalidMean() {
+  const auto requested = DifferentialMixer::mix(0.14, 0.0, 0.30, 0.50);
+  QVERIFY(!DifferentialMixer::preserveLinearSpeed(
+      requested, 0.14, 0.30, 0.50, 0.13, 1.0).has_value());
+  QVERIFY(!DifferentialMixer::preserveLinearSpeed(
+      WheelTargets{}, 0.03, 0.30, 0.50, 0.13, 1.0).has_value());
+  WheelTargets invalid = requested;
+  invalid.leftMps = std::numeric_limits<double>::quiet_NaN();
+  QVERIFY(!DifferentialMixer::preserveLinearSpeed(
+      invalid, 0.03, 0.30, 0.50, 0.13, 1.0).has_value());
+  invalid.leftMps = -0.03;
+  invalid.rightMps = -0.03;
+  QVERIFY(!DifferentialMixer::preserveLinearSpeed(
+      invalid, 0.03, 0.30, 0.50, 0.13, 1.0).has_value());
+}
+
+void DriveCoreTests::correctionControllerStopsOnOutwardMeasuredWheelResponse() {
+  LaserCorrectionController controller;
+  LaserCorrectionStatus latest;
+  connect(&controller, &LaserCorrectionController::statusChanged,
+          [&latest](const LaserCorrectionStatus& status) { latest = status; });
+  QSignalSpy commands(&controller, &LaserCorrectionController::commandChanged);
+  QSignalSpy diagnostics(&controller,
+                        &LaserCorrectionController::diagnosticLogMessage);
+  LaserCorrectionSettings settings;
+  settings.segmentLengthM = 0.02;
+  settings.targetSpeedMps = 0.030;
+  settings.maxLinearAccelerationMps2 = 100.0;
+  settings.settleTimeMs = 100;
+  settings.imageTimeoutMs = 1000;
+  settings.telemetryTimeoutMs = 1000;
+  QVERIFY(startTrackingWithMeasuredGap(controller, settings, latest,
+                                      gapImageWithLine(240, 20, 399)));
+
+  // Contract the illuminated right endpoint without moving the weld. This
+  // leaves about 12.5% actual margin, so containment must steer positively.
+  controller.processCameraImage(gapImageWithLine(240, 20, 300));
+  auto telemetry = enabledTelemetry(0.0, settings.targetSpeedMps,
+                                    settings.wheelRadiusM);
+  telemetry.appliedLinearMps = settings.targetSpeedMps;
+  telemetry.appliedAngularRadps = 0.010;
+  controller.processDriveTelemetry(telemetry);
+  QVERIFY(latest.active);
+  QVERIFY(latest.angularCommandRadps > 0.0);
+
+  // The old wheel response may still point outward while a reversal is in
+  // flight. Keep steering inward while reliable clearance remains.
+  telemetry.left.wheelSpeedMps = 0.020;
+  telemetry.right.wheelSpeedMps = 0.040;
+  commands.clear();
+  diagnostics.clear();
+  controller.processDriveTelemetry(telemetry);
+  QVERIFY(latest.active);
+  QVERIFY(latest.angularCommandRadps > 0.0);
+  QElapsedTimer response;
+  response.start();
+  while (response.elapsed() < 750) {
+    QTest::qWait(20);
+    controller.processCameraImage(gapImageWithLine(240, 20, 300));
+    controller.processDriveTelemetry(telemetry);
+    QVERIFY(latest.active);
+    QVERIFY(latest.angularCommandRadps > 0.0);
+  }
+  // Move continuously toward the physical right endpoint, with inward
+  // feedback during the approach. Extending the line with the gap keeps
+  // containment active without introducing an identity jump or a short
+  // shoulder that cannot count as a reliable boundary observation.
+  telemetry.left.wheelSpeedMps = 0.040;
+  telemetry.right.wheelSpeedMps = 0.020;
+  controller.processDriveTelemetry(telemetry);
+  for (int center = 248; center <= 352; center += 8) {
+    controller.processCameraImage(
+        gapImageWithLine(center, 20, std::min(399, center + 60)));
+    controller.processDriveTelemetry(telemetry);
+    QVERIFY(latest.active);
+    QVERIFY(latest.gapValid && !latest.detectionHeld);
+  }
+  // This fixture has seven sampled pixels on its right shoulder and 157
+  // on its left: confidence is about 0.0616, above the controller's 0.060
+  // measurement gate, and the envelope margin is 14/379 = 3.69%.
+  const QImage critical = gapImageWithLine(359, 20, 399);
+  const LaserGapDetection criticalDetection =
+      LaserGapDetector::detect(critical, settings.detector);
+  QVERIFY(criticalDetection.valid && !criticalDetection.edgeBreakFallback);
+  QVERIFY(criticalDetection.confidence >= 0.060);
+  const double criticalMargin =
+      (criticalDetection.lineEndPx - criticalDetection.gapEndPx) /
+      static_cast<double>(criticalDetection.lineEndPx - criticalDetection.lineStartPx);
+  QVERIFY(criticalMargin > 0.0 && criticalMargin <= 0.04);
+  controller.processCameraImage(critical);
+  QVERIFY(latest.active);
+  // The reversal grace has elapsed. Actual outward wheels now must latch
+  // the critical failure despite an applied target that still points inward.
+  telemetry.left.wheelSpeedMps = 0.020;
+  telemetry.right.wheelSpeedMps = 0.040;
+  controller.processDriveTelemetry(telemetry);
+  QVERIFY(!latest.active);
+  QVERIFY(latest.reason.contains(QStringLiteral("outward_wheel_response")));
+  QVERIFY(!commands.isEmpty());
+  QCOMPARE(commands.last().at(0).toDouble(), 0.0);
+  QCOMPARE(commands.last().at(1).toDouble(), 0.0);
+  bool sawMeasuredResponseStop = false;
+  for (const QList<QVariant>& entry : diagnostics) {
+    sawMeasuredResponseStop |= entry.first().toString().contains(
+        QStringLiteral("reason=outward_wheel_response"));
+  }
+  QVERIFY(sawMeasuredResponseStop);
+}
+
+void DriveCoreTests::correctionControllerUsesPredictedThreatenedScanEdge() {
+  LaserCorrectionController controller;
+  LaserCorrectionStatus latest;
+  connect(&controller, &LaserCorrectionController::statusChanged,
+          [&latest](const LaserCorrectionStatus& status) { latest = status; });
+  QSignalSpy commands(&controller, &LaserCorrectionController::commandChanged);
+  QSignalSpy diagnostics(&controller,
+                        &LaserCorrectionController::diagnosticLogMessage);
+  LaserCorrectionSettings settings;
+  settings.segmentLengthM = 0.02;
+  settings.targetSpeedMps = 0.030;
+  settings.maxLinearAccelerationMps2 = 100.0;
+  settings.maxAngularAccelerationRadps2 = 100.0;
+  settings.settleTimeMs = 100;
+  settings.imageTimeoutMs = 1000;
+  settings.telemetryTimeoutMs = 1000;
+  const QImage initial = gapImageWithLine(140, 0, 399);
+  QVERIFY(startTrackingWithMeasuredGap(controller, settings, latest, initial));
+  // Establish a negative command while the measured weld is nearer the
+  // left edge. These observations also complete center-direction hysteresis.
+  for (int frame = 0; frame < 3; ++frame) {
+    controller.processCameraImage(initial);
+    controller.processDriveTelemetry(
+        enabledTelemetry(0.0, 0.0, settings.wheelRadiusM));
+  }
+  QVERIFY(latest.active);
+  QVERIFY(latest.angularCommandRadps < 0.0);
+
+  // Use the public SDK receipt timestamp to replay 20 ms acquisition steps
+  // without sleep-based frame-rate assumptions. All frames fit comfortably
+  // within imageTimeoutMs; the last receipt is approximately current time.
+  // Keep the short braking horizon during replay so the seam remains safe.
+  const qint64 receiptEpochMs = QDateTime::currentMSecsSinceEpoch();
+  for (int frame = 0; frame <= 10; ++frame) {
+    controller.processCameraFrame(
+        gapImageWithLine(140 + frame * 3, 0, 399),
+        static_cast<quint32>(frame + 1),
+        receiptEpochMs - 200 + frame * 20);
+    QVERIFY(latest.active);
+    QVERIFY(latest.gapValid);
+    QVERIFY(!latest.detectionHeld);
+  }
+  // The final seam is still visibly nearer the left endpoint. Its rightward
+  // velocity, however, threatens the RIGHT endpoint over the braking horizon.
+  QVERIFY(latest.gapAbsoluteCenterRatio < 0.5);
+  QVERIFY(latest.gapStartPx > 100);
+  QVERIFY(latest.gapEndPx < 220);
+
+  settings.maxLinearAccelerationMps2 = 0.030;
+  controller.setSettings(settings);
+  diagnostics.clear();
+  commands.clear();
+  controller.processDriveTelemetry(
+      enabledTelemetry(0.0, 0.0, settings.wheelRadiusM));
+
+  // The predicted threatened edge changes the requested direction even
+  // though the measured center remains left of center. The previous outward
+  // command must be replaced with recovery, without treating it as a fault.
+  QVERIFY(latest.active);
+  QVERIFY(!commands.isEmpty());
+  QVERIFY(std::abs(commands.last().at(0).toDouble() - settings.targetSpeedMps) < 1e-8);
+  QVERIFY(commands.last().at(1).toDouble() > 0.0);
+  for (const QList<QVariant>& entry : diagnostics) {
+    QVERIFY(!entry.first().toString().contains(QStringLiteral("event=scan_boundary_stop")));
+  }
   controller.setEnabled(false);
 }
 

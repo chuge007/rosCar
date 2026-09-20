@@ -17,9 +17,8 @@ constexpr double kPi = 3.14159265358979323846;
 // signs alone cannot establish camera mounting polarity or physical scale.
 constexpr double kInternalImageLateralSpanM = 0.20;
 // DifferentialMixer defines positive angular velocity as a right turn (left
-// wheel faster). Retain the configured image-to-drive convention; a falsely
-// localized seam is not evidence for reversing it. Keep
-// that sign identical in the live loop, rolling cloud and saved trajectory.
+// wheel faster). Keep the installed image-to-drive convention identical in
+// the live loop, rolling cloud, boundary recovery and saved trajectory.
 constexpr double kCameraLateralToVehicleSign = 1.0;
 constexpr int kInitialGapConfirmationFrames = 3;
 constexpr int kContourIdentityConfirmationFrames = 5;
@@ -28,18 +27,6 @@ constexpr double kInitialGapWidthToleranceRatio = 0.02;
 constexpr qint64 kControlDiagnosticIntervalMs = 500;
 constexpr qint64 kDetectionDiagnosticIntervalMs = 1000;
 constexpr qint64 kRawFrameDiagnosticIntervalMs = 100;
-// Forward speed is supervised from observation age, not from steering angle.
-// This prevents a large but valid correction from silently reducing the
-// configured tracking speed, while still giving a bounded response to stale
-// or missing real-gap observations.
-constexpr qint64 kSpeedSupervisorHoldMs = 500;
-constexpr qint64 kSpeedSupervisorDegradedEndMs = 1800;
-constexpr qint64 kSpeedSupervisorFloorRampMs = 1200;
-constexpr qint64 kSpeedSupervisorRecoveryMs = 300;
-constexpr double kSpeedSupervisorDegradedScale = 0.70;
-constexpr double kSpeedSupervisorFloorScale = 0.45;
-constexpr double kSpeedSupervisorDownRatePerSecond = 2.0;
-constexpr double kSpeedSupervisorUpRatePerSecond = 0.85;
 constexpr int kRawProfileLogBuckets = 128;
 constexpr double kCenterFilterTimeConstantS = 0.20;
 // The weld can move in the image only gradually while the chassis is moving.
@@ -64,15 +51,16 @@ constexpr double kMinimumGeometrySampleConfidence = 0.08;
 constexpr double kAngularBrakeAccelerationMultiplier = 2.5;
 constexpr double kMaximumGuidanceEdgeAngleDifferenceRad = 8.0 * kPi / 180.0;
 constexpr double kMaximumGuidanceWidthDriftM = 0.012;
-// Keep the configured tracking speed through the normal scan area. Only the
-// last 6% of either image side invokes boundary slowing; dropping to a few
-// millimetres per second before that point made the vehicle lose steering
-// authority and could strand it while the gap was still measurable.
-constexpr double kLaserBoundaryMarginRatio = 0.10;
-constexpr double kLaserHardBoundaryMarginRatio = 0.06;
-constexpr double kLaserBoundaryMinimumSpeedScale = 0.45;
+// Boundary containment has priority over soft curvature and blending.
+// Cruise remains constant while a measured seam can still be steered inward.
 constexpr double kBoundaryRecoveryCurvatureRadPerM = 3.20;
 constexpr double kMinimumContainmentAngularRadps = 0.04;
+constexpr double kScanContainmentMarginRatio = 0.25;
+constexpr double kScanContainmentReleaseRatio = 0.29;
+constexpr double kScanStopMarginRatio = 0.04;
+constexpr qint64 kBoundaryObservationGraceMs = 500;
+constexpr qint64 kBoundaryResponseGraceMs = 700;
+constexpr qint64 kMaximumUnmeasuredSeamMs = 1000;
 constexpr double kLaserCenterDeadbandM = 0.0015;
 constexpr double kLaserCenterTurnErrorM = 0.012;
 constexpr double kLaserCenterAngularLimitRadps = 0.16;
@@ -298,24 +286,22 @@ void LaserCorrectionController::setEnabled(bool enabled) {
                0, 'f', 1));
   emit logMessage(
       CRAWLING_TEXT("相机横向坐标：原图右侧=车体右转正方向；双边缺口需连续 %1 帧确认，"
-                    "缺口包络距图像边界小于 %2% 时进入持续前进回中保护；"
-                    "仅凸起轮廓须连续 %3 帧且无候选冲突，只作低权反馈")
+                    "焊道包络距有效激光端点小于 %2% 时优先回中；"
+                    "不能可靠回中则停止，边界保护优先于柔性纠偏")
           .arg(kInitialGapConfirmationFrames)
-          .arg(kLaserHardBoundaryMarginRatio * 100.0, 0, 'f', 0)
-          .arg(kContourIdentityConfirmationFrames));
+          .arg(kScanContainmentMarginRatio * 100.0, 0, 'f', 0));
+  emit logMessage(settings_.detector.allowOpenCvContour
+      ? CRAWLING_TEXT("定位方式：相机原尺寸图像，主基线缺口 + OpenCV 断续凸起轮廓；轮廓需连续五帧确认")
+      : settings_.detector.allowDisplacedContourFallback
+      ? CRAWLING_TEXT("定位方式：相机原尺寸主基线缺口优先，辅助轮廓仅低权补充")
+      : CRAWLING_TEXT("定位方式：相机原尺寸主基线缺口及双边中心；凸起轮廓接管已关闭"));
   emit logMessage(CRAWLING_TEXT(
       "纠偏连续运行策略：实时原始图负责快速回中，连续拼接点云负责慢速航向；"
-      "短时无效时降速并衰减旧转向；转向无回中效果时重新定位，不继续加大同向转弯；"
-      "仅相机数据流或轮端反馈真正超时才执行安全停止"));
-  emit logMessage(
-      CRAWLING_TEXT("速度监督策略：正常观测保持设置速度；观测年龄超过 %1 ms 后"
-                    "平滑降至 %2%，超过 %3 ms 后最低 %4%；扫描边界保护与观测保护"
-                    "只取一个最小比例，连续可信观测 %5 ms 后恢复")
-          .arg(kSpeedSupervisorHoldMs)
-          .arg(kSpeedSupervisorDegradedScale * 100.0, 0, 'f', 0)
-          .arg(kSpeedSupervisorDegradedEndMs)
-          .arg(kSpeedSupervisorFloorScale * 100.0, 0, 'f', 0)
-          .arg(kSpeedSupervisorRecoveryMs));
+      "前进纠偏保持设置速度，短时无效时衰减旧转向；"
+      "扫描边界和观测丢失保护优先于柔性纠偏，无法保持有效观测时安全停止"));
+  emit logMessage(CRAWLING_TEXT(
+      "速度策略：前进纠偏按设置速度匀速巡航，边界距离、观测年龄和回中响应"
+      "不再折减巡航速度；起停及返程保留必要过渡，安全保护独立执行停止"));
   emit diagnosticLogMessage(QStringLiteral(
       "event=laser_raw_log_format version=3 interval_ms=%1 "
       "profile_encoding=hex4_mean_128_bins "
@@ -379,7 +365,8 @@ void LaserCorrectionController::processCameraFrame(
 }
 
 void LaserCorrectionController::processCameraImage(const QImage& image) {
-  if (image.isNull()) return;
+  if (image.isNull() || boundaryStopLatched_) return;
+  boundaryObservationReliable_ = false;
   const qint64 now = clock_.elapsed();
   const qint64 queueAgeMs = processingSourceFrame_
       ? std::max<qint64>(0, QDateTime::currentMSecsSinceEpoch() - sourceReceivedAtEpochMs_)
@@ -396,7 +383,11 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
       now - lastValidDetectionMs_ <= settings_.detectionTimeoutMs;
   if (status_.active && gapTrackerValid_ && lastTwoEdgeDetectionMs_ >= 0 &&
       !liveContourTrack &&
-      now - lastTwoEdgeDetectionMs_ > settings_.detectionRecoveryTimeoutMs) {
+      now - lastTwoEdgeDetectionMs_ >
+          std::min<qint64>(settings_.detectionRecoveryTimeoutMs,
+                           kMaximumUnmeasuredSeamMs / 2)) {
+    // Leave time for multi-frame confirmation before the independent
+    // measured-seam timeout. Reacquisition must not extend that deadline.
     beginSeamReacquisition(CRAWLING_TEXT("真实双边缘持续缺失，解除旧候选锁定"));
   }
   LaserGapDetectorConfig detectorConfig = settings_.detector;
@@ -584,6 +575,12 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
             CRAWLING_TEXT("正在确认原始图最大缺口（%1/%2）")
                 .arg(initialGapConfirmationCount_)
                 .arg(requiredFrames);
+        // An unconfirmed candidate cannot renew measured guidance or expand
+        // the old weld into an unrelated edge. Keep its last measured
+        // envelope and deadline until the candidate is confirmed.
+        updateScanBoundaryObservation(detection,
+            detection.horizontal ? image.width() : image.height(), lastImageMs_, false);
+        if (stopIfScanBoundaryUnsafe(now)) return;
         publishStatus();
         return;
       }
@@ -603,7 +600,7 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
               .arg(initialGapConfirmationCount_)
               .arg(detection.absoluteCenterRatio * 100.0, 0, 'f', 2)
               .arg(candidateWidthRatio * 100.0, 0, 'f', 2)
-              .arg(confirmableContour ? CRAWLING_TEXT("凸起轮廓，低权且不入拟合")
+              .arg(confirmableContour ? CRAWLING_TEXT("辅助轮廓，不写入暗缺口拟合点")
                                        : CRAWLING_TEXT("真实双边缺口")));
     }
   }
@@ -611,12 +608,10 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
     status_.gapStartPx = detection.gapStartPx;
     status_.gapEndPx = detection.gapEndPx;
     status_.supportingSamples = detection.supportingSamples;
-    // Both paths are measured from this frame, but a displaced contour has
-    // less geometric authority than a baseline-band two-edge interruption.
-    // Keep that distinction out of the held-frame state while still reducing
-    // its steering weight in the fast center loop.
+    // OpenCV supplies a measured two-shoulder contour, not an inferred single
+    // edge. Its confidence and initial five-frame gate still limit authority.
     detectionEdgeBreakFallback_ = detection.edgeBreakFallback ||
-                                  detection.contourFallback;
+        (detection.contourFallback && !detection.opencvContour);
   }
   // An unconfirmed fallback cannot bypass the multi-frame identity gate.
   if (reacquisitionPending_) status_.gapValid = false;
@@ -625,6 +620,7 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
     latestImageAxisLengthPx_ = axisLength;
     latestLineStartPx_ = detection.lineStartPx;
     latestLineEndPx_ = detection.lineEndPx;
+    updateScanBoundaryObservation(detection, axisLength, lastImageMs_);
     const double axisLastPixel = std::max(1, axisLength - 1);
     // Edge samples are physical camera coordinates. Do not normalize them by
     // the detected laser span: that span changes when reflections/occlusion
@@ -675,6 +671,8 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
   }
 
   if (!status_.gapValid) {
+    boundaryObservationReliable_ = false;
+    if (stopIfScanBoundaryUnsafe(now)) return;
     ++invalidDetectionCount_;
     status_.confidence = 0.0;
     if (!status_.active) {
@@ -818,6 +816,12 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
       status_.detectionHeld = true;
       status_.contourFallback = false;
       status_.edgeBreakFallback = true;
+      // Prediction cannot prove recovery, but it can expose additional risk.
+      boundaryGapStartRatio_ = std::min(boundaryGapStartRatio_,
+          seamPrediction_.absoluteCenterRatio - seamPrediction_.absoluteWidthRatio * 0.5);
+      boundaryGapEndRatio_ = std::max(boundaryGapEndRatio_,
+          seamPrediction_.absoluteCenterRatio + seamPrediction_.absoluteWidthRatio * 0.5);
+      if (stopIfScanBoundaryUnsafe(now)) return;
       ++reusedDetectionCount_;
       status_.reason = CRAWLING_TEXT(
           "当前激光缺口被凸起遮挡，沿连续点云预测中心低权重前进并重新搜索");
@@ -864,12 +868,12 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
       status_.edgeBreakFallback = true;
       ++reusedDetectionCount_;
       status_.reason = CRAWLING_TEXT(
-          "实时缺口暂时无效，降低旧中心权重并重新定位，连续低速前进");
+          "实时焊道暂时无效，短时保持巡航并优先回中；持续失去有效观测时停止");
       if (!detectionDegradedLogged_) {
         detectionDegradedLogged_ = true;
         emit logMessage(
             CRAWLING_TEXT("连续运行降级：新原始图仍在到达，但主缺口已连续 %1 ms "
-                          "未通过检测；不中断前进，沿用上一帧中心，禁止写入陈旧点云，"
+                          "未通过检测；安全范围内短时保持巡航，禁止写入陈旧点云，"
                           "丢弃旧拟合并重新确认真实双边缘")
                 .arg(heldDetectionAgeMs));
       }
@@ -931,7 +935,8 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
   lastGapFilterMs_ = now;
   status_.leftEdgeLateralM = latestLeftEdgeM_;
   status_.rightEdgeLateralM = latestRightEdgeM_;
-  if (realTwoEdge || confirmedContourIdentity) {
+  if (realTwoEdge || confirmedContourIdentity ||
+      (detection.opencvContour && liveContourTrack)) {
     trackedGapCenterRatio_ = detection.normalizedCenter;
     trackedGapAbsoluteCenterRatio_ = detection.absoluteCenterRatio;
     if (referenceGapAbsoluteCenterRatio_ < 0.0) {
@@ -993,6 +998,7 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
                         .arg(status_.gapEndPx));
   }
   status_.reason = runningReason();
+  if (stopIfScanBoundaryUnsafe(now)) return;
   tryStartSurvey();
   if (phase_ == Phase::SurveyForward || phase_ == Phase::TrackingForward) {
     appendCurrentEdgeSample();
@@ -1025,7 +1031,9 @@ void LaserCorrectionController::logDetectionDiagnostic(
                     "置信度 %11，支撑点 %12，无效帧 %13，沿用帧 %14，"
                     "轮廓候选 %15（%16..%17 px，置信度 %18，冲突=%19）")
           .arg(phaseName(phase_))
-          .arg(detection.contourFallback
+          .arg(detection.opencvContour
+                   ? CRAWLING_TEXT("opencv_raised_contour")
+                   : detection.contourFallback
                    ? CRAWLING_TEXT("contour_fallback")
                    : detection.edgeBreakFallback
                    ? (detection.widthRejected
@@ -1200,6 +1208,7 @@ void LaserCorrectionController::queueRawFrame(
   detector.insert(QStringLiteral("minimumGapRatio"), config.minimumGapRatio);
   detector.insert(QStringLiteral("minimumSideSupportRatio"), config.minimumSideSupportRatio);
   detector.insert(QStringLiteral("minimumContrast"), config.minimumContrast);
+  detector.insert(QStringLiteral("allowOpenCvContour"), config.allowOpenCvContour);
   detector.insert(QStringLiteral("maximumHoleLength"), config.maximumHoleLength);
   detector.insert(QStringLiteral("smallGapFillRatio"), config.smallGapFillRatio);
   detector.insert(QStringLiteral("minimumRunLength"), config.minimumRunLength);
@@ -1216,6 +1225,7 @@ void LaserCorrectionController::queueRawFrame(
   detector.insert(QStringLiteral("trackingAbsoluteCenterWeight"), config.trackingAbsoluteCenterWeight);
   detector.insert(QStringLiteral("trackingWidthWeight"), config.trackingWidthWeight);
   detector.insert(QStringLiteral("allowEdgeBreakFallback"), config.allowEdgeBreakFallback);
+  detector.insert(QStringLiteral("allowDisplacedContourFallback"), config.allowDisplacedContourFallback);
   detector.insert(QStringLiteral("edgeBreakGapRatio"), config.edgeBreakGapRatio);
   detector.insert(QStringLiteral("minimumEdgeBreakRunRatio"), config.minimumEdgeBreakRunRatio);
   detector.insert(QStringLiteral("maximumTrackingGapWidthJumpRatio"), config.maximumTrackingGapWidthJumpRatio);
@@ -1240,6 +1250,7 @@ void LaserCorrectionController::queueRawFrame(
   record.insert(QStringLiteral("inferred"), detection.edgeBreakFallback);
   record.insert(QStringLiteral("contour_supported"), detection.contourSupported);
   record.insert(QStringLiteral("contour_fallback"), detection.contourFallback);
+  record.insert(QStringLiteral("opencv_contour"), detection.opencvContour);
   record.insert(QStringLiteral("contour_dominant"), detection.contourDominant);
   record.insert(QStringLiteral("contour_start_px"), detection.contourStartPx);
   record.insert(QStringLiteral("contour_end_px"), detection.contourEndPx);
@@ -1333,6 +1344,7 @@ void LaserCorrectionController::processDriveTelemetry(
     return;
   }
   if (!telemetryUsable(telemetry)) {
+    haveTelemetry_ = false;
     if (now - enabledAtMs_ > settings_.telemetryTimeoutMs &&
         (lastTelemetryMs_ < enabledAtMs_ ||
          now - lastTelemetryMs_ > settings_.telemetryTimeoutMs)) {
@@ -1403,8 +1415,7 @@ bool LaserCorrectionController::telemetryUsable(
 }
 
 bool LaserCorrectionController::phaseNeedsLaser() const {
-  return phase_ == Phase::AwaitingInputs || phase_ == Phase::SurveyForward ||
-         phase_ == Phase::TrackingForward;
+  return status_.active;
 }
 
 bool LaserCorrectionController::phaseMoves() const {
@@ -1420,7 +1431,8 @@ bool LaserCorrectionController::wheelsStopped() const {
 
 void LaserCorrectionController::tryStartSurvey() {
   if (!status_.active || phase_ != Phase::AwaitingInputs || !haveTelemetry_ ||
-      !status_.gapValid || lastValidDetectionMs_ < enabledAtMs_ ||
+      !status_.gapValid || !boundaryObservationReliable_ ||
+      lastValidDetectionMs_ < enabledAtMs_ ||
       lastTelemetryMs_ < enabledAtMs_ || !wheelsStopped()) {
     return;
   }
@@ -1693,14 +1705,14 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
   previousControlMs_ = now;
 
   if (stopIfMotionStalled(now)) return;
+  if (stopIfScanBoundaryUnsafe(now)) return;
 
-  const auto currentLaserBoundaryScale = [&]() {
-    const double margin = laserBoundaryMargin(now);
-    return clamp((margin - kLaserHardBoundaryMarginRatio) /
-                     (kLaserBoundaryMarginRatio -
-                      kLaserHardBoundaryMarginRatio),
-                 kLaserBoundaryMinimumSpeedScale, 1.0);
-  };
+  // Boundary containment changes the steering command, but it must not
+  // bypass the mandatory initial survey. The first pass is always one full
+  // forward sample followed by a settled reverse to the start point; only
+  // after that pass may the rolling tracking phase begin. applyCommand()
+  // enforces the inward turn while either survey leg is moving, and the
+  // stop gate still handles a genuinely lost/out-of-range observation.
 
   switch (phase_) {
     case Phase::Idle:
@@ -1719,8 +1731,9 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
         return;
       }
       const double targetLinear = updateForwardSpeedSupervisor(
-          now, deltaSeconds, currentLaserBoundaryScale());
+          now, deltaSeconds, 1.0);
       applyCommand(targetLinear, 0.0, deltaSeconds);
+      if (!status_.active) return;
       if (!status_.gapValid) {
         status_.reason = CRAWLING_TEXT(
             "首段缺口暂时无效，按速度监督器连续前进并等待原始图恢复");
@@ -1773,6 +1786,7 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
         return;
       }
       applyCommand(-settings_.targetSpeedMps, 0.0, deltaSeconds);
+      if (!status_.active) return;
       status_.reason = runningReason();
       return;
     }
@@ -1803,13 +1817,13 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
     case Phase::TrackingForward: {
       const double progress = phaseTravelM_;
       status_.segmentProgressM = clamp(progress, 0.0, settings_.segmentLengthM);
-      const double boundaryScale = currentLaserBoundaryScale();
       if (!status_.gapValid) {
         const double targetLinear = updateForwardSpeedSupervisor(
-            now, deltaSeconds, boundaryScale);
+            now, deltaSeconds, 1.0);
         applyCommand(targetLinear, 0.0, deltaSeconds);
+        if (!status_.active) return;
         status_.reason = CRAWLING_TEXT(
-            "实时缺口暂无可用中心，按观测年龄监督速度沿当前航向连续前进");
+            "实时缺口暂无可用中心，短时使用最近实测回中；持续失去有效观测时停止");
         return;
       }
       if (progress >= settings_.segmentLengthM) {
@@ -1905,7 +1919,7 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
               beginSeamReacquisition(CRAWLING_TEXT("转向后缺口未向中心改善"));
               emit logMessage(
                   CRAWLING_TEXT("回中保护：已前进 %1 mm，但缺口偏差仅改善 %2 mm，"
-                                "当前偏差 %3 mm；降低转向权重并重新定位主激光基线，保持低速前进，禁止继续加大同向转弯")
+                                "当前偏差 %3 mm；重新定位主激光基线，短时沿最近实测回中；持续无有效观测时停止")
                       .arg(recoveryTravelM * 1000.0, 0, 'f', 1)
                       .arg(improvementM * 1000.0, 0, 'f', 1)
                       .arg(centerErrorMagnitudeM * 1000.0, 0, 'f', 1));
@@ -1915,7 +1929,7 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
             centerRecoveryProtectionLogged_ = false;
             emit logMessage(
                 CRAWLING_TEXT("回中趋势恢复：最近 %1 mm 偏差改善 %2 mm，"
-                              "继续前进并平滑恢复正常速度和曲率")
+                              "保持设置速度并平滑恢复正常曲率")
                     .arg(recoveryTravelM * 1000.0, 0, 'f', 1)
                     .arg(improvementM * 1000.0, 0, 'f', 1));
           }
@@ -2032,35 +2046,12 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
       }
 
       const double controlledError = headingError;
-      // Use the raw-image coordinate here. The visible laser span can be
-      // clipped by glare/occlusion, so its local ratio is not a safe boundary
-      // measure. Slow down before the gap reaches either image edge while the
-      // signed center error continues turning it back toward the reference.
+      // Use the measured raw-pixel envelope inside the actual laser span.
+      // A clipped span means less information is available for guidance.
       const double laserRangeMargin = laserBoundaryMargin(now);
-      const bool boundaryRecoveryActive =
-          laserRangeMargin <= kLaserHardBoundaryMarginRatio;
-      if (boundaryRecoveryActive) {
-        if (!boundaryProtectionLogged_) {
-          boundaryProtectionLogged_ = true;
-          emit logMessage(
-              CRAWLING_TEXT("扫描范围保护：缺口包络预计距图像边界仅 %1%，"
-                            "平滑减速，按当前观测可信度向中心回转")
-                  .arg(laserRangeMargin * 100.0, 0, 'f', 1));
-        }
-      }
-      if (laserRangeMargin > kLaserBoundaryMarginRatio) {
-        boundaryProtectionLogged_ = false;
-      }
-      const double laserRangeSpeedScale =
-          clamp((laserRangeMargin - kLaserHardBoundaryMarginRatio) /
-                    (kLaserBoundaryMarginRatio -
-                     kLaserHardBoundaryMarginRatio),
-                kLaserBoundaryMinimumSpeedScale, 1.0);
-      // All forward-speed constraints are merged by one supervisor. Do not
-      // multiply heading, held-frame, and reacquisition factors here: that
-      // made the configured tracking speed drift down to a few mm/s.
+      const bool boundaryRecoveryActive = boundaryContainmentActive_;
       const double targetLinear = updateForwardSpeedSupervisor(
-          now, deltaSeconds, laserRangeSpeedScale);
+          now, deltaSeconds, 1.0);
       const double guidanceFreshness = lastGuidanceFitMs_ < 0 ? 0.0 :
           clamp(1.0 - (now - lastGuidanceFitMs_) / 6000.0, 0.0, 1.0);
       const double proportionalTerm = targetLinear *
@@ -2094,16 +2085,16 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
                                         -maximumOpposingHeading,
                                         maximumOpposingHeading);
       }
-      const int centerReturnDirection = centerErrorForControl > 0.0
+      const int centerReturnDirection = boundaryRecoveryActive
+                                            ? boundaryReturnDirection(now)
+                                            : centerErrorForControl > 0.0
                                             ? 1
                                             : (centerErrorForControl < 0.0
                                                    ? -1
                                                    : 0);
       const bool containmentActive =
           centerReturnDirection != 0 &&
-          boundaryRecoveryActive && !detectionHeld_ &&
-          !reacquisitionPending_ && !centerResponseUntrusted_ &&
-          centerFeedbackWeight >= 0.10;
+          boundaryRecoveryActive && boundaryObservationReliable_;
       if (containmentActive &&
           effectiveHeadingAngular * centerReturnDirection < 0.0) {
         effectiveHeadingAngular = 0.0;
@@ -2120,8 +2111,9 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
           std::abs(rawTargetAngular) < kSteeringDeadbandRadps) {
         rawTargetAngular = 0.0;
       }
-      const double containmentMinimum = kMinimumContainmentAngularRadps *
-          centerFeedbackWeight;
+      const double containmentMinimum = kMinimumContainmentAngularRadps * clamp(
+          (kScanContainmentReleaseRatio - laserRangeMargin) /
+              (kScanContainmentReleaseRatio - kScanStopMarginRatio), 0.0, 1.0);
       if (containmentActive &&
           rawTargetAngular * centerReturnDirection < containmentMinimum) {
         rawTargetAngular =
@@ -2148,8 +2140,9 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
       const double safeAngularLimit = std::min(
           {settings_.maxAngularRadps,
            std::max(1e-6, sameDirectionAngularLimit),
-           std::max(1e-6, std::abs(targetLinear) *
-                             adaptiveCurvature)});
+           containmentActive ? settings_.maxAngularRadps
+                             : std::max(1e-6, std::abs(targetLinear) *
+                                                 adaptiveCurvature)});
       if (!angularLimitLogged_ &&
           std::abs(rawTargetAngular) > safeAngularLimit + 1e-9) {
         emit logMessage(
@@ -2165,6 +2158,7 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
                                          safeAngularLimit);
       applyCommand(targetLinear, targetAngular, deltaSeconds,
                    adaptiveCurvature);
+      if (!status_.active) return;
       // Do not store a large unreachable steering demand behind the output
       // limiter: it would delay braking even after the image error disappears.
       filteredCenterAngularRadps_ = clamp(filteredCenterAngularRadps_,
@@ -2207,6 +2201,11 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
         controlRecord.insert(QStringLiteral("filtered_error_m"), centerErrorM);
         controlRecord.insert(QStringLiteral("predicted_error_m"), predictedCenterErrorM);
         controlRecord.insert(QStringLiteral("boundary_envelope_margin_ratio"), laserRangeMargin);
+        controlRecord.insert(QStringLiteral("boundary_priority"), containmentActive);
+        controlRecord.insert(QStringLiteral("boundary_measurement_age_ms"),
+                             static_cast<double>(now - boundaryObservationMs_));
+        controlRecord.insert(QStringLiteral("boundary_line_start_ratio"), boundaryLineStartRatio_);
+        controlRecord.insert(QStringLiteral("boundary_line_end_ratio"), boundaryLineEndRatio_);
         controlRecord.insert(QStringLiteral("contour_fallback"), status_.contourFallback);
         controlRecord.insert(QStringLiteral("center_direction_confirmation_frames"),
                              pendingCenterControlDirectionCount_);
@@ -2818,6 +2817,7 @@ void LaserCorrectionController::watchdogTick() {
   if (!status_.active) return;
   const qint64 now = clock_.elapsed();
   if (stopIfImageTimedOut(now)) return;
+  if (stopIfScanBoundaryUnsafe(now)) return;
   if (lastWatchdogTickMs_ >= 0 && now - lastWatchdogTickMs_ > 100) {
     emit diagnosticLogMessage(
         QStringLiteral("event=correction_dispatch_delay session=%1 watchdog_gap_ms=%2 detector_ms=%3 image_age_ms=%4 command_age_ms=%5")
@@ -2832,10 +2832,17 @@ void LaserCorrectionController::watchdogTick() {
     stop(CRAWLING_TEXT("轮端里程反馈超时，已停止自动纠偏"));
     return;
   }
-  // A fresh camera frame proves that the sensor path is alive even when the
-  // gap detector temporarily rejects every candidate. The motion loop keeps
-  // the last raw-image center plus the stitched cloud in degraded mode; only
-  // an actual image-stream outage above is allowed to stop the vehicle.
+  // Image receipt cannot renew the independent measured-seam safety age.
+
+  // New camera centres must affect steering at the control heartbeat, not
+  // wait for the next (much slower) motor reply. Reuse only fresh telemetry;
+  // odometry is still integrated exclusively when an actual reply arrives.
+  if (phaseMoves() && haveTelemetry_ && lastTelemetryMs_ >= enabledAtMs_ &&
+      now - lastTelemetryMs_ <= settings_.telemetryTimeoutMs &&
+      (previousControlMs_ < 0 || now - previousControlMs_ >= 15)) {
+    advanceFromTelemetry(now);
+    if (!status_.active) return;
+  }
 
   if (lastCommandMs_ < 0 || now - lastCommandMs_ >= 100) {
     emit commandChanged(currentLinearMps_, currentAngularRadps_);
@@ -2928,6 +2935,18 @@ void LaserCorrectionController::resetSession() {
   speedSupervisorRecoverySinceMs_ = -1;
   speedSupervisorReason_ = CRAWLING_TEXT("按跟踪速度运行");
   boundaryProtectionLogged_ = false;
+  boundaryContainmentActive_ = false;
+  boundaryObservationReliable_ = false;
+  boundaryStopLatched_ = false;
+  boundaryObservationMs_ = -1;
+  boundaryLineStartRatio_ = 0.0;
+  boundaryLineEndRatio_ = 1.0;
+  boundaryGapStartRatio_ = boundaryGapEndRatio_ = 0.5;
+  boundaryMeasuredMarginRatio_ = 0.5;
+  boundarySignedRateRatioPerS_ = 0.0;
+  boundaryRecoveryStartedMs_ = -1;
+  boundaryRecoveryStartMargin_ = 0.0;
+  boundaryRecoveryDirection_ = 0;
   centerRecoveryWindowActive_ = false;
   centerRecoveryProtectionLogged_ = false;
   centerResponseUntrusted_ = false;
@@ -2961,6 +2980,12 @@ void LaserCorrectionController::setPhase(Phase phase, const QString& reason,
                                          bool writeLog) {
   const Phase previousPhase = phase_;
   phase_ = phase;
+  if (phase != previousPhase) {
+    // Motion changes at survey/return/settling transitions invalidate its
+    // image drift. Preserve the measured envelope, relearn only the rate.
+    boundarySignedRateRatioPerS_ = 0.0;
+    boundaryRecoveryStartedMs_ = -1;
+  }
   phaseStartedMs_ = clock_.elapsed();
   status_.phase = phaseName(phase_);
   status_.reason = reason;
@@ -3018,142 +3043,225 @@ QString LaserCorrectionController::runningReason() const {
   return {};
 }
 
+void LaserCorrectionController::updateScanBoundaryObservation(
+    const LaserGapDetection& detection, int axisLengthPx, qint64 receivedMs,
+    bool identityConfirmed) {
+  if (!detection.valid || axisLengthPx < 2 ||
+      detection.lineEndPx <= detection.lineStartPx ||
+      detection.gapEndPx <= detection.gapStartPx) return;
+  const double axis = axisLengthPx - 1.0;
+  const double left = detection.gapStartPx / axis;
+  const double right = detection.gapEndPx / axis;
+  const bool measured = identityConfirmed &&
+      (!detection.edgeBreakFallback || detection.contourFallback) &&
+      detection.confidence >= 0.060 && !reacquisitionPending_;
+  if (measured) {
+    if (phaseMoves() && boundaryObservationMs_ >= 0 && receivedMs > boundaryObservationMs_ &&
+        receivedMs - boundaryObservationMs_ <= 250) {
+      const double dt = (receivedMs - boundaryObservationMs_) / 1000.0;
+      const double rawRate = clamp(
+          ((left + right) - (boundaryGapStartRatio_ + boundaryGapEndRatio_)) *
+              0.5 / dt, -0.4, 0.4);
+      boundarySignedRateRatioPerS_ += (1.0 - std::exp(-dt / 0.10)) *
+          (rawRate - boundarySignedRateRatioPerS_);
+    } else {
+      boundarySignedRateRatioPerS_ = 0.0;
+    }
+    boundaryLineStartRatio_ = clamp(detection.lineStartPx / axis, 0.0, 1.0);
+    boundaryLineEndRatio_ = clamp(detection.lineEndPx / axis, 0.0, 1.0);
+    boundaryGapStartRatio_ = left;
+    boundaryGapEndRatio_ = right;
+    boundaryMeasuredMarginRatio_ = std::min(
+        left - boundaryLineStartRatio_, boundaryLineEndRatio_ - right) /
+        std::max(1e-6, boundaryLineEndRatio_ - boundaryLineStartRatio_);
+    boundaryObservationMs_ = receivedMs;
+    boundaryObservationReliable_ = true;
+  } else if (identityConfirmed && detection.edgeBreakFallback &&
+             boundaryObservationMs_ >= 0) {
+    // Inferred/clipped edges may tighten the safety envelope, never erase
+    // known risk or renew the last measured two-shoulder/contour timestamp.
+    boundaryGapStartRatio_ = std::min(boundaryGapStartRatio_, left);
+    boundaryGapEndRatio_ = std::max(boundaryGapEndRatio_, right);
+    boundaryLineStartRatio_ = std::max(boundaryLineStartRatio_,
+        clamp(detection.lineStartPx / axis, 0.0, 1.0));
+    boundaryLineEndRatio_ = std::min(boundaryLineEndRatio_,
+        clamp(detection.lineEndPx / axis, 0.0, 1.0));
+  }
+}
+
+int LaserCorrectionController::boundaryReturnDirection(qint64 now) const {
+  const double leftMargin = boundaryGapStartRatio_ - boundaryLineStartRatio_;
+  const double rightMargin = boundaryLineEndRatio_ - boundaryGapEndRatio_;
+  const double displacement = boundaryPredictionDisplacement(now);
+  const double span = std::max(1e-6, boundaryLineEndRatio_ - boundaryLineStartRatio_);
+  const double threatenedLeft = std::min(leftMargin, leftMargin + displacement);
+  const double threatenedRight = std::min(rightMargin, rightMargin - displacement);
+  // A wide weld can be near both endpoints even while perfectly centred.
+  // Do not force alternating turns over sub-pixel left/right margin noise.
+  if (std::abs(threatenedLeft - threatenedRight) <= span * 0.02) return 0;
+  // Choose the threatened edge from the same conservative prediction that
+  // triggered containment. The nearest measured edge can be the other side
+  // while the weld is crossing the scan rapidly.
+  return threatenedLeft < threatenedRight ? -1 : 1;
+}
+
+double LaserCorrectionController::boundaryPredictionDisplacement(qint64 now) const {
+  // A stopped survey/return transition must not keep extrapolating the last
+  // moving-frame drift and turn an in-range weld into a predicted edge loss.
+  if (boundaryObservationMs_ < 0 || !phaseMoves()) return 0.0;
+  // Reserve dispatch/actuation time plus a nominal braking interval. Actual
+  // wheel response still requires commissioning; prediction only tightens
+  // the measured envelope and cannot certify that an edge has recovered.
+  const double speed = std::max({std::abs(currentLinearMps_),
+      std::abs(driveAppliedLinearMps_), std::abs(leftSpeedMps_), std::abs(rightSpeedMps_)});
+  const double horizon = std::max<qint64>(0, now - boundaryObservationMs_) / 1000.0 +
+      0.20 + speed / std::max(0.005, settings_.maxLinearAccelerationMps2);
+  return boundarySignedRateRatioPerS_ * horizon;
+}
+
 double LaserCorrectionController::laserBoundaryMargin(qint64 now) const {
-  double center = status_.gapValid ? status_.gapAbsoluteCenterRatio
-                                  : trackedGapAbsoluteCenterRatio_;
-  if (!std::isfinite(center)) center = 0.5;
-  // Protect both edges, not just the center: a 25%-wide seam centered at
-  // 88% is already clipped even though the old center margin says 12%.
-  double halfWidth = gapTrackerValid_
-      ? 0.5 * trackedGapWidthRatio_ *
-            std::max(0.0, trackedLineEndRatio_ - trackedLineStartRatio_)
-      : 0.0;
-  if (!detectionHeld_ && status_.gapValid && latestImageAxisLengthPx_ > 1) {
-    halfWidth = std::max(halfWidth,
-        0.5 * std::max(0, status_.gapEndPx - status_.gapStartPx + 1) /
-            (latestImageAxisLengthPx_ - 1.0));
+  if (boundaryObservationMs_ < 0) return 0.5;
+  const double span = std::max(1e-6, boundaryLineEndRatio_ - boundaryLineStartRatio_);
+  const double left = boundaryGapStartRatio_ - boundaryLineStartRatio_;
+  const double right = boundaryLineEndRatio_ - boundaryGapEndRatio_;
+  const double displacement = boundaryPredictionDisplacement(now);
+  return clamp(std::min({left, right, left + displacement, right - displacement}) / span,
+               0.0, 0.5);
+}
+
+bool LaserCorrectionController::stopIfScanBoundaryUnsafe(qint64 now) {
+  if (!status_.active) return false;
+  const qint64 age = std::max<qint64>(0, now -
+      (boundaryObservationMs_ >= 0 ? boundaryObservationMs_ : enabledAtMs_));
+  const double margin = laserBoundaryMargin(now);
+  const double measuredMargin = boundaryMeasuredMarginRatio_;
+  const int returnDirection = boundaryReturnDirection(now);
+  const double measuredAngularRadps =
+      (leftSpeedMps_ - rightSpeedMps_) / settings_.trackWidthM;
+  QString cause;
+  const bool moving = phaseMoves();
+  if (boundaryObservationMs_ >= 0 && margin <= kScanContainmentMarginRatio) {
+    boundaryContainmentActive_ = true;
+  } else if (margin > kScanContainmentReleaseRatio) {
+    boundaryContainmentActive_ = false;
+    boundaryRecoveryStartedMs_ = -1;
+    boundaryRecoveryDirection_ = 0;
   }
-  double margin = std::min(center, 1.0 - center) - halfWidth;
-  if (centerErrorTrendValid_ && lastValidDetectionMs_ >= 0) {
-    const double horizon = clamp((now - lastValidDetectionMs_) / 1000.0 + 0.15,
-                                 0.15, 0.50);
-    const double predictedCenter = center + clamp(
-        kCameraLateralToVehicleSign * filteredSignedCenterRateMps_ * horizon /
-            settings_.imageLateralSpanM, -0.06, 0.06);
-    // A predicted improvement never relaxes protection before it is seen.
-    margin = std::min(margin,
-        std::min(predictedCenter, 1.0 - predictedCenter) - halfWidth);
+  if (moving && measuredMargin <= 0.0) {
+    cause = QStringLiteral("seam_outside_scan");
+  } else if (moving && age > kMaximumUnmeasuredSeamMs) {
+    cause = QStringLiteral("measured_seam_timeout");
+  } else if (moving && boundaryContainmentActive_) {
+    if (boundaryRecoveryStartedMs_ < 0 ||
+        boundaryRecoveryDirection_ != returnDirection) {
+      boundaryRecoveryStartedMs_ = now;
+      boundaryRecoveryStartMargin_ = measuredMargin;
+      boundaryRecoveryDirection_ = returnDirection;
+    }
+    const qint64 recoveryAge = now - boundaryRecoveryStartedMs_;
+    if (age > kBoundaryObservationGraceMs) {
+      cause = QStringLiteral("unreliable_seam_near_boundary");
+    } else if (recoveryAge >= kBoundaryResponseGraceMs &&
+               measuredMargin <= kScanStopMarginRatio &&
+               measuredAngularRadps * returnDirection <
+                   -kSteeringDeadbandRadps) {
+      // Give a commanded reversal time to reach the wheels. Stop only if the
+      // seam is nearly out of view and the measured wheels still turn out.
+      cause = QStringLiteral("outward_wheel_response");
+    } else if (recoveryAge >= 1500 &&
+               // Prediction is an early-warning envelope only. It may raise
+               // the inward-turn priority, but it cannot prove that the weld
+               // has left the usable scan. Final parking requires the current
+               // measured envelope itself to be critical and still worsening.
+               measuredMargin <= kScanStopMarginRatio &&
+               measuredMargin < boundaryRecoveryStartMargin_ - 0.01) {
+      cause = QStringLiteral("containment_not_recovering");
+    }
+  } else if (!moving) {
+    // A settling pause is not time spent applying a recovery command.
+    boundaryRecoveryStartedMs_ = -1;
   }
-  return clamp(margin, 0.0, 0.5);
+  if (cause.isEmpty()) return false;
+  boundaryStopLatched_ = true;
+  emit diagnosticLogMessage(QStringLiteral(
+      "event=scan_boundary_stop session=%1 camera_seq=%2 phase=%3 reason=%4 "
+      "measured_margin_ratio=%5 predicted_margin_ratio=%6 line_ratio=%7:%8 "
+      "gap_ratio=%9:%10 measured_age_ms=%11 reliable=%12 response_untrusted=%13 "
+      "linear_before_mps=%14 angular_before_radps=%15 "
+      "return_direction=%16 wheel_angular_radps=%17 drive_angular_radps=%18")
+      .arg(trajectorySessionId_).arg(cameraFrameSequence_).arg(phaseName(phase_)).arg(cause)
+      .arg(measuredMargin, 0, 'f', 6).arg(margin, 0, 'f', 6)
+      .arg(boundaryLineStartRatio_, 0, 'f', 6).arg(boundaryLineEndRatio_, 0, 'f', 6)
+      .arg(boundaryGapStartRatio_, 0, 'f', 6).arg(boundaryGapEndRatio_, 0, 'f', 6)
+      .arg(age).arg(boundaryObservationReliable_ ? 1 : 0).arg(centerResponseUntrusted_ ? 1 : 0)
+      .arg(currentLinearMps_, 0, 'f', 6).arg(currentAngularRadps_, 0, 'f', 6)
+      .arg(returnDirection).arg(measuredAngularRadps, 0, 'f', 6)
+      .arg(driveAppliedAngularRadps_, 0, 'f', 6));
+  stop(CRAWLING_TEXT("扫描范围保护：焊道已出界或回中观测/响应无法保证，已停止；请检查焊道位置后重新启动（%1）")
+           .arg(cause));
+  return true;
 }
 
 double LaserCorrectionController::updateForwardSpeedSupervisor(
     qint64 now, double deltaSeconds, double boundaryScale) {
-  const double boundedBoundaryScale = clamp(
-      std::isfinite(boundaryScale) ? boundaryScale : 1.0,
-      kLaserBoundaryMinimumSpeedScale, 1.0);
-  const qint64 observationAgeMs =
+  Q_UNUSED(deltaSeconds);
+  Q_UNUSED(boundaryScale);
+  // Cruising speed is the configured chassis-centre speed. Observation and
+  // scan-boundary safety are enforced by the separate stop gate; they must
+  // not silently turn into a slower, open-loop crawl. Preserve the existing
+  // diagnostic fields so recordings remain comparable across versions.
+  speedSupervisorScale_ = 1.0;
+  speedSupervisorBoundaryScale_ = 1.0;
+  speedSupervisorObservationScale_ = 1.0;
+  speedSupervisorObservationAgeMs_ =
       lastValidDetectionMs_ >= enabledAtMs_ && lastValidDetectionMs_ >= 0
           ? std::max<qint64>(0, now - lastValidDetectionMs_)
-          : kSpeedSupervisorDegradedEndMs + kSpeedSupervisorFloorRampMs;
-
-  double ageScale = 1.0;
-  if (observationAgeMs > kSpeedSupervisorHoldMs &&
-      observationAgeMs <= kSpeedSupervisorDegradedEndMs) {
-    const double progress =
-        static_cast<double>(observationAgeMs - kSpeedSupervisorHoldMs) /
-        static_cast<double>(kSpeedSupervisorDegradedEndMs -
-                            kSpeedSupervisorHoldMs);
-    ageScale = 1.0 +
-               (kSpeedSupervisorDegradedScale - 1.0) * clamp(progress, 0.0, 1.0);
-  } else if (observationAgeMs > kSpeedSupervisorDegradedEndMs) {
-    const double progress =
-        static_cast<double>(observationAgeMs - kSpeedSupervisorDegradedEndMs) /
-        static_cast<double>(kSpeedSupervisorFloorRampMs);
-    ageScale = kSpeedSupervisorDegradedScale +
-               (kSpeedSupervisorFloorScale - kSpeedSupervisorDegradedScale) *
-                   clamp(progress, 0.0, 1.0);
-  }
-
-  // A current image measurement is still a measurement even when it is an
-  // edge-clipped gap or a displaced contour. Those paths have lower steering
-  // authority, but treating them as stale would make a valid live frame
-  // reduce speed and then leave too little motion for the center loop to
-  // recover. Only held/predicted/reacquisition frames lose speed authority.
-  const bool imageStreamFresh =
-      lastImageMs_ >= enabledAtMs_ && lastImageMs_ >= 0 &&
-      now - lastImageMs_ <= settings_.imageTimeoutMs;
-  // Seeing the parent stripe alone does not locate the seam. The 500 ms
-  // grace window absorbs isolated failures; persistent loss still degrades
-  // smoothly instead of treating a bright but featureless line as recovery.
-  const bool freshRealObservation =
-      imageStreamFresh && status_.gapValid && !detectionHeld_ && !reacquisitionPending_ &&
-       !centerResponseUntrusted_ &&
-       observationAgeMs <= kSpeedSupervisorHoldMs;
-  if (freshRealObservation) {
-    if (speedSupervisorRecoverySinceMs_ < 0) {
-      speedSupervisorRecoverySinceMs_ = now;
-    }
-  } else {
-    speedSupervisorRecoverySinceMs_ = -1;
-  }
-  const bool recoveryReady =
-      speedSupervisorRecoverySinceMs_ >= 0 &&
-      now - speedSupervisorRecoverySinceMs_ >= kSpeedSupervisorRecoveryMs;
-  double observationScale = ageScale;
-  if (!freshRealObservation && observationAgeMs > kSpeedSupervisorHoldMs) {
-    // Once the last measured gap is older than the hold window, trajectory
-    // prediction, a held frame, and reacquisition remain usable for bounded
-    // motion but are no longer fresh closed-loop authority. A single held
-    // frame inside the grace window must not create a speed pulse.
-    observationScale = std::min(observationScale,
-                                kSpeedSupervisorDegradedScale);
-  }
-  if (centerResponseUntrusted_) {
-    observationScale = std::min(observationScale,
-                                kSpeedSupervisorDegradedScale);
-  }
-  if (!recoveryReady && speedSupervisorScale_ < observationScale) {
-    // Require a short continuous run of trustworthy observations before
-    // restoring speed after a degraded interval.
-    observationScale = speedSupervisorScale_;
-  }
-
-  const double targetScale =
-      std::min(boundedBoundaryScale, clamp(observationScale,
-                                           kSpeedSupervisorFloorScale, 1.0));
-  const double stepRate = targetScale < speedSupervisorScale_
-                              ? kSpeedSupervisorDownRatePerSecond
-                              : kSpeedSupervisorUpRatePerSecond;
-  speedSupervisorScale_ = rate(
-      speedSupervisorScale_, targetScale,
-      stepRate * clamp(deltaSeconds, 0.001, 0.75));
-  speedSupervisorScale_ = clamp(speedSupervisorScale_,
-                                kLaserBoundaryMinimumSpeedScale, 1.0);
-  speedSupervisorBoundaryScale_ = boundedBoundaryScale;
-  speedSupervisorObservationScale_ = observationScale;
-  speedSupervisorObservationAgeMs_ = observationAgeMs;
-
-  if (boundedBoundaryScale < 0.999 && observationScale < 0.999) {
-    speedSupervisorReason_ = CRAWLING_TEXT("扫描边界+观测保护");
-  } else if (boundedBoundaryScale < 0.999) {
-    speedSupervisorReason_ = CRAWLING_TEXT("扫描边界保护");
-  } else if (observationAgeMs > kSpeedSupervisorHoldMs) {
-    speedSupervisorReason_ = CRAWLING_TEXT("观测年龄保护");
-  } else if (centerResponseUntrusted_) {
-    speedSupervisorReason_ = CRAWLING_TEXT("回中响应保护");
-  } else if (!recoveryReady && speedSupervisorScale_ < 0.999) {
-    speedSupervisorReason_ = CRAWLING_TEXT("可信观测恢复确认");
-  } else {
-    speedSupervisorReason_ = CRAWLING_TEXT("按跟踪速度运行");
-  }
-  return settings_.targetSpeedMps * speedSupervisorScale_;
+          : -1;
+  speedSupervisorRecoverySinceMs_ = -1;
+  speedSupervisorReason_ = CRAWLING_TEXT("按设置速度匀速巡航");
+  return settings_.targetSpeedMps;
 }
 
 void LaserCorrectionController::applyCommand(double targetLinearMps,
                                               double targetAngularRadps,
                                               double deltaSeconds,
                                               double curvatureLimitRadPerM) {
+  const qint64 now = clock_.elapsed();
+  if (stopIfScanBoundaryUnsafe(now)) return;
+  const double boundaryMargin = laserBoundaryMargin(now);
+  const int returnDirection = boundaryReturnDirection(now);
+  const bool containment = phaseMoves() && boundaryObservationMs_ >= 0 &&
+      now - boundaryObservationMs_ <= kBoundaryObservationGraceMs &&
+      boundaryContainmentActive_ && returnDirection != 0;
+  if (containment) {
+    const double wheelLimit =
+        (2.0 * std::abs(targetLinearMps) / settings_.trackWidthM) *
+        ((1.0 - settings_.minimumInnerWheelRatio) /
+         (1.0 + settings_.minimumInnerWheelRatio));
+    const double recoveryWeight = clamp(
+        (kScanContainmentReleaseRatio - boundaryMargin) /
+            (kScanContainmentReleaseRatio - kScanStopMarginRatio), 0.0, 1.0);
+    const double minimumTurn = std::min(kMinimumContainmentAngularRadps,
+                                        wheelLimit * 0.85) * recoveryWeight;
+    targetAngularRadps = returnDirection * std::max(
+        targetAngularRadps * returnDirection, minimumTurn);
+    if (!boundaryProtectionLogged_) {
+      boundaryProtectionLogged_ = true;
+      emit diagnosticLogMessage(QStringLiteral(
+          "event=scan_boundary_recenter session=%1 camera_seq=%2 phase=%3 "
+          "margin_ratio=%4 measured_age_ms=%5 return_direction=%6 "
+          "linear_target_mps=%7 angular_target_radps=%8")
+          .arg(trajectorySessionId_).arg(cameraFrameSequence_).arg(phaseName(phase_))
+          .arg(boundaryMargin, 0, 'f', 6).arg(now - boundaryObservationMs_)
+          .arg(returnDirection).arg(targetLinearMps, 0, 'f', 6)
+          .arg(targetAngularRadps, 0, 'f', 6));
+      emit logMessage(CRAWLING_TEXT(
+          "扫描范围回中：焊道余量 %1%，保持设置速度并向内转向")
+          .arg(boundaryMargin * 100.0, 0, 'f', 1));
+    }
+  } else if (boundaryMargin > kScanContainmentReleaseRatio) {
+    boundaryProtectionLogged_ = false;
+  }
   currentLinearMps_ = rate(
       currentLinearMps_, targetLinearMps,
       std::max(0.005, settings_.maxLinearAccelerationMps2) * deltaSeconds);
@@ -3181,10 +3289,15 @@ void LaserCorrectionController::applyCommand(double targetLinearMps,
       (curvatureLimitRadPerM > 0.0 ? curvatureLimitRadPerM
                                    : settings_.maximumCurvatureRadPerM);
   const double currentSafeAngularLimit =
-      std::min(currentLinearAngularLimit, currentCurvatureAngularLimit);
+      std::min(settings_.maxAngularRadps,
+               containment ? currentLinearAngularLimit
+                           : std::min(currentLinearAngularLimit, currentCurvatureAngularLimit));
   currentAngularRadps_ = clamp(acceleratedAngularRadps,
                                -currentSafeAngularLimit,
                                currentSafeAngularLimit);
+  // Recheck the final ramped command, including its changed braking horizon.
+  // Every boundary stop uses the same complete diagnostic record and latch.
+  if (stopIfScanBoundaryUnsafe(clock_.elapsed())) return;
   status_.linearCommandMps = currentLinearMps_;
   status_.angularCommandRadps = currentAngularRadps_;
   emit commandChanged(currentLinearMps_, currentAngularRadps_);

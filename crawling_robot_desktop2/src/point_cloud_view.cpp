@@ -154,7 +154,7 @@ void PointCloudView::paintEvent(QPaintEvent*) {
               ? CRAWLING_TEXT("检测焊缝 %1..%2 px / %3；青线=中心，黄线=主激光基线")
                     .arg(detection_.gapStartPx).arg(detection_.gapEndPx)
                     .arg(detection_.contourFallback
-                             ? CRAWLING_TEXT("轮廓辅助")
+                             ? CRAWLING_TEXT("凸起轮廓")
                              : (detection_.edgeBreakFallback
                                     ? CRAWLING_TEXT("单边推断")
                                     : CRAWLING_TEXT("双边实测")))

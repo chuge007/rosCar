@@ -25,6 +25,7 @@ class SynchronizedDriveController final : public QObject {
   void autoDetectCanDevices(const QString& excludedPort);
   void disconnectAdapter();
   void setInputCommand(double linearMps, double angularRadps);
+  void setCorrectionCommand(double linearMps, double angularRadps);
   void requestEnable(bool enabled);
   void emergencyStop();
   void systemReset();
@@ -47,6 +48,7 @@ class SynchronizedDriveController final : public QObject {
     double angularRadps = 0.0;
     qint64 receivedAtMs = 0;
     bool valid = false;
+    bool preserveLinearSpeed = false;
   };
 
   qint64 nowMs() const;
@@ -87,6 +89,7 @@ class SynchronizedDriveController final : public QObject {
   double lastRightResponseFactor_ = 1.0;
   double lastLeftCommandScale_ = 1.0;
   double lastRightCommandScale_ = 1.0;
+  bool lastCorrectionSteeringLimited_ = false;
 };
 
 }  // namespace crawling

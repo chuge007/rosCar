@@ -4,6 +4,9 @@ CONFIG += c++17 console testcase warn_on
 QMAKE_CXXFLAGS += /utf-8
 TEMPLATE = app
 TARGET = drive_core_tests
+include($$PWD/../opencv.pri)
+SOURCES += ../src/opencv_laser_contour.cpp
+HEADERS += ../src/opencv_laser_contour.h
 
 SOURCES += \
     drive_core_tests.cpp \

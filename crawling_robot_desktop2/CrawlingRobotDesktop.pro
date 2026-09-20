@@ -6,6 +6,9 @@ TEMPLATE = app
 TARGET = CrawlingRobotDesktop
 
 DEFINES += QT_DEPRECATED_WARNINGS
+include($$PWD/opencv.pri)
+SOURCES += src/opencv_laser_contour.cpp
+HEADERS += src/opencv_laser_contour.h
 
 SOURCES += \
     src/main.cpp \

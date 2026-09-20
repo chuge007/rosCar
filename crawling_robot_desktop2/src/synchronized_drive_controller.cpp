@@ -149,6 +149,42 @@ void SynchronizedDriveController::setInputCommand(double linearMps, double angul
   input_.angularRadps = angularRadps;
   input_.receivedAtMs = nowMs();
   input_.valid = true;
+  input_.preserveLinearSpeed = false;
+}
+
+void SynchronizedDriveController::setCorrectionCommand(double linearMps,
+                                                       double angularRadps) {
+  // A stop is always accepted, independent of configuration validity. Late
+  // queued motion must never overwrite a fault or emergency-stop latch.
+  if (linearMps == 0.0 && angularRadps == 0.0) {
+    setInputCommand(0.0, 0.0);
+    return;
+  }
+  if (state_ != DriveState::Enabled) return;
+  const double maximumCorrectionSpeedMps = std::min(
+      settings_.maximumLinearSpeedMps,
+      wheelMotors_.maximumCommandableWheelSpeedMps());
+  if (!std::isfinite(linearMps) || !std::isfinite(angularRadps) ||
+      !std::isfinite(maximumCorrectionSpeedMps) ||
+      maximumCorrectionSpeedMps <= 0.0 ||
+      std::abs(linearMps) > maximumCorrectionSpeedMps) {
+    emit logMessage(QStringLiteral(
+        "event=correction_command_rejected reason=unattainable_or_invalid_speed "
+        "requested_linear_mps=%1 requested_angular_radps=%2 limit_mps=%3")
+        .arg(linearMps, 0, 'f', 6).arg(angularRadps, 0, 'f', 6)
+        .arg(maximumCorrectionSpeedMps, 0, 'f', 6));
+    // Reject by stopping immediately: retaining the preceding nonzero
+    // command would let an invalid setting keep the chassis moving.
+    enterFault(CRAWLING_TEXT("自动纠偏速度无效或超过底盘可用上限，已停止；设置 %1 mm/s，上限 %2 mm/s")
+        .arg(linearMps * 1000.0, 0, 'f', 2)
+        .arg(maximumCorrectionSpeedMps * 1000.0, 0, 'f', 2));
+    return;
+  }
+  input_.linearMps = linearMps;
+  input_.angularRadps = angularRadps;
+  input_.receivedAtMs = nowMs();
+  input_.valid = true;
+  input_.preserveLinearSpeed = true;
 }
 
 void SynchronizedDriveController::requestEnable(bool enabled) {
@@ -263,7 +299,16 @@ void SynchronizedDriveController::controlTick() {
   }
 
   if (state_ == DriveState::Enabled) {
-    const double targetLinear = std::clamp(input_.linearMps,
+    const double effectiveWheelSpeedLimitMps =
+        wheelMotors_.maximumCommandableWheelSpeedMps();
+    if (input_.preserveLinearSpeed &&
+        std::abs(input_.linearMps) > std::min(settings_.maximumLinearSpeedMps,
+                                             effectiveWheelSpeedLimitMps)) {
+      enterFault(CRAWLING_TEXT("自动纠偏速度超过当前底盘上限，已停止"));
+      return;
+    }
+    const double targetLinear = input_.preserveLinearSpeed ? input_.linearMps :
+        std::clamp(input_.linearMps,
                                            -settings_.maximumLinearSpeedMps,
                                            settings_.maximumLinearSpeedMps);
     const double targetAngular = std::clamp(input_.angularRadps,
@@ -274,6 +319,8 @@ void SynchronizedDriveController::controlTick() {
       appliedLinearMps_ = 0.0;
       appliedAngularRadps_ = 0.0;
       synchronizer_.reset();
+      input_.preserveLinearSpeed = false;
+      lastCorrectionSteeringLimited_ = false;
       if (stoppingNow || !wheelMotors_.isStopped()) {
         sendStopPair(stoppingNow);
       }
@@ -323,10 +370,24 @@ void SynchronizedDriveController::controlTick() {
     WheelTargets output = DifferentialMixer::mix(appliedLinearMps_, appliedAngularRadps_,
                                                   settings_.trackWidthM,
                                                   settings_.minimumInnerWheelRatio);
-    const double effectiveWheelSpeedLimitMps =
-        wheelMotors_.maximumCommandableWheelSpeedMps();
-    output = DifferentialMixer::limitUniformly(output,
-                                                effectiveWheelSpeedLimitMps);
+    lastCorrectionSteeringLimited_ = false;
+    if (input_.preserveLinearSpeed) {
+      const auto limited = DifferentialMixer::preserveLinearSpeed(
+          output, appliedLinearMps_, settings_.trackWidthM,
+          settings_.minimumInnerWheelRatio, effectiveWheelSpeedLimitMps,
+          settings_.maximumAngularSpeedRadps);
+      if (!limited.has_value()) {
+        enterFault(CRAWLING_TEXT("自动纠偏无法在轮速上限内保持设置速度，已停止"));
+        return;
+      }
+      lastCorrectionSteeringLimited_ =
+          std::abs(limited->angularRadps - output.angularRadps) > 1e-9;
+      output = limited.value();
+    } else {
+      output = DifferentialMixer::limitUniformly(output,
+                                                  effectiveWheelSpeedLimitMps);
+    }
+    const WheelTargets beforeSynchronization = output;
     const bool synchronizationFeedbackUpdated =
         leftFeedback_.receivedAtMs > lastSynchronizationFeedbackMs_ &&
         rightFeedback_.receivedAtMs > lastSynchronizationFeedbackMs_;
@@ -348,14 +409,43 @@ void SynchronizedDriveController::controlTick() {
     output.rightMps = synchronization.rightMps;
     output.linearMps = (output.leftMps + output.rightMps) * 0.5;
     output.angularRadps = (output.leftMps - output.rightMps) / settings_.trackWidthM;
-    output = DifferentialMixer::limitUniformly(output,
-                                                effectiveWheelSpeedLimitMps);
+    if (input_.preserveLinearSpeed) {
+      const double synchronizedMean = output.linearMps;
+      const double requestedAngular = std::abs(synchronizedMean) > 1e-12
+          ? output.angularRadps * appliedLinearMps_ / synchronizedMean
+          : output.angularRadps;
+      const auto restored = DifferentialMixer::preserveLinearSpeed(
+          output, appliedLinearMps_, settings_.trackWidthM,
+          settings_.minimumInnerWheelRatio, effectiveWheelSpeedLimitMps,
+          settings_.maximumAngularSpeedRadps);
+      if (!restored.has_value()) {
+        enterFault(CRAWLING_TEXT("自动纠偏双轮同步无法保持目标均速，已停止"));
+        return;
+      }
+      lastCorrectionSteeringLimited_ = lastCorrectionSteeringLimited_ ||
+          std::abs(restored->angularRadps - requestedAngular) > 1e-9;
+      output = restored.value();
+    } else {
+      output = DifferentialMixer::limitUniformly(output,
+                                                  effectiveWheelSpeedLimitMps);
+    }
     lastSynchronizationError_ = synchronization.normalizedError;
     lastSynchronizationCorrectionMps_ = synchronization.correctionMps;
     lastLeftResponseFactor_ = synchronization.leftResponseFactor;
     lastRightResponseFactor_ = synchronization.rightResponseFactor;
     lastLeftCommandScale_ = synchronization.leftCommandScale;
     lastRightCommandScale_ = synchronization.rightCommandScale;
+    if (input_.preserveLinearSpeed) {
+      // Report the commands actually sent, including mean restoration and
+      // differential clipping, rather than only the synchronizer's reduction.
+      lastLeftCommandScale_ = std::abs(beforeSynchronization.leftMps) > 1e-12
+          ? output.leftMps / beforeSynchronization.leftMps : 1.0;
+      lastRightCommandScale_ = std::abs(beforeSynchronization.rightMps) > 1e-12
+          ? output.rightMps / beforeSynchronization.rightMps : 1.0;
+      lastSynchronizationCorrectionMps_ = 0.5 *
+          ((beforeSynchronization.rightMps - output.rightMps) -
+           (beforeSynchronization.leftMps - output.leftMps));
+    }
     sendSpeedPair(output.leftMps, output.rightMps, motionOutputStopped_);
     motionOutputStopped_ = false;
     publishTelemetry(output);
@@ -482,7 +572,8 @@ void SynchronizedDriveController::sendSpeedPair(double leftMps, double rightMps,
         "left_motor_feedback_raw_dps=%9 right_motor_feedback_raw_dps=%10 "
         "left_sign=%11 right_sign=%12 effective_limit_mps=%13 "
         "sync_left_response=%14 sync_right_response=%15 "
-        "sync_left_scale=%16 sync_right_scale=%17")
+        "sync_left_scale=%16 sync_right_scale=%17 "
+        "constant_speed_correction=%18 output_mean_mps=%19 correction_steering_limited=%20")
                         .arg(input_.linearMps, 0, 'f', 4)
                         .arg(input_.angularRadps, 0, 'f', 4)
                         .arg(leftMps, 0, 'f', 4)
@@ -500,7 +591,10 @@ void SynchronizedDriveController::sendSpeedPair(double leftMps, double rightMps,
                         .arg(lastLeftResponseFactor_, 0, 'f', 3)
                         .arg(lastRightResponseFactor_, 0, 'f', 3)
                         .arg(lastLeftCommandScale_, 0, 'f', 3)
-                        .arg(lastRightCommandScale_, 0, 'f', 3));
+                        .arg(lastRightCommandScale_, 0, 'f', 3)
+                        .arg(input_.preserveLinearSpeed ? 1 : 0)
+                        .arg((leftMps + rightMps) * 0.5, 0, 'f', 6)
+                        .arg(lastCorrectionSteeringLimited_ ? 1 : 0));
   }
 }
 
@@ -538,6 +632,7 @@ void SynchronizedDriveController::resetMotionState() {
   lastRightResponseFactor_ = 1.0;
   lastLeftCommandScale_ = 1.0;
   lastRightCommandScale_ = 1.0;
+  lastCorrectionSteeringLimited_ = false;
   synchronizer_.reset();
   input_ = {};
 }
