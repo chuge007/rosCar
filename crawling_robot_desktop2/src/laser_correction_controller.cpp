@@ -70,7 +70,7 @@ constexpr double kDetectionSearchAngularRadps = 0.025;
 constexpr double kLaserCenterDeadbandM = 0.0015;
 constexpr double kLaserCenterTurnErrorM = 0.012;
 constexpr double kLaserCenterAngularLimitRadps = 0.16;
-constexpr double kLargeOffsetCurvatureRadPerM = 2.40;
+constexpr double kLargeOffsetCurvatureRadPerM = 3.60;
 constexpr double kCenterRecoveryWatchdogErrorM = 0.015;
 constexpr double kCenterRecoveryWatchdogTravelM = 0.060;
 constexpr double kCenterRecoveryMinimumImprovementM = 0.001;
@@ -201,12 +201,12 @@ void LaserCorrectionController::setSettings(
   settings_.steeringSign =
       static_cast<int>(kCameraLateralToVehicleSign);
   settings_.targetSpeedMps = std::max(0.001, settings_.targetSpeedMps);
-  settings_.proportionalGain = clamp(settings_.proportionalGain, 0.0, 10.0);
-  settings_.derivativeGain = clamp(settings_.derivativeGain, 0.0, 2.0);
+  settings_.proportionalGain = clamp(settings_.proportionalGain, 0.0, 20.0);
+  settings_.derivativeGain = clamp(settings_.derivativeGain, 0.0, 4.0);
   settings_.derivativeAlpha = clamp(settings_.derivativeAlpha, 0.02, 1.0);
   settings_.headingFitBlend = clamp(settings_.headingFitBlend, 0.05, 0.50);
   settings_.maximumCurvatureRadPerM =
-      clamp(settings_.maximumCurvatureRadPerM, 0.05, 1.0);
+      clamp(settings_.maximumCurvatureRadPerM, 0.05, 2.0);
   settings_.laserCenterFeedbackGain =
       clamp(settings_.laserCenterFeedbackGain, 0.0, 1.5);
   settings_.laserCenterAngularGain =
@@ -2136,8 +2136,17 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
           now, deltaSeconds, 1.0);
       const double guidanceFreshness = lastGuidanceFitMs_ < 0 ? 0.0 :
           clamp(1.0 - (now - lastGuidanceFitMs_) / 6000.0, 0.0, 1.0);
+      // Keep the point-cloud heading loop slow and subordinate to the live
+      // laser-center loop, but give the configured Kp a visible effect at
+      // the expanded UI range.  Detection, fusion priorities, and all safety
+      // limits remain unchanged.
+      // The live laser-center loop remains the primary containment loop, but
+      // the fitted-path heading loop must still be visible at low cruise
+      // speed. Keep this as a bounded multiplier instead of changing the
+      // configured Kp semantics or any downstream safety limit.
+      constexpr double kHeadingProportionalScale = 3.50;
       const double proportionalTerm = targetLinear *
-          settings_.maximumCurvatureRadPerM * 0.35 * guidanceFreshness *
+          settings_.maximumCurvatureRadPerM * kHeadingProportionalScale * guidanceFreshness *
           std::tanh(settings_.proportionalGain * controlledError);
       // Wheel-speed yaw rate is considerably less noisy than differentiating
       // a heading estimate delivered at about 3 Hz. Opposing it provides

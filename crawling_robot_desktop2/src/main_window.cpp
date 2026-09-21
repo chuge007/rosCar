@@ -1166,9 +1166,9 @@ void MainWindow::buildInterface() {
   correctionSpeedBox_->setValue(5.0);
   correctionSegmentBox_ = makeDoubleSpin(20.0, 2000.0, 10.0, 1, correctionGroup);
   correctionSegmentBox_->setValue(100.0);
-  correctionKpBox_ = makeDoubleSpin(0.000, 10.000, 0.010, 3, correctionGroup);
+  correctionKpBox_ = makeDoubleSpin(0.000, 20.000, 0.010, 3, correctionGroup);
   correctionKpBox_->setValue(3.0);
-  correctionKdBox_ = makeDoubleSpin(0.000, 2.000, 0.010, 3, correctionGroup);
+  correctionKdBox_ = makeDoubleSpin(0.000, 4.000, 0.010, 3, correctionGroup);
   correctionKdBox_->setValue(0.12);
   const auto makeGainControl = [this, correctionGroup](
       QDoubleSpinBox* box, QSlider*& slider, const QString& name,
@@ -1212,11 +1212,11 @@ void MainWindow::buildInterface() {
   };
   QWidget* correctionKpControl = makeGainControl(
       correctionKpBox_, correctionKpSlider_, CRAWLING_TEXT("航向辅助 Kp"),
-      CRAWLING_TEXT("范围 0 到 10。调节滚动点云航向误差的辅助响应；"
+      CRAWLING_TEXT("范围 0 到 20。调节滚动点云航向误差的辅助响应；"
                     "增大时小航向误差响应更强，0 表示关闭该比例辅助。"));
   QWidget* correctionKdControl = makeGainControl(
       correctionKdBox_, correctionKdSlider_, CRAWLING_TEXT("转向阻尼 Kd"),
-      CRAWLING_TEXT("范围 0 到 2。依据左右轮反馈的转动速度施加反向阻尼，"
+      CRAWLING_TEXT("范围 0 到 4。依据左右轮反馈的转动速度施加反向阻尼，"
                     "帮助减小过冲；过大可能降低转向响应，0 表示关闭阻尼。"));
   const QList<QWidget*> correctionControls = {
       correctionSpeedBox_, correctionSegmentBox_, correctionKpControl, correctionKdControl};

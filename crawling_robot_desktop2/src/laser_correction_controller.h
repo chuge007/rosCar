@@ -46,7 +46,7 @@ struct LaserCorrectionSettings {
   // Keep the correction gentle, but do not make a 10--20 mm/s vehicle
   // effectively unable to turn. The previous 0.35 rad/m cap limited a
   // 12 mm/s run to about 0.24 deg/s, which made stale measurements dominate.
-  double maximumCurvatureRadPerM = 0.90;
+  double maximumCurvatureRadPerM = 1.50;
   // Keep the weld near the optical scan center. The nominal lookahead
   // converts lateral image error into a gentle steering curvature.
   double laserCenterFeedbackGain = 0.60;
