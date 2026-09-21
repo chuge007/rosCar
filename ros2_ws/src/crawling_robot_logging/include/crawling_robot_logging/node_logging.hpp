@@ -18,10 +18,58 @@
 
 #include "rcutils/logging.h"
 
+#if defined(_WIN32) && !defined(NOMINMAX)
+#define NOMINMAX
+#endif
+
+#if defined(_WIN32)
+#include <windows.h>
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#endif
+
 namespace crawling_robot_logging {
 namespace detail {
 
 inline constexpr std::size_t kMaxLogLines = 10000;
+inline constexpr std::uintmax_t kMaxLogBytes = 2U * 1024U * 1024U;
+
+class ProcessLogFileLock final {
+public:
+  ProcessLogFileLock() {
+#if defined(_WIN32)
+    handle_ = ::CreateMutexA(nullptr, FALSE, "Local\\CrawlingRobotRobotLog");
+    if (handle_ != nullptr) {
+      const DWORD result = ::WaitForSingleObject(handle_, 5000U);
+      locked_ = result == WAIT_OBJECT_0 || result == WAIT_ABANDONED;
+    }
+#endif
+  }
+
+  ~ProcessLogFileLock() {
+#if defined(_WIN32)
+    if (locked_) {
+      ::ReleaseMutex(handle_);
+    }
+    if (handle_ != nullptr) {
+      ::CloseHandle(handle_);
+    }
+#endif
+  }
+
+  ProcessLogFileLock(const ProcessLogFileLock&) = delete;
+  ProcessLogFileLock& operator=(const ProcessLogFileLock&) = delete;
+
+private:
+#if defined(_WIN32)
+  HANDLE handle_ = nullptr;
+  bool locked_ = false;
+#endif
+};
 
 inline std::string sanitizeFileStem(std::string value) {
   for (char& ch : value) {
@@ -126,7 +174,9 @@ public:
     log_root_ = std::move(log_root);
     std::error_code error;
     std::filesystem::create_directories(log_root_, error);
-    file_path_ = log_root_ / (node_name_ + ".log");
+    // All ROS processes append to one operator-facing log. The node name is
+    // retained in each formatted line, so diagnosis remains possible.
+    file_path_ = log_root_ / "robot.log";
     loadExistingLog();
     rcutils_logging_set_output_handler(&NodeFileLogger::outputHandler);
     initialized_ = true;
@@ -154,6 +204,11 @@ private:
   }
 
   void loadExistingLog() {
+    detail::ProcessLogFileLock file_lock;
+    trimFileLocked();
+  }
+
+  void trimFileLocked() {
     lines_.clear();
     std::ifstream input(file_path_);
     std::string line;
@@ -163,22 +218,21 @@ private:
         lines_.pop_front();
       }
     }
-    flushLocked();
+    if (lines_.size() >= detail::kMaxLogLines) {
+      flushLocked();
+    }
   }
 
   void appendLineLocked(const std::string& line) {
-    lines_.push_back(line);
-    if (lines_.size() > detail::kMaxLogLines) {
-      while (lines_.size() > detail::kMaxLogLines) {
-        lines_.pop_front();
-      }
-      flushLocked();
-      return;
-    }
-
+    detail::ProcessLogFileLock file_lock;
     std::ofstream output(file_path_, std::ios::binary | std::ios::app);
     if (output) {
       output << line << '\n';
+    }
+    std::error_code error;
+    const auto file_size = std::filesystem::file_size(file_path_, error);
+    if (!error && file_size > detail::kMaxLogBytes) {
+      trimFileLocked();
     }
   }
 

@@ -1,0 +1,189 @@
+{
+  "build": "pyhd8ed1ab_1",
+  "build_number": 1,
+  "depends": [
+    "python >=3.9",
+    "snowballstemmer >=2.2.0",
+    "tomli >=1.2.3"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "a36aa6e0119331d3280f4bba043314c7",
+  "name": "pydocstyle",
+  "noarch": "python",
+  "sha256": "83ab8434e3baf6a018914da4f1c2ae9023e23fb41e131b68b3e3f9ca41ecef61",
+  "size": 40236,
+  "subdir": "noarch",
+  "timestamp": 1733261742916,
+  "version": "6.3.0",
+  "fn": "pydocstyle-6.3.0-pyhd8ed1ab_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/pydocstyle-6.3.0-pyhd8ed1ab_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\pydocstyle-6.3.0-pyhd8ed1ab_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/pydocstyle-6.3.0.dist-info/INSTALLER",
+    "Lib/site-packages/pydocstyle-6.3.0.dist-info/LICENSE-MIT",
+    "Lib/site-packages/pydocstyle-6.3.0.dist-info/METADATA",
+    "Lib/site-packages/pydocstyle-6.3.0.dist-info/RECORD",
+    "Lib/site-packages/pydocstyle-6.3.0.dist-info/REQUESTED",
+    "Lib/site-packages/pydocstyle-6.3.0.dist-info/WHEEL",
+    "Lib/site-packages/pydocstyle-6.3.0.dist-info/direct_url.json",
+    "Lib/site-packages/pydocstyle-6.3.0.dist-info/entry_points.txt",
+    "Lib/site-packages/pydocstyle/__init__.py",
+    "Lib/site-packages/pydocstyle/__main__.py",
+    "Lib/site-packages/pydocstyle/_version.py",
+    "Lib/site-packages/pydocstyle/checker.py",
+    "Lib/site-packages/pydocstyle/cli.py",
+    "Lib/site-packages/pydocstyle/config.py",
+    "Lib/site-packages/pydocstyle/parser.py",
+    "Lib/site-packages/pydocstyle/utils.py",
+    "Lib/site-packages/pydocstyle/violations.py",
+    "Lib/site-packages/pydocstyle/wordlists.py",
+    "Lib/site-packages/pydocstyle/data/imperatives.txt",
+    "Lib/site-packages/pydocstyle/data/imperatives_blacklist.txt",
+    "Scripts/pydocstyle-script.py",
+    "Scripts/pydocstyle.exe"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/pydocstyle-6.3.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle-6.3.0.dist-info/LICENSE-MIT",
+        "path_type": "hardlink",
+        "sha256": "2449878c93af4d10bbdb6618ac26d18877e0b893ecff597532b3867c4458aa93",
+        "size_in_bytes": 1210
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle-6.3.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "a552b199db5d09aaee05255130d2fc94946e7e69094f30c413e727b7c47241b2",
+        "size_in_bytes": 3776
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle-6.3.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "0e36acfb2f73e9b69eba25978f23c8a7dfbe2ee1ec48554706c811e4b26ef68d",
+        "size_in_bytes": 2243
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle-6.3.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle-6.3.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "36af367bdad4027123b7df09e8c95598c0996feb7d71813622bd64a419a759fb",
+        "size_in_bytes": 88
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle-6.3.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "5e2a797b1c4a054219b7df19673c7096389750e282d079a10feede0724e444cc",
+        "size_in_bytes": 106
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle-6.3.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "c4331b75aca7e8c60ce748aa1fa43baeccf51964df2aa0f42cfe165205abbf1f",
+        "size_in_bytes": 50
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "521dac54c717c81c9c0b67cf09eca74fd3bafea2c1388369d66cde79b1b86fc6",
+        "size_in_bytes": 194
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/__main__.py",
+        "path_type": "hardlink",
+        "sha256": "1c04efcf230b39c4e0b6799aa5cb343d851a506069b9e3d38f76005b6fa97c94",
+        "size_in_bytes": 288
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/_version.py",
+        "path_type": "hardlink",
+        "sha256": "a3708fd51253bad0ba911004abb529bf1b2df20032a80c7e94315ee2a5000f2e",
+        "size_in_bytes": 400
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/checker.py",
+        "path_type": "hardlink",
+        "sha256": "b49e7b5e9cbe6b02246ff5e6b6154a6851772abbe6870305ad715af9bb2f1bfe",
+        "size_in_bytes": 44884
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/cli.py",
+        "path_type": "hardlink",
+        "sha256": "d24c72298a15ea13366a3133b93da2454ed0639041d35e3068bb5451ebb827a2",
+        "size_in_bytes": 2993
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/config.py",
+        "path_type": "hardlink",
+        "sha256": "8b8da83e65c1582762b373d15f2bf0b07819ec65e45e80a4b2afdeb7f43e666d",
+        "size_in_bytes": 33488
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/parser.py",
+        "path_type": "hardlink",
+        "sha256": "7c6da901768ce2bcc9ceec1beaa2593cfcb79746643c8d82d2cec612a953e47f",
+        "size_in_bytes": 28291
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/utils.py",
+        "path_type": "hardlink",
+        "sha256": "17706840d232836bf005882f86c77880149636a8a4239ea508e250fe0840f250",
+        "size_in_bytes": 1291
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/violations.py",
+        "path_type": "hardlink",
+        "sha256": "d4bcf8d0e942e9286ffd397ea3c0c2cee5bbf9ac8df589c18a053d2427114eec",
+        "size_in_bytes": 12411
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/wordlists.py",
+        "path_type": "hardlink",
+        "sha256": "ee5b494a398772912c9242174940fc5c121b9bfc95063a87f4c811f9e3220b08",
+        "size_in_bytes": 1548
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/data/imperatives.txt",
+        "path_type": "hardlink",
+        "sha256": "4e36122cdc06748fb6fe9f19e90a4e2c95a8629a246bc4d6e14a1084213d6d8e",
+        "size_in_bytes": 1821
+      },
+      {
+        "_path": "Lib/site-packages/pydocstyle/data/imperatives_blacklist.txt",
+        "path_type": "hardlink",
+        "sha256": "02c78121c377e598b14ae2a1873ec7dc68d4b260af49ec88713041bfe0e314e3",
+        "size_in_bytes": 1443
+      },
+      {
+        "_path": "Scripts/pydocstyle-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "a3772507f2e91693db6c1e273f3898c67bf6baf0619b5034a700f3b9550e1482",
+        "size_in_bytes": 192
+      },
+      {
+        "_path": "Scripts/pydocstyle.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\pydocstyle-6.3.0-pyhd8ed1ab_1",
+    "type": 1
+  }
+}

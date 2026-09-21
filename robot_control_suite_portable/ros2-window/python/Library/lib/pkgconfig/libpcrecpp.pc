@@ -1,0 +1,12 @@
+# Package Information for pkg-config
+
+prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libpcrecpp
+Description: PCRECPP - C++ wrapper for PCRE
+Version: 8.45
+Libs: -L${libdir} -lpcre -lpcrecpp
+Cflags: -I${includedir} 

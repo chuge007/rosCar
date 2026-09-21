@@ -1,0 +1,43 @@
+{
+  "arch": "x86_64",
+  "build": "h372dad0_7",
+  "build_number": 7,
+  "depends": [
+    "libopenvino 2024.1.0 hfe1841e_7",
+    "pugixml >=1.14,<1.15.0a0",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139"
+  ],
+  "md5": "38d649aaf121da5591a2d60325933ef9",
+  "name": "libopenvino-hetero-plugin",
+  "platform": "win",
+  "sha256": "5ff285bc544210fea1b8f0d3ef6d5d57cf1df7070e71fed3314439789679ccc0",
+  "size": 158159,
+  "subdir": "win-64",
+  "timestamp": 1715786163360,
+  "version": "2024.1.0",
+  "fn": "libopenvino-hetero-plugin-2024.1.0-h372dad0_7.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/libopenvino-hetero-plugin-2024.1.0-h372dad0_7.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\libopenvino-hetero-plugin-2024.1.0-h372dad0_7",
+  "requested_specs": [],
+  "files": [
+    "Library/bin/openvino-2024.1.0/openvino_hetero_plugin.dll"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/bin/openvino-2024.1.0/openvino_hetero_plugin.dll",
+        "path_type": "hardlink",
+        "sha256": "e3a00bcc5a1b5730f2278001f7b9a83eefa990fb3dd07f5e4f773ad502dfa52e",
+        "size_in_bytes": 365056
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\libopenvino-hetero-plugin-2024.1.0-h372dad0_7",
+    "type": 1
+  }
+}

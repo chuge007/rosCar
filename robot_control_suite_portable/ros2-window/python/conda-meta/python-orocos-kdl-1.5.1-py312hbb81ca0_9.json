@@ -1,0 +1,48 @@
+{
+  "arch": "x86_64",
+  "build": "py312hbb81ca0_9",
+  "build_number": 9,
+  "depends": [
+    "eigen",
+    "orocos-kdl",
+    "pybind11",
+    "python >=3.12,<3.13.0a0",
+    "python_abi 3.12.* *_cp312",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.3,<15",
+    "vc14_runtime >=14.44.35208"
+  ],
+  "license": "LGPL-2.1-or-later",
+  "license_family": "LGPL",
+  "md5": "6c1218c8b8e52a00bdbcc6417cc5dcd9",
+  "name": "python-orocos-kdl",
+  "platform": "win",
+  "sha256": "552f6695dc05c578d8cbac0789b489ccd904056223dc40bd38bd683c74a96f08",
+  "size": 368613,
+  "subdir": "win-64",
+  "timestamp": 1756374234326,
+  "version": "1.5.1",
+  "fn": "python-orocos-kdl-1.5.1-py312hbb81ca0_9.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/python-orocos-kdl-1.5.1-py312hbb81ca0_9.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\python-orocos-kdl-1.5.1-py312hbb81ca0_9",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/PyKDL.cp312-win_amd64.pyd"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/PyKDL.cp312-win_amd64.pyd",
+        "path_type": "hardlink",
+        "sha256": "c9bb50a6b033b9d538799c2bfaa73a085711cb8e42f77eb0e7eac697b0a416c9",
+        "size_in_bytes": 1193472
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\python-orocos-kdl-1.5.1-py312hbb81ca0_9",
+    "type": 1
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "arch": "x86_64",
+  "build": "hba3369d_0",
+  "build_number": 0,
+  "depends": [
+    "libgcc >=14",
+    "libwinpthread >=12.0.0.r4.gg4f2fc60ca",
+    "ucrt >=10.0.20348.0",
+    "xorg-libx11 >=1.8.12,<2.0a0",
+    "xorg-libxext >=1.3.6,<2.0a0",
+    "xorg-libxt >=1.3.1,<2.0a0"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "52105b90eaf5b859cb383348e99cbac2",
+  "name": "xorg-libxpm",
+  "platform": "win",
+  "sha256": "2004ebe53ce5e7288f148f2d92dd52526fd6ee0f5435bf95cf48de808028cd68",
+  "size": 237697,
+  "subdir": "win-64",
+  "timestamp": 1769445545101,
+  "version": "3.5.18",
+  "fn": "xorg-libxpm-3.5.18-hba3369d_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/xorg-libxpm-3.5.18-hba3369d_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\xorg-libxpm-3.5.18-hba3369d_0",
+  "requested_specs": [],
+  "files": [
+    "Library/lib/pkgconfig/xpm.pc",
+    "Library/lib/libXpm.dll.a",
+    "Library/include/X11/xpm.h",
+    "Library/bin/cxpm.exe",
+    "Library/bin/msys-Xpm-4.dll",
+    "Library/bin/sxpm.exe"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/lib/pkgconfig/xpm.pc",
+        "path_type": "hardlink",
+        "sha256": "7034eb9d36a89fa7fed6d0c531253cf0fd3f73b51b58251bcf2b520f9186b659",
+        "sha256_in_prefix": "26daa151b683420754c0b68042da25e17c45dcbcf82680bc739cceca0cc0b171",
+        "size_in_bytes": 280,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/xorg-libxpm_1769445060069/_h_env"
+      },
+      {
+        "_path": "Library/lib/libXpm.dll.a",
+        "path_type": "hardlink",
+        "sha256": "d685bca98d77bf00b09640012e6978cdd36f89a447d5f3df249ccec4ec388484",
+        "size_in_bytes": 44682
+      },
+      {
+        "_path": "Library/include/X11/xpm.h",
+        "path_type": "hardlink",
+        "sha256": "652b9aa90b3c5a516b367c1a4bed0658920505290657ea0d9362152a3e7c6388",
+        "size_in_bytes": 15468
+      },
+      {
+        "_path": "Library/bin/cxpm.exe",
+        "path_type": "hardlink",
+        "sha256": "8487b0943100e1c12d27b64636da1c1a00cb8ba8b5b01ee42a97aa18abbf44e7",
+        "size_in_bytes": 223567
+      },
+      {
+        "_path": "Library/bin/msys-Xpm-4.dll",
+        "path_type": "hardlink",
+        "sha256": "7912539751cd2f75e69c075e591e0aa187b6e6b30c6b51c4a5325122e4635b11",
+        "size_in_bytes": 453791
+      },
+      {
+        "_path": "Library/bin/sxpm.exe",
+        "path_type": "hardlink",
+        "sha256": "f47d093a6d5f34440ff802b62f53fc4da60970699a223aba99db4ce30c9b39af",
+        "size_in_bytes": 194982
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\xorg-libxpm-3.5.18-hba3369d_0",
+    "type": 1
+  }
+}

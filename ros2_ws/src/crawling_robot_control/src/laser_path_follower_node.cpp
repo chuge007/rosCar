@@ -24,6 +24,7 @@
 
 #include "crawling_robot_interfaces/msg/laser_correction_status.hpp"
 #include "crawling_robot_interfaces/msg/laser_profile.hpp"
+#include "crawling_robot_interfaces/srv/set_localization_reference.hpp"
 #include "crawling_robot_logging/node_logging.hpp"
 
 namespace crawling_robot_control {
@@ -287,6 +288,12 @@ public:
           response->success = true;
           response->message = "Laser correction filters and command ramp reset.";
         });
+    reference_service_ = create_service<crawling_robot_interfaces::srv::SetLocalizationReference>(
+        "/laser_correction/set_reference",
+        [this](const std::shared_ptr<crawling_robot_interfaces::srv::SetLocalizationReference::Request> request,
+               std::shared_ptr<crawling_robot_interfaces::srv::SetLocalizationReference::Response> response) {
+          setLocalizationReference(*request, *response);
+        });
     control_timer_ = create_wall_timer(std::chrono::milliseconds(std::max(1, control_period_ms_)),
                                        [this] { updateCommand(); });
     status_timer_ = create_wall_timer(std::chrono::milliseconds(100), [this] { publishStatus(); });
@@ -352,6 +359,26 @@ private:
     fit_residual_m_ = 0.0;
     trajectory_points_ = 0;
     trajectory_.clear();
+  }
+
+  void setLocalizationReference(
+      const crawling_robot_interfaces::srv::SetLocalizationReference::Request& request,
+      crawling_robot_interfaces::srv::SetLocalizationReference::Response& response) {
+    if (!std::isfinite(request.contour_lateral_m) || !std::isfinite(request.heading_reference_rad)) {
+      response.success = false;
+      response.message = "Localization reference must contain finite values.";
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      target_lateral_m_ = clampValue(request.contour_lateral_m,
+                                     std::min(lateral_min_m_, lateral_max_m_),
+                                     std::max(lateral_min_m_, lateral_max_m_));
+      heading_reference_rad_ = wrapAngle(request.heading_reference_rad);
+      resetControllerLocked();
+    }
+    response.success = true;
+    response.message = "Localization reference applied; correction filters reset.";
   }
 
   bool extractContour(const sensor_msgs::msg::PointCloud2& cloud, ContourMeasurement& measurement) const {
@@ -655,7 +682,7 @@ private:
     // physical seam offset so zero corresponds to the configured tracking line.
     estimate.lateral_error = (closest_y - tangent_slope * closest_x) / normal_scale -
                              target_lateral_m_;
-    estimate.heading_error = std::atan(tangent_slope);
+    estimate.heading_error = wrapAngle(std::atan(tangent_slope) - heading_reference_rad_);
     const double requested_preview = std::max(0.0, preview_distance_m_);
     const double preview_x = clampValue(requested_preview, min_x, max_x);
     const double preview_u = preview_x / fit_scale;
@@ -857,6 +884,7 @@ private:
   double lateral_min_m_ = -0.2;
   double lateral_max_m_ = 0.2;
   double target_lateral_m_ = 0.0;
+  double heading_reference_rad_ = 0.0;
   double prominence_threshold_m_ = 0.0015;
   double confidence_scale_m_ = 0.004;
   int min_candidate_points_ = 3;
@@ -937,6 +965,7 @@ private:
   rclcpp::Publisher<crawling_robot_interfaces::msg::LaserCorrectionStatus>::SharedPtr status_publisher_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr enable_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_service_;
+  rclcpp::Service<crawling_robot_interfaces::srv::SetLocalizationReference>::SharedPtr reference_service_;
   rclcpp::TimerBase::SharedPtr control_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   std::deque<OdomState> odom_history_;

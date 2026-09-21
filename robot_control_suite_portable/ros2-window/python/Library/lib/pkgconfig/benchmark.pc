@@ -1,0 +1,12 @@
+prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+exec_prefix=${prefix}
+libdir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib
+includedir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/include
+
+Name: benchmark
+Description: Google microbenchmark framework
+Version: 1.8.3
+
+Libs: -L${libdir} -lbenchmark
+Libs.private: -lpthread
+Cflags: -I${includedir}

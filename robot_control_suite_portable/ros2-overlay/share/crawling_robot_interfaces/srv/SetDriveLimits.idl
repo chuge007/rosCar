@@ -1,0 +1,31 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from crawling_robot_interfaces/srv/SetDriveLimits.srv
+// generated code does not contain a copyright notice
+
+
+module crawling_robot_interfaces {
+  module srv {
+    struct SetDriveLimits_Request {
+      double max_linear_speed_m_s;
+
+      double max_angular_speed_rad_s;
+
+      double max_linear_accel_m_s2;
+
+      double max_angular_accel_rad_s2;
+
+      @verbatim (language="comment", text=
+        "Safety cap applied uniformly to the two physical wheel speeds.")
+      double max_wheel_speed_m_s;
+
+      @verbatim (language="comment", text=
+        "Minimum inner/outer wheel speed ratio during a translating turn.")
+      double minimum_inner_wheel_ratio;
+    };
+    struct SetDriveLimits_Response {
+      boolean success;
+
+      string message;
+    };
+  };
+};

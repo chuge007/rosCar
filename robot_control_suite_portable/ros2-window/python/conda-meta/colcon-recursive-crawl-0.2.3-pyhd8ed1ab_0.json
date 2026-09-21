@@ -1,0 +1,125 @@
+{
+  "build": "pyhd8ed1ab_0",
+  "build_number": 0,
+  "depends": [
+    "colcon-core >=0.2.0",
+    "python >=3.5"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "APACHE",
+  "md5": "0e15eecc695ef5a4508ffe3e438f1466",
+  "name": "colcon-recursive-crawl",
+  "noarch": "python",
+  "sha256": "8aede8793a64695cf65f37633ede04c125db71d13abc2c8fb70b44fbc48d3794",
+  "size": 13254,
+  "subdir": "noarch",
+  "timestamp": 1696534627965,
+  "version": "0.2.3",
+  "fn": "colcon-recursive-crawl-0.2.3-pyhd8ed1ab_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/colcon-recursive-crawl-0.2.3-pyhd8ed1ab_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-recursive-crawl-0.2.3-pyhd8ed1ab_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/INSTALLER",
+    "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/LICENSE",
+    "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/METADATA",
+    "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/RECORD",
+    "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/REQUESTED",
+    "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/WHEEL",
+    "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/direct_url.json",
+    "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/entry_points.txt",
+    "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/top_level.txt",
+    "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/zip-safe",
+    "Lib/site-packages/colcon_recursive_crawl/__init__.py",
+    "Lib/site-packages/colcon_recursive_crawl/package_discovery/__init__.py",
+    "Lib/site-packages/colcon_recursive_crawl/package_discovery/recursive_crawl.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_in_bytes": 11358
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "9923dcbc73f514fc4c56234f51411a098cd2330f3dbd16b0e4dd89bd818d1adc",
+        "size_in_bytes": 1889
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "2c3c319d85655f2779f723c5d6ad9b28fe089c21f9da95f06fe858d59a7f9532",
+        "size_in_bytes": 1545
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "c903798389a0e00c9b4639208bef72cb889010589b1909a5cfbf0f8a4e4eafe0",
+        "size_in_bytes": 92
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "030e03720168f9f13f57cb8a9e536bda526f0792ebfda99536cedd848fae2814",
+        "size_in_bytes": 118
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "ef6294af96f9ecffbe712b50164925039a1b2dcd6304ff59966a6bf989591b04",
+        "size_in_bytes": 129
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "ed0450a9c2f6278e052f1a3ec3ef7546cd75e7bcf3f3b11b5a60c6d976beaf38",
+        "size_in_bytes": 23
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl-0.2.3.dist-info/zip-safe",
+        "path_type": "hardlink",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "size_in_bytes": 1
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "f93eea82a86251e1fe53373a13bdcf92933a020f59c648cbe1d8dfd8b1a68337",
+        "size_in_bytes": 106
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl/package_discovery/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_recursive_crawl/package_discovery/recursive_crawl.py",
+        "path_type": "hardlink",
+        "sha256": "6bdcda327a3b047e54997c09572c5442a049582f299fda3c735a1a3f7b1f2c62",
+        "size_in_bytes": 3127
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-recursive-crawl-0.2.3-pyhd8ed1ab_0",
+    "type": 1
+  }
+}

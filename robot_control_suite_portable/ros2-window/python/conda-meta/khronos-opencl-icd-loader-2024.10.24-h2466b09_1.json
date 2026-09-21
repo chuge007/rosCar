@@ -1,0 +1,131 @@
+{
+  "arch": "x86_64",
+  "build": "h2466b09_1",
+  "build_number": 1,
+  "depends": [
+    "opencl-headers >=2024.10.24",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "APACHE",
+  "md5": "71a72eb0eed16a4a76fd88359be48fec",
+  "name": "khronos-opencl-icd-loader",
+  "platform": "win",
+  "sha256": "881f92399f706df1185ec4372e59c5c9832f2dbb8e7587c6030a2a9a6e8ce7f8",
+  "size": 46768,
+  "subdir": "win-64",
+  "timestamp": 1732916943523,
+  "version": "2024.10.24",
+  "fn": "khronos-opencl-icd-loader-2024.10.24-h2466b09_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/khronos-opencl-icd-loader-2024.10.24-h2466b09_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\khronos-opencl-icd-loader-2024.10.24-h2466b09_1",
+  "requested_specs": [],
+  "files": [
+    "Library/etc/OpenCL/vendors/opencl-helper.bat",
+    "Library/lib/pkgconfig/OpenCL.pc",
+    "Library/lib/OpenCL.lib",
+    "Library/share/cmake/OpenCLICDLoader/OpenCLICDLoaderConfig.cmake",
+    "Library/share/cmake/OpenCLICDLoader/OpenCLICDLoaderConfigVersion.cmake",
+    "Library/share/cmake/OpenCLICDLoader/OpenCLICDLoaderTargets-release.cmake",
+    "Library/share/cmake/OpenCLICDLoader/OpenCLICDLoaderTargets.cmake",
+    "etc/conda/deactivate.d/khronos-opencl-icd-loader_deactivate.bat",
+    "etc/conda/deactivate.d/khronos-opencl-icd-loader_deactivate.sh",
+    "Library/bin/OpenCL.dll",
+    "Library/bin/cllayerinfo.exe",
+    "etc/conda/activate.d/khronos-opencl-icd-loader_activate.bat",
+    "etc/conda/activate.d/khronos-opencl-icd-loader_activate.sh"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/etc/OpenCL/vendors/opencl-helper.bat",
+        "path_type": "hardlink",
+        "sha256": "63bfe30797effe5b1fc997c1df45518aae456bb98370025f5be505115dafc51a",
+        "size_in_bytes": 437
+      },
+      {
+        "_path": "Library/lib/pkgconfig/OpenCL.pc",
+        "path_type": "hardlink",
+        "sha256": "365e9c781b1fbdc32bd0672c70091fb60b8e30a382f7f033837372b61b079fe4",
+        "sha256_in_prefix": "cc2a9daa7fb17339e84c1b64094b98fa1888ca8d4dc58b01d4b7e4aaf5b3f5b9",
+        "size_in_bytes": 237,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/khronos-opencl-icd-loader_1732916401361/_h_env"
+      },
+      {
+        "_path": "Library/lib/OpenCL.lib",
+        "path_type": "hardlink",
+        "sha256": "b157eed9aa715cca16459a9e8dffe31ba4754c1317a2f56aaaa353d1aa101690",
+        "size_in_bytes": 28824
+      },
+      {
+        "_path": "Library/share/cmake/OpenCLICDLoader/OpenCLICDLoaderConfig.cmake",
+        "path_type": "hardlink",
+        "sha256": "1f8f47a4439fdd8e01d5d7ca83414dafee5d47e7a9474769797a662b2dbd702f",
+        "size_in_bytes": 65
+      },
+      {
+        "_path": "Library/share/cmake/OpenCLICDLoader/OpenCLICDLoaderConfigVersion.cmake",
+        "path_type": "hardlink",
+        "sha256": "f61e48935ed7c46d8c362655adabc57ecbecc169880c68875d9be9dfa7739d67",
+        "size_in_bytes": 1899
+      },
+      {
+        "_path": "Library/share/cmake/OpenCLICDLoader/OpenCLICDLoaderTargets-release.cmake",
+        "path_type": "hardlink",
+        "sha256": "b49de241f74e004778337781586c7e1e2bd9706dc6bcd9ab90079708558295ab",
+        "size_in_bytes": 906
+      },
+      {
+        "_path": "Library/share/cmake/OpenCLICDLoader/OpenCLICDLoaderTargets.cmake",
+        "path_type": "hardlink",
+        "sha256": "eeed7a183bd1b660e730e8c15d5306cec99b1a3674adaa1a86daac2ce4eaa0a3",
+        "size_in_bytes": 4220
+      },
+      {
+        "_path": "etc/conda/deactivate.d/khronos-opencl-icd-loader_deactivate.bat",
+        "path_type": "hardlink",
+        "sha256": "e2ed2b13136f79390fc91ef89e19eeee5bff03b1809014e693e2c2150587c58a",
+        "size_in_bytes": 58
+      },
+      {
+        "_path": "etc/conda/deactivate.d/khronos-opencl-icd-loader_deactivate.sh",
+        "path_type": "hardlink",
+        "sha256": "6225de2d7b1f08665a1a961eb5576c0a35b02c5bff7996a6e9c0068d18de6137",
+        "size_in_bytes": 129
+      },
+      {
+        "_path": "Library/bin/OpenCL.dll",
+        "path_type": "hardlink",
+        "sha256": "8e87c7016d8ca7909a6bccfd875edb7c650366b57bf3c97e6b5dbe3efada4c51",
+        "size_in_bytes": 55296
+      },
+      {
+        "_path": "Library/bin/cllayerinfo.exe",
+        "path_type": "hardlink",
+        "sha256": "824d28675bb8b7b8e8a5cfa3cc71cc1d8aa69d239eedb0edd0c78e345915b15f",
+        "size_in_bytes": 46080
+      },
+      {
+        "_path": "etc/conda/activate.d/khronos-opencl-icd-loader_activate.bat",
+        "path_type": "hardlink",
+        "sha256": "7fec63331a9d93a0d51b0fc034fcfe84aa2c2b6fe25987f41d222afc85850c5e",
+        "size_in_bytes": 398
+      },
+      {
+        "_path": "etc/conda/activate.d/khronos-opencl-icd-loader_activate.sh",
+        "path_type": "hardlink",
+        "sha256": "c69237d051fd04ff3c7b26ea64875c42e3aeab8638c10269a02e5884b4bbff6c",
+        "size_in_bytes": 261
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\khronos-opencl-icd-loader-2024.10.24-h2466b09_1",
+    "type": 1
+  }
+}

@@ -189,7 +189,7 @@ try {
     # Snapshot launcher/config templates before -Clean removes the default
     # output directory (which is also the checked-in template directory).
     Copy-Tree (Join-Path $repoRoot "target_board_release\config") (Join-Path $templateRoot "config")
-    foreach ($template in @("run_robot.ps1", "run_robot.cmd", "stop_robot.ps1", "stop_robot.cmd", "create_shortcut.ps1", "create_shortcut.cmd", "README.md")) {
+    foreach ($template in @("run_robot.ps1", "run_robot.cmd", "run_drive_test.ps1", "run_drive_test.cmd", "stop_robot.ps1", "stop_robot.cmd", "start_monitor.cmd", "create_shortcut.ps1", "create_shortcut.cmd", "README.md")) {
         Copy-Item -LiteralPath (Join-Path $repoRoot "target_board_release\$template") -Destination (Join-Path $templateRoot $template) -Force
     }
 
@@ -202,6 +202,7 @@ try {
             '-DCMAKE_BUILD_TYPE=Release',
             '-DCMAKE_CXX_STANDARD=17',
             '-DCMAKE_CXX_STANDARD_REQUIRED=ON',
+            '-DBUILD_TESTING=OFF',
             "-DPython3_EXECUTABLE=$pythonExecutable",
             '-DPython3_FIND_STRATEGY=LOCATION'
         )
@@ -279,7 +280,7 @@ try {
         Copy-Tree (Join-Path $repoRoot "modules\mv3dlp_laser_profile") (Join-Path $OutputRoot "source\modules\mv3dlp_laser_profile")
     }
 
-    foreach ($template in @("run_robot.ps1", "run_robot.cmd", "stop_robot.ps1", "stop_robot.cmd", "create_shortcut.ps1", "create_shortcut.cmd", "README.md")) {
+    foreach ($template in @("run_robot.ps1", "run_robot.cmd", "run_drive_test.ps1", "run_drive_test.cmd", "stop_robot.ps1", "stop_robot.cmd", "start_monitor.cmd", "create_shortcut.ps1", "create_shortcut.cmd", "README.md")) {
         Copy-Item -LiteralPath (Join-Path $templateRoot $template) -Destination (Join-Path $OutputRoot $template) -Force
     }
 

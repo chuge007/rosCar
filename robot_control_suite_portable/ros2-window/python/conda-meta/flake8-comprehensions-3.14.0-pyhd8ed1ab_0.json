@@ -1,0 +1,111 @@
+{
+  "build": "pyhd8ed1ab_0",
+  "build_number": 0,
+  "depends": [
+    "flake8 >=3.0,!=3.2.0",
+    "python >=3.8"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "42f49fbea025865595ffa23755458e9c",
+  "name": "flake8-comprehensions",
+  "noarch": "python",
+  "sha256": "a9193697cfcfbb5505a616a52ae0da18339b3d60976ac191cab1e9874ffe35ee",
+  "size": 13328,
+  "subdir": "noarch",
+  "timestamp": 1689628236413,
+  "version": "3.14.0",
+  "fn": "flake8-comprehensions-3.14.0-pyhd8ed1ab_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/flake8-comprehensions-3.14.0-pyhd8ed1ab_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\flake8-comprehensions-3.14.0-pyhd8ed1ab_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/flake8_comprehensions/__init__.py",
+    "Lib/site-packages/flake8_comprehensions/py.typed",
+    "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/INSTALLER",
+    "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/LICENSE",
+    "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/METADATA",
+    "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/RECORD",
+    "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/REQUESTED",
+    "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/WHEEL",
+    "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/direct_url.json",
+    "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/entry_points.txt",
+    "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/top_level.txt"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "2dda6b0cc27a4e1b5d03109962e42583688dbe5dac17d548da3dc6b6b6d046f9",
+        "size_in_bytes": 15886
+      },
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions/py.typed",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "d9705af1319332f41bedb7845e1dc9e71d83c07c29cfb534f1ceb2f13d3f60dc",
+        "size_in_bytes": 1069
+      },
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "3b04a0fde1379c96153c22848d7d15edd1f2debe2e87158b452147fc69f2aec2",
+        "size_in_bytes": 11716
+      },
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "39bfb661079d89e93797233d87d8b2068b76bbb557351f5bc726fc47006e8854",
+        "size_in_bytes": 1134
+      },
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "a6472d658cd44b8018567e9d27eef7ebb389662bc5d9ef1103d6ff6418e27f5f",
+        "size_in_bytes": 92
+      },
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "7557bc798b05c9276ca963c75e909cd1db28d25ee78d1a3e57d9c360df5df3a7",
+        "size_in_bytes": 117
+      },
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "c9ec750ff4c5a3c47ccab99f71abe905c5f2115b48d2ec19dddf589019c75d14",
+        "size_in_bytes": 67
+      },
+      {
+        "_path": "Lib/site-packages/flake8_comprehensions-3.14.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "41006425f17b8ab2f05f298c5fc233312269bb0427ed0299cc0a4ee070191c6d",
+        "size_in_bytes": 22
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\flake8-comprehensions-3.14.0-pyhd8ed1ab_0",
+    "type": 1
+  }
+}

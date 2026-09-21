@@ -1,0 +1,43 @@
+{
+  "arch": "x86_64",
+  "build": "h04f32e0_7",
+  "build_number": 7,
+  "depends": [
+    "libopenvino 2024.1.0 hfe1841e_7",
+    "tbb >=2021.12.0",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139"
+  ],
+  "md5": "1a2e491187bdd45fa1f2c44ec8ae6d4b",
+  "name": "libopenvino-auto-batch-plugin",
+  "platform": "win",
+  "sha256": "9b4a52db70f13c5a08ae9caf036cfa71e9fa248a1e349c5d97c0309920401ba9",
+  "size": 97297,
+  "subdir": "win-64",
+  "timestamp": 1715786078537,
+  "version": "2024.1.0",
+  "fn": "libopenvino-auto-batch-plugin-2024.1.0-h04f32e0_7.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/libopenvino-auto-batch-plugin-2024.1.0-h04f32e0_7.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\libopenvino-auto-batch-plugin-2024.1.0-h04f32e0_7",
+  "requested_specs": [],
+  "files": [
+    "Library/bin/openvino-2024.1.0/openvino_auto_batch_plugin.dll"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/bin/openvino-2024.1.0/openvino_auto_batch_plugin.dll",
+        "path_type": "hardlink",
+        "sha256": "7fa4252d0bc2b572d26c95d7911e5d8c2ffcd263db6a81c4abb54d1fc434feea",
+        "size_in_bytes": 188416
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\libopenvino-auto-batch-plugin-2024.1.0-h04f32e0_7",
+    "type": 1
+  }
+}

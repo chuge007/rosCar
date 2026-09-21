@@ -1,8 +1,10 @@
 @echo off
 setlocal EnableExtensions
 set "SCRIPT_DIR=%~dp0"
-rem SSH settings for the target board. Set SSH_PASSWORD in the environment
-rem before running this helper; credentials are intentionally not stored here.
+rem Select the target explicitly when calling this helper. The PowerShell
+rem script chooses the matching private key automatically:
+rem   192.168.1.20 -> %USERPROFILE%\.ssh\id_ed25519
+rem   192.168.1.21 -> %USERPROFILE%\.ssh\id_ed25519_robot21
 set "SSH_HOST=192.168.1.20"
 set "SSH_USER=pc"
 set "SSH_PORT=22"
@@ -12,6 +14,5 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%ssh
   -SshHost "%SSH_HOST%" ^
   -SshUser "%SSH_USER%" ^
   -SshPort %SSH_PORT% ^
-  -SshPassword "%SSH_PASSWORD%" ^
   -SshTargetRoot "%SSH_TARGET_ROOT%" %*
 exit /b %ERRORLEVEL%

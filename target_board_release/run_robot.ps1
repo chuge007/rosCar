@@ -9,6 +9,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $releaseRoot = (Resolve-Path (Join-Path $PSScriptRoot ".")).Path
+$previousLocation = Get-Location
+Set-Location -LiteralPath $releaseRoot
+try {
 $runtimeRoot = Join-Path $releaseRoot "runtime"
 $installRoot = Join-Path $releaseRoot "install"
 $vendorRoot = Join-Path $releaseRoot "vendor\mv3dlp_sdk"
@@ -40,6 +43,32 @@ function Resolve-ReleasePath([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
     if ([IO.Path]::IsPathRooted($path)) { return (Resolve-Path -LiteralPath $path).Path }
     return (Resolve-Path -LiteralPath (Join-Path $releaseRoot $path)).Path
+}
+
+function Find-CanPort {
+    $ports = @(Get-CimInstance Win32_SerialPort -ErrorAction SilentlyContinue)
+    $match = $ports | Where-Object {
+        $text = "$($_.Name) $($_.Description) $($_.PNPDeviceID)"
+        $text -match '(?i)CANable|SLCAN|VID_16D0&PID_117E'
+    } | Select-Object -First 1
+    if ($match) { return [string]$match.DeviceID }
+
+    # Some USB-CAN drivers register as a generic Ports device instead of a
+    # Win32_SerialPort. Use the friendly name/instance id as a fallback and
+    # extract the COM number from the same record.
+    $records = @()
+    if (Get-Command Get-PnpDevice -ErrorAction SilentlyContinue) {
+        $records += @(Get-PnpDevice -Class Ports -ErrorAction SilentlyContinue)
+    }
+    $records += @(Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
+        Where-Object { "$($_.Name) $($_.Caption) $($_.PNPDeviceID)" -match '(?i)CANable|SLCAN|VID_16D0&PID_117E' })
+    foreach ($record in $records) {
+        $text = "$($record.FriendlyName) $($record.Name) $($record.Caption) $($record.InstanceId) $($record.PNPDeviceID)"
+        if ($text -notmatch '(?i)CANable|SLCAN|VID_16D0&PID_117E') { continue }
+        $com = [regex]::Match($text, '(?i)\bCOM\d+\b')
+        if ($com.Success) { return $com.Value.ToUpperInvariant() }
+    }
+    return ""
 }
 
 if (-not (Test-Path (Join-Path $runtimeRoot "local_setup.bat")) -and
@@ -146,8 +175,16 @@ $pidFile = Join-Path $releaseRoot "run.pid"
 if (Test-Path $pidFile) {
     $oldPid = 0
     try { $oldPid = [int](Get-Content -Raw -LiteralPath $pidFile) } catch {}
-    if ($oldPid -gt 0 -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {
-        Fail "ROS 2 stack is already running (PID $oldPid). Use stop_robot.cmd first."
+    $oldProcess = if ($oldPid -gt 0) { Get-CimInstance Win32_Process -Filter "ProcessId = $oldPid" -ErrorAction SilentlyContinue } else { $null }
+    $oldCommandLine = [string]$oldProcess.CommandLine
+    if ($oldProcess -and $oldCommandLine.IndexOf($releaseRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        Write-Host "Existing ROS 2 launch found (PID $oldPid); stopping it before restart..." -ForegroundColor Yellow
+        & (Join-Path $releaseRoot "stop_robot.ps1")
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Unable to stop the existing ROS 2 stack (PID $oldPid)."
+        }
+    } elseif ($oldProcess) {
+        Write-Host "Ignoring stale run.pid $oldPid because it belongs to another process." -ForegroundColor Yellow
     }
     Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
 }
@@ -158,9 +195,20 @@ $env:ROS_LOCALHOST_ONLY = if ($env:ROS_LOCALHOST_ONLY) { $env:ROS_LOCALHOST_ONLY
 $env:ROS_AUTOMATIC_DISCOVERY_RANGE = if ($env:ROS_AUTOMATIC_DISCOVERY_RANGE) { $env:ROS_AUTOMATIC_DISCOVERY_RANGE } else { "SUBNET" }
 $fastDdsProfile = Join-Path $releaseRoot "config\fastdds_profile.xml"
 if (Test-Path -LiteralPath $fastDdsProfile) {
-    # The target has two 192.168.1.x adapters. Advertise only the cable-side
-    # address so DDS replies do not go through the other adapter.
-    $env:FASTRTPS_DEFAULT_PROFILES_FILE = $fastDdsProfile
+    # The release profile is for the target board at 192.168.1.20. When the
+    # same release is run on a development PC (normally 192.168.1.100), that
+    # whitelist would prevent the local monitor and drive node from seeing
+    # each other. Use localhost DDS for that case.
+    $localAddresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.AddressState -eq "Preferred" } |
+        Select-Object -ExpandProperty IPAddress)
+    if ($localAddresses -contains "192.168.1.20") {
+        $env:FASTRTPS_DEFAULT_PROFILES_FILE = $fastDdsProfile
+    } elseif (-not $env:FASTRTPS_DEFAULT_PROFILES_FILE) {
+        $env:ROS_LOCALHOST_ONLY = "1"
+        $env:ROS_AUTOMATIC_DISCOVERY_RANGE = "LOCALHOST"
+        Write-Host "Development host detected; using localhost DDS discovery." -ForegroundColor Yellow
+    }
 }
 $env:MV3DLP_LIBRARY_PATH = Join-Path $vendorRoot "Mv3dLp.dll"
 $bundledPython = @(
@@ -180,9 +228,18 @@ $env:COLCON_PYTHON_EXECUTABLE = $bundledPython
 $pythonRoot = Split-Path -Parent $bundledPython
 $env:PATH = "$vendorRoot;$runtimeRoot;$pythonRoot;$pythonRoot\Scripts;$pythonRoot\Library\bin;$runtimeRoot\bin;$runtimeRoot\Library\bin;$env:PATH"
 
+$canPort = Find-CanPort
+if ($canPort) {
+    $UseSlcanCanBridge = $true
+    Write-Host "Detected USB-CAN adapter on $canPort; enabling SLCAN bridge." -ForegroundColor Green
+} else {
+    Write-Host "USB-CAN adapter not detected; ROS base-drive services will still start." -ForegroundColor Yellow
+}
+
 $launchArguments = "crawling_robot_bringup robot.launch.py parameters_file:=`"$configPath`""
 if ($UseSlcanCanBridge) {
     $launchArguments += " use_slcan_can_bridge:=true"
+    if ($canPort) { $launchArguments += " can_serial_port:=$canPort" }
 }
 if ($SkipCanopenAxis) {
     $launchArguments += " use_canopen_axis:=false"
@@ -199,11 +256,13 @@ $launchArguments += " use_monitor:=false"
 # remains relocatable after it is copied to a target board.
 $ros2Command = "`"$bundledPython`" `"$ros2Script`""
 $monitorLauncher = Join-Path $releaseRoot "start_monitor.cmd"
+$env:CRAWLING_ROBOT_STACK_LAUNCHER = "1"
 if (-not $SkipMonitor) {
     if (-not (Test-Path -LiteralPath $monitorLauncher)) {
         Fail "Monitor launcher is missing: $monitorLauncher"
     }
-    $monitorStart = "start `"Crawling Robot Monitor`" /D `"$releaseRoot`" `"$monitorLauncher`""
+    $monitorArguments = "--ros-args --params-file `"$configPath`""
+    $monitorStart = "start `"Crawling Robot Monitor`" /D `"$releaseRoot`" `"$env:ComSpec`" /d /c call `"$monitorLauncher`" $monitorArguments"
     $command = "call `"$setupScript`" && call `"$overlaySetupScript`" && $monitorStart && $ros2Command launch $launchArguments"
 } else {
     $command = "call `"$setupScript`" && call `"$overlaySetupScript`" && $ros2Command launch $launchArguments"
@@ -232,4 +291,7 @@ try {
         Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
     }
 }
-exit $exitCode
+    exit $exitCode
+} finally {
+    Set-Location -LiteralPath $previousLocation
+}

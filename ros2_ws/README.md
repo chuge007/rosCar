@@ -6,7 +6,7 @@
 flowchart LR
     PC["操作电脑\nWiFi 或有线以太网"] --> DDS["ROS 2 DDS\ncmd_vel / scan_axes/command"]
     DDS --> Base["base_drive_node\n两前驱差速 + 200 ms 看门狗"]
-    Base --> CanTopic["/can/tx / /can/rx\n经典 CAN 500 kbps"]
+    Base --> CanTopic["/can/tx / /can/rx\n经典 CAN（轮毂测试 1 Mbps）"]
     DDS --> Axes["canopen_axis_node\nCiA-402 三轴位置控制"]
     Axes --> CanTopic
     CanTopic --> CanBridge["SLCAN 或主板 CAN 适配器"]
@@ -55,7 +55,7 @@ flowchart LR
 - LAN1：连接维护电脑或工业交换机。LAN2：连接激光轮廓仪或交换机。WiFi：使用 M.2 Key-E 或 USB 无线网卡接入独立 AP。
 - 有线和 WiFi 的操作电脑使用同一个 `ROS_DOMAIN_ID`，并将 Windows 防火墙的 ROS 2 UDP 流量限制在专用网络。控制命令统一发布到 `/cmd_vel`，不从外部网络直接访问 CAN 话题。
 - RIM302 接一个 RS-485 端口，计米轮接另一个 RS-485 端口。两者使用 115200、8N1。RIM302 的 A 接主板 A、B 接主板 B。
-- 一条经典 CAN 2.0 总线同时连接两轮 V3.8 私有 CAN 伺服和三台 IG28EC CANopen 伺服。统一使用 500 kbps、标准帧、菊花链接线，且仅总线两端各 120 ohm。轮毂电机 ID 固定为 1、2；IG28EC 必须逐台配置为 Node 10、11、12，再接入同一总线。
+- 轮毂试车配置使用一条 1 Mbps 经典 CAN 2.0 总线连接两轮 V3.8 私有 CAN 伺服（ID 1、2）；IG28EC CANopen 轴按手册使用 500 kbps，不能与 1 Mbps 轮毂设备同时接在同一条总线上。需要混接时必须先把所有设备改成同一波特率，并使用标准帧、菊花链接线，且仅总线两端各 120 ohm。
 - `slcan_can_bridge_node` 可直接驱动 SLCAN 兼容 USB-CAN；主板原生 CAN 需要其 Windows 驱动/SDK 后新增同一 `/can/tx`、`/can/rx` 话题接口的桥接实现。
 
 ## 丝杆三轴联调前置条件
@@ -64,7 +64,7 @@ IG28EC 手册已确认其支持 CANopen CiA-301/CiA-402、PP 位置模式以及�
 
 首次接入时，每台 IG28EC 都是 Node 1，不能同时上总线。用 Step-Config 单台设置 Node 10、11、12 和 500 kbps，并断电重启确认。然后在 `config/robot.yaml` 填入每轴的丝杆导程换算值 `counts_per_meter`、行程上下限、最大速度、最大加速度、零位和正方向。默认 `dry_run: true`、`protocol_verified: false`，不会发送任何三轴实际运动命令。
 
-V3.8 轮毂伺服的默认 CAN 波特率是 1 Mbps。首次改线时只连接两轮，临时将 CAN 适配器设为 1 Mbps，按 V3.8 的 `0xB4` 波特率设置命令改为 500 kbps，断电重启确认；再接入三台 IG28EC。不要把 1 Mbps 和 500 kbps 设备同时接到同一条 CAN 总线上。
+V3.8 轮毂伺服的默认 CAN 波特率是 1 Mbps，速度闭环使用私有 `0xA2` 命令。CANopen 手册中的 IG28EC 速度模式使用 `0x6060=3`、目标速度 `0x60FF`（正负号表示方向）；两套协议和波特率不能混用。首次改线时只连接同一协议、同一波特率的设备，确认心跳/反馈正常后再继续接线。
 
 编码器商品资料只能确认 4096 线、50 mm 计米轮、RS-485 Modbus。`modbus_encoder_node` 已实现标准 Modbus RTU 功能码 `0x03` 的 32 位计数读取；还需从卖家取得计数寄存器地址、站号和高低字顺序后填入 `counter_register`、`unit_id`、`high_word_first`。
 

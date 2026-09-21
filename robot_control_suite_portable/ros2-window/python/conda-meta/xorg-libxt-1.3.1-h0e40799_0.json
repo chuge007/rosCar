@@ -1,0 +1,296 @@
+{
+  "arch": "x86_64",
+  "build": "h0e40799_0",
+  "build_number": 0,
+  "depends": [
+    "libgcc >=13",
+    "libwinpthread >=12.0.0.r4.gg4f2fc60ca",
+    "ucrt >=10.0.20348.0",
+    "xorg-libice >=1.1.1,<2.0a0",
+    "xorg-libsm >=1.2.4,<2.0a0",
+    "xorg-libx11 >=1.8.10,<2.0a0"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "31baf0ce8ef19f5617be73aee0527618",
+  "name": "xorg-libxt",
+  "platform": "win",
+  "sha256": "c940a6b71a1e59450b01ebfb3e21f3bbf0a8e611e5fbfc7982145736b0f20133",
+  "size": 918674,
+  "subdir": "win-64",
+  "timestamp": 1731861024233,
+  "version": "1.3.1",
+  "fn": "xorg-libxt-1.3.1-h0e40799_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/xorg-libxt-1.3.1-h0e40799_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\xorg-libxt-1.3.1-h0e40799_0",
+  "requested_specs": [],
+  "files": [
+    "Library/include/X11/CallbackI.h",
+    "Library/include/X11/Composite.h",
+    "Library/include/X11/CompositeP.h",
+    "Library/include/X11/ConstrainP.h",
+    "Library/include/X11/Constraint.h",
+    "Library/include/X11/ConvertI.h",
+    "Library/include/X11/Core.h",
+    "Library/include/X11/CoreP.h",
+    "Library/include/X11/CreateI.h",
+    "Library/include/X11/EventI.h",
+    "Library/include/X11/HookObjI.h",
+    "Library/include/X11/InitialI.h",
+    "Library/include/X11/Intrinsic.h",
+    "Library/include/X11/IntrinsicI.h",
+    "Library/include/X11/IntrinsicP.h",
+    "Library/include/X11/Object.h",
+    "Library/include/X11/ObjectP.h",
+    "Library/include/X11/PassivGraI.h",
+    "Library/include/X11/RectObj.h",
+    "Library/include/X11/RectObjP.h",
+    "Library/include/X11/ResConfigP.h",
+    "Library/include/X11/ResourceI.h",
+    "Library/include/X11/SelectionI.h",
+    "Library/include/X11/Shell.h",
+    "Library/include/X11/ShellI.h",
+    "Library/include/X11/ShellP.h",
+    "Library/include/X11/StringDefs.h",
+    "Library/include/X11/ThreadsI.h",
+    "Library/include/X11/TranslateI.h",
+    "Library/include/X11/VarargsI.h",
+    "Library/include/X11/Vendor.h",
+    "Library/include/X11/VendorP.h",
+    "Library/include/X11/Xtos.h",
+    "Library/bin/msys-Xt-6.dll",
+    "Library/lib/libXt.dll.a",
+    "Library/lib/pkgconfig/xt.pc"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/include/X11/CallbackI.h",
+        "path_type": "hardlink",
+        "sha256": "b84a3df54271f7d19dc7d7e05ca3812c783301a35dc8b56ddb274b40d9a67fbc",
+        "size_in_bytes": 4232
+      },
+      {
+        "_path": "Library/include/X11/Composite.h",
+        "path_type": "hardlink",
+        "sha256": "a66475f5eb1eade99ac2f23b81da5a556f9e9d38cf5a0db640951bf0ce73003a",
+        "size_in_bytes": 3469
+      },
+      {
+        "_path": "Library/include/X11/CompositeP.h",
+        "path_type": "hardlink",
+        "sha256": "5472eb998f9236e29e4beadd6905b7600238d823258d7eae594776ce1178f7ba",
+        "size_in_bytes": 4713
+      },
+      {
+        "_path": "Library/include/X11/ConstrainP.h",
+        "path_type": "hardlink",
+        "sha256": "c3a6fb487993213b95960db4b7709f022038d4552bc054d3a612555cd68e19ca",
+        "size_in_bytes": 4004
+      },
+      {
+        "_path": "Library/include/X11/Constraint.h",
+        "path_type": "hardlink",
+        "sha256": "80020be48e38837cc2483e477bcd821b6fc6a08ffc037e153691b6c34a0f60ed",
+        "size_in_bytes": 2549
+      },
+      {
+        "_path": "Library/include/X11/ConvertI.h",
+        "path_type": "hardlink",
+        "sha256": "1f781ab3108326d8102c3e04fe58b033156abf5cfb06227a1ee98663ce4a896c",
+        "size_in_bytes": 3463
+      },
+      {
+        "_path": "Library/include/X11/Core.h",
+        "path_type": "hardlink",
+        "sha256": "d17dff16fbe6c23168e3f6eb15ed546e6cac2694273a75683ff2ab360141b773",
+        "size_in_bytes": 2592
+      },
+      {
+        "_path": "Library/include/X11/CoreP.h",
+        "path_type": "hardlink",
+        "sha256": "31d8314fb43fb25a74eb75440abdbd5fb1b53345b9f479301656d355195bfc3b",
+        "size_in_bytes": 8587
+      },
+      {
+        "_path": "Library/include/X11/CreateI.h",
+        "path_type": "hardlink",
+        "sha256": "d7518d7b259d5b30297cc36395f54c456ebab04d3645d04d93ec88f9c6257c03",
+        "size_in_bytes": 1351
+      },
+      {
+        "_path": "Library/include/X11/EventI.h",
+        "path_type": "hardlink",
+        "sha256": "aa6b49e72eaefd810eff7fc4d9fe8ef54bcb9644ba14ebf9f400f65166bc7205",
+        "size_in_bytes": 4203
+      },
+      {
+        "_path": "Library/include/X11/HookObjI.h",
+        "path_type": "hardlink",
+        "sha256": "4e10bfcb45852f3cdf1f7e9cc9c4491cb768da2808d9a085955cfa56cc043235",
+        "size_in_bytes": 2187
+      },
+      {
+        "_path": "Library/include/X11/InitialI.h",
+        "path_type": "hardlink",
+        "sha256": "0fd9792095a39af1ad9029fdbd6c634c1257f628241f5663eb464d4987c904ff",
+        "size_in_bytes": 12625
+      },
+      {
+        "_path": "Library/include/X11/Intrinsic.h",
+        "path_type": "hardlink",
+        "sha256": "8c0f2cfbadca7125007fbcb3a00d8199ee3da70eecb4746ea943fef5e92cbac1",
+        "size_in_bytes": 64746
+      },
+      {
+        "_path": "Library/include/X11/IntrinsicI.h",
+        "path_type": "hardlink",
+        "sha256": "59521894c5d1263b830bc201e9ff1d4df3bd672a0ecf6eccb810deda5e52ee1f",
+        "size_in_bytes": 6895
+      },
+      {
+        "_path": "Library/include/X11/IntrinsicP.h",
+        "path_type": "hardlink",
+        "sha256": "25c0a55e8882301b796cb2f1a8607896f6dd0643b0c0ae62d1723633195e39ad",
+        "size_in_bytes": 9900
+      },
+      {
+        "_path": "Library/include/X11/Object.h",
+        "path_type": "hardlink",
+        "sha256": "1a69e81ca50373ec9990828ef66ee900b747b7c192b2f37e102952a79354f392",
+        "size_in_bytes": 2548
+      },
+      {
+        "_path": "Library/include/X11/ObjectP.h",
+        "path_type": "hardlink",
+        "sha256": "407caea7343e2cda909def35835b4871f9f1b9fa008a1b5286288a9fec4d1379",
+        "size_in_bytes": 6949
+      },
+      {
+        "_path": "Library/include/X11/PassivGraI.h",
+        "path_type": "hardlink",
+        "sha256": "9d63ea0a5794316f4fd2fc63f0d0390397d7b2f0751d88bc600ef5c3c1d0023d",
+        "size_in_bytes": 5497
+      },
+      {
+        "_path": "Library/include/X11/RectObj.h",
+        "path_type": "hardlink",
+        "sha256": "cc2271e1d1dac1fd995b1d56a87dbc1d226a6fe755d94627c0a745f9ad26ab31",
+        "size_in_bytes": 2547
+      },
+      {
+        "_path": "Library/include/X11/RectObjP.h",
+        "path_type": "hardlink",
+        "sha256": "70f436d845e4dada8b6218d19f713bd821b87b24dcded579be1df082077a473e",
+        "size_in_bytes": 6412
+      },
+      {
+        "_path": "Library/include/X11/ResConfigP.h",
+        "path_type": "hardlink",
+        "sha256": "28e6b7d965fddb53853666cbdc1861319ddc6e98d56a3faa1558bf12ec6e8606",
+        "size_in_bytes": 3001
+      },
+      {
+        "_path": "Library/include/X11/ResourceI.h",
+        "path_type": "hardlink",
+        "sha256": "e56e1e6cf335bd077115abb8b5de9e77bfb67d62b0da6f0aa92f4229c5a6444b",
+        "size_in_bytes": 3715
+      },
+      {
+        "_path": "Library/include/X11/SelectionI.h",
+        "path_type": "hardlink",
+        "sha256": "8efccc175f1d18979d6e0888ca4d091b807822c444619a73cba04cbea91c8de1",
+        "size_in_bytes": 5198
+      },
+      {
+        "_path": "Library/include/X11/Shell.h",
+        "path_type": "hardlink",
+        "sha256": "075ea2fc09cc795f1c9b226cbecae8c6c6917689bc3e7c0c8199743658d985d4",
+        "size_in_bytes": 18044
+      },
+      {
+        "_path": "Library/include/X11/ShellI.h",
+        "path_type": "hardlink",
+        "sha256": "595d7be1b394800c80f265e63641ae70a8420e67e9ef7b96e069e2447859a91d",
+        "size_in_bytes": 212
+      },
+      {
+        "_path": "Library/include/X11/ShellP.h",
+        "path_type": "hardlink",
+        "sha256": "c0f4cbb3482d69e18f610c39fdae3263a499871d96697858f450682b22e05235",
+        "size_in_bytes": 12726
+      },
+      {
+        "_path": "Library/include/X11/StringDefs.h",
+        "path_type": "hardlink",
+        "sha256": "33fec212c816b9414ed66902fb5ec20ef5d5f3f6d1ef6ef98bf7dd9760968a7a",
+        "size_in_bytes": 31755
+      },
+      {
+        "_path": "Library/include/X11/ThreadsI.h",
+        "path_type": "hardlink",
+        "sha256": "276acadbf782417471da6578d92fc13601b11e03f3e4c519542c6d9986c7b0cf",
+        "size_in_bytes": 4256
+      },
+      {
+        "_path": "Library/include/X11/TranslateI.h",
+        "path_type": "hardlink",
+        "sha256": "2c52265089c20a1d6c59db5b1701ed843507171912721a038cdb8ec38716a70d",
+        "size_in_bytes": 17161
+      },
+      {
+        "_path": "Library/include/X11/VarargsI.h",
+        "path_type": "hardlink",
+        "sha256": "49ea46f0c30b74a5bcc6bfe49ff14f5af64c344aeb25bb8b2725236bbe898de2",
+        "size_in_bytes": 2393
+      },
+      {
+        "_path": "Library/include/X11/Vendor.h",
+        "path_type": "hardlink",
+        "sha256": "a5ade8f011db3a3a1c9156f8c6fa46b10202033f723f7b1bcd1e5cdc79656f16",
+        "size_in_bytes": 2774
+      },
+      {
+        "_path": "Library/include/X11/VendorP.h",
+        "path_type": "hardlink",
+        "sha256": "938cf487dba824fdccb06e99ec9fe583e3ca84ec0cbf0f11a9fc9943601f5b03",
+        "size_in_bytes": 3554
+      },
+      {
+        "_path": "Library/include/X11/Xtos.h",
+        "path_type": "hardlink",
+        "sha256": "9708ac03fbdb506a1f9ebcb4508a617263fd5b79c80551104dc375a2ddfd18e6",
+        "size_in_bytes": 2959
+      },
+      {
+        "_path": "Library/bin/msys-Xt-6.dll",
+        "path_type": "hardlink",
+        "sha256": "98bb634c4385fff30ae380b97cd13bda4964b339e8c552a7896fa55d28d3e77d",
+        "size_in_bytes": 2759327,
+        "file_mode": "binary",
+        "prefix_placeholder": "D:/bld/xorg-libxt_1731860350217/_h_env"
+      },
+      {
+        "_path": "Library/lib/libXt.dll.a",
+        "path_type": "hardlink",
+        "sha256": "bc161f1fd26ec755c69588cca352e61ebb66ae8f593717916f0e9a9dc2b70bba",
+        "size_in_bytes": 317196
+      },
+      {
+        "_path": "Library/lib/pkgconfig/xt.pc",
+        "path_type": "hardlink",
+        "sha256": "74a65873b1945cddc6337cf658c924fcfe2c5f1aed7e2849ff8ded6bad1454c6",
+        "sha256_in_prefix": "3f99478193ea66e6230537ce13d9f04b5580cac30196807954b58ebbf7b1dc51",
+        "size_in_bytes": 660,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/xorg-libxt_1731860350217/_h_env"
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\xorg-libxt-1.3.1-h0e40799_0",
+    "type": 1
+  }
+}

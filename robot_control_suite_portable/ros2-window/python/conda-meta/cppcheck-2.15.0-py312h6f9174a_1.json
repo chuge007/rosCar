@@ -1,0 +1,762 @@
+{
+  "arch": "x86_64",
+  "build": "py312h6f9174a_1",
+  "build_number": 1,
+  "depends": [
+    "pcre >=8.45,<9.0a0",
+    "pygments",
+    "python >=3.12,<3.13.0a0",
+    "python_abi 3.12.* *_cp312",
+    "tinyxml2 >=10.0.0,<10.1.0a0",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139"
+  ],
+  "license": "GPL-3.0-or-later",
+  "license_family": "GPL",
+  "md5": "97940c3a0e19dd68d1aec963376fa355",
+  "name": "cppcheck",
+  "platform": "win",
+  "sha256": "e2be3da3c43227ccd73e1991d587e2f5f1161044214d85da116227e61243d044",
+  "size": 2123107,
+  "subdir": "win-64",
+  "timestamp": 1725713487740,
+  "version": "2.15.0",
+  "fn": "cppcheck-2.15.0-py312h6f9174a_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/cppcheck-2.15.0-py312h6f9174a_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\cppcheck-2.15.0-py312h6f9174a_1",
+  "requested_specs": [],
+  "files": [
+    "share/Cppcheck/addons/__init__.py",
+    "share/Cppcheck/addons/cppcheck.py",
+    "share/Cppcheck/addons/cppcheckdata.py",
+    "share/Cppcheck/addons/findcasts.py",
+    "share/Cppcheck/addons/misc.py",
+    "share/Cppcheck/addons/misra.py",
+    "share/Cppcheck/addons/misra_9.py",
+    "share/Cppcheck/addons/naming.py",
+    "share/Cppcheck/addons/namingng.py",
+    "share/Cppcheck/addons/runaddon.py",
+    "share/Cppcheck/addons/threadsafety.py",
+    "share/Cppcheck/addons/y2038.py",
+    "Lib/site-packages/cppcheck_htmlreport/__init__.py",
+    "Lib/site-packages/cppcheck_htmlreport/run.py",
+    "Lib/site-packages/cppcheck_htmlreport/__pycache__/__init__.cpython-312.pyc",
+    "Lib/site-packages/cppcheck_htmlreport/__pycache__/run.cpython-312.pyc",
+    "Scripts/cppcheck-htmlreport.exe",
+    "share/Cppcheck/addons/__pycache__/__init__.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/cppcheck.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/cppcheckdata.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/findcasts.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/misc.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/misra.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/misra_9.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/naming.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/namingng.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/runaddon.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/threadsafety.cpython-312.pyc",
+    "share/Cppcheck/addons/__pycache__/y2038.cpython-312.pyc",
+    "share/Cppcheck/cfg/avr.cfg",
+    "share/Cppcheck/cfg/bento4.cfg",
+    "share/Cppcheck/cfg/boost.cfg",
+    "share/Cppcheck/cfg/bsd.cfg",
+    "share/Cppcheck/cfg/cairo.cfg",
+    "share/Cppcheck/cfg/cppcheck-lib.cfg",
+    "share/Cppcheck/cfg/cppunit.cfg",
+    "share/Cppcheck/cfg/dpdk.cfg",
+    "share/Cppcheck/cfg/embedded_sql.cfg",
+    "share/Cppcheck/cfg/emscripten.cfg",
+    "share/Cppcheck/cfg/ginac.cfg",
+    "share/Cppcheck/cfg/gnu.cfg",
+    "share/Cppcheck/cfg/googletest.cfg",
+    "share/Cppcheck/cfg/gtk.cfg",
+    "share/Cppcheck/cfg/icu.cfg",
+    "share/Cppcheck/cfg/kde.cfg",
+    "share/Cppcheck/cfg/libcerror.cfg",
+    "share/Cppcheck/cfg/libcurl.cfg",
+    "share/Cppcheck/cfg/libsigc++.cfg",
+    "share/Cppcheck/cfg/lua.cfg",
+    "share/Cppcheck/cfg/mfc.cfg",
+    "share/Cppcheck/cfg/microsoft_atl.cfg",
+    "share/Cppcheck/cfg/microsoft_sal.cfg",
+    "share/Cppcheck/cfg/microsoft_unittest.cfg",
+    "share/Cppcheck/cfg/motif.cfg",
+    "share/Cppcheck/cfg/nspr.cfg",
+    "share/Cppcheck/cfg/ntl.cfg",
+    "share/Cppcheck/cfg/opencv2.cfg",
+    "share/Cppcheck/cfg/opengl.cfg",
+    "share/Cppcheck/cfg/openmp.cfg",
+    "share/Cppcheck/cfg/openssl.cfg",
+    "share/Cppcheck/cfg/pcre.cfg",
+    "share/Cppcheck/cfg/posix.cfg",
+    "share/Cppcheck/cfg/protobuf.cfg",
+    "share/Cppcheck/cfg/python.cfg",
+    "share/Cppcheck/cfg/qt.cfg",
+    "share/Cppcheck/cfg/ruby.cfg",
+    "share/Cppcheck/cfg/sdl.cfg",
+    "share/Cppcheck/cfg/selinux.cfg",
+    "share/Cppcheck/cfg/sfml.cfg",
+    "share/Cppcheck/cfg/sqlite3.cfg",
+    "share/Cppcheck/cfg/std.cfg",
+    "share/Cppcheck/cfg/tinyxml2.cfg",
+    "share/Cppcheck/cfg/vcl.cfg",
+    "share/Cppcheck/cfg/windows.cfg",
+    "share/Cppcheck/cfg/wxsqlite3.cfg",
+    "share/Cppcheck/cfg/wxsvg.cfg",
+    "share/Cppcheck/cfg/wxwidgets.cfg",
+    "share/Cppcheck/cfg/zephyr.cfg",
+    "share/Cppcheck/cfg/zlib.cfg",
+    "share/Cppcheck/platforms/aix_ppc64.xml",
+    "share/Cppcheck/platforms/arm32-wchar_t2.xml",
+    "share/Cppcheck/platforms/arm32-wchar_t4.xml",
+    "share/Cppcheck/platforms/arm64-wchar_t2.xml",
+    "share/Cppcheck/platforms/arm64-wchar_t4.xml",
+    "share/Cppcheck/platforms/avr8.xml",
+    "share/Cppcheck/platforms/cray_sv1.xml",
+    "share/Cppcheck/platforms/elbrus-e1cp.xml",
+    "share/Cppcheck/platforms/mips32.xml",
+    "share/Cppcheck/platforms/msp430_eabi_large_datamodel.xml",
+    "share/Cppcheck/platforms/pic16.xml",
+    "share/Cppcheck/platforms/pic8-enhanced.xml",
+    "share/Cppcheck/platforms/pic8.xml",
+    "share/Cppcheck/platforms/unix32-unsigned.xml",
+    "share/Cppcheck/platforms/unix64-unsigned.xml",
+    "Library/bin/cppcheck.exe",
+    "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/INSTALLER",
+    "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/METADATA",
+    "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/RECORD",
+    "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/REQUESTED",
+    "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/WHEEL",
+    "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/direct_url.json",
+    "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/entry_points.txt",
+    "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/top_level.txt"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "share/Cppcheck/addons/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "share/Cppcheck/addons/cppcheck.py",
+        "path_type": "hardlink",
+        "sha256": "ee40c92a0bd446023b9352b7ca8444034f50f9366eaf13b0bbf0e49a959613dd",
+        "size_in_bytes": 1048
+      },
+      {
+        "_path": "share/Cppcheck/addons/cppcheckdata.py",
+        "path_type": "hardlink",
+        "sha256": "0cd9ff43f560008c18674936469d3604075a8828fe3fccd7103f08e7d2e64c2b",
+        "size_in_bytes": 59747
+      },
+      {
+        "_path": "share/Cppcheck/addons/findcasts.py",
+        "path_type": "hardlink",
+        "sha256": "ac4b057d19fd75a287ecb7fd46904272fe6871b777e640215e0c9b56df236f8f",
+        "size_in_bytes": 839
+      },
+      {
+        "_path": "share/Cppcheck/addons/misc.py",
+        "path_type": "hardlink",
+        "sha256": "8e7d16f262b54b8d8b305ae3a4dacbd9b041267b1ad66647a3b3d8c041d184a1",
+        "size_in_bytes": 6065
+      },
+      {
+        "_path": "share/Cppcheck/addons/misra.py",
+        "path_type": "hardlink",
+        "sha256": "0f973a81123d9ddbefee29cd739fa799faff2b4d29c6dd8c80228d172f8d19bc",
+        "size_in_bytes": 203428
+      },
+      {
+        "_path": "share/Cppcheck/addons/misra_9.py",
+        "path_type": "hardlink",
+        "sha256": "39c9a0ef671f82fdbddd815b09f380186d0c98a5336b695b6ae879c8be3bf4bd",
+        "size_in_bytes": 21996
+      },
+      {
+        "_path": "share/Cppcheck/addons/naming.py",
+        "path_type": "hardlink",
+        "sha256": "66c6281f2c32f3520f1c3c895ee984753b0049fa64d9e305424a547a3837c544",
+        "size_in_bytes": 3528
+      },
+      {
+        "_path": "share/Cppcheck/addons/namingng.py",
+        "path_type": "hardlink",
+        "sha256": "d1254dfbdcdb208de0f39937080d00cc33312091784f5923566cd3387bc93e00",
+        "size_in_bytes": 16685
+      },
+      {
+        "_path": "share/Cppcheck/addons/runaddon.py",
+        "path_type": "hardlink",
+        "sha256": "014a5a26beb8dea172ac3ec832974272a6488a69b9ed3bbb70a09ba5dbce309f",
+        "size_in_bytes": 326
+      },
+      {
+        "_path": "share/Cppcheck/addons/threadsafety.py",
+        "path_type": "hardlink",
+        "sha256": "013537e197433c38231f462c7bbefd679a2bbf11a9ee02b4d0a01039e0e1ec84",
+        "size_in_bytes": 7639
+      },
+      {
+        "_path": "share/Cppcheck/addons/y2038.py",
+        "path_type": "hardlink",
+        "sha256": "a8f8a871a777feb34fa5201ee3e7ca4df8a4727918a59558e22dd6c7377aed4b",
+        "size_in_bytes": 6665
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport/run.py",
+        "path_type": "hardlink",
+        "sha256": "028f9ac396dbb038b65dabf9042a495ce0361e2ff936463dc643ffac2df2c3d4",
+        "size_in_bytes": 35297
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport/__pycache__/__init__.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "66df8ebed40a4e9b9ee858c1dbbd2edd42f3e3d4f71958eee20b2121179402a7",
+        "size_in_bytes": 146
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport/__pycache__/run.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "1a81da3fc1b5aa46e0ffc3c0c8fcd1861aff78249f2bddeb8cc04640f92240a7",
+        "size_in_bytes": 39224
+      },
+      {
+        "_path": "Scripts/cppcheck-htmlreport.exe",
+        "path_type": "hardlink",
+        "sha256": "495a2efcc5983f106fe1e499aabb01fa9a736e48bd79344430d0945190a963d1",
+        "size_in_bytes": 108406
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/__init__.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "c94d1af2b590f5c44dcc083c653ac45fc75644ee425bdc630599b1f049b18a64",
+        "size_in_bytes": 130
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/cppcheck.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "331b6a77b2fc41f82871aa25d423a0d7001d87d22b767e316a98cf5f662ccba6",
+        "size_in_bytes": 1873
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/cppcheckdata.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "ec8a144a3ec2c124eba9e66753b479048282143de0d3adc4a970c02793399a0c",
+        "size_in_bytes": 78677
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/findcasts.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "a270a035a9b506756fcf7cc292473f8dabacae2ec60e0bc23f16b577ff21ffc2",
+        "size_in_bytes": 946
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/misc.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "08c907e4f3b48c6930da2ee3045c34f71f93595d3785beca85deea3946c33995",
+        "size_in_bytes": 7501
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/misra.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "bd77d41b274b5de97e8b9d015b837c6615a5af1772e2ebb16d2dbd5eb25ba8f3",
+        "size_in_bytes": 234279
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/misra_9.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "1eea39f2d34d2591ea4360c9657bc440774852d619a671816f0d47af961258d0",
+        "size_in_bytes": 31348
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/naming.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "29a0fbc2b8da47054840f0470e0c1374153d2f5cbcc62c022c46bdc4ba40075c",
+        "size_in_bytes": 4148
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/namingng.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "8c5b73d0d62d132ee66d3a6e40a4d2416e068e6f7a71f2e5e691975560d9358c",
+        "size_in_bytes": 20651
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/runaddon.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "51488ee30f1ea87af7815bdc27ef8af54093f4cc6e71b21aa83e7517128d7f79",
+        "size_in_bytes": 827
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/threadsafety.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "6834ac5b973593c1a45f33c1ae7b633acd68861db15809058050dedb81262c8a",
+        "size_in_bytes": 6387
+      },
+      {
+        "_path": "share/Cppcheck/addons/__pycache__/y2038.cpython-312.pyc",
+        "path_type": "hardlink",
+        "sha256": "b562d07e418f791d4fae0fffdf4f92592b40a857e37907c398a597290ad1e7bb",
+        "size_in_bytes": 5536
+      },
+      {
+        "_path": "share/Cppcheck/cfg/avr.cfg",
+        "path_type": "hardlink",
+        "sha256": "dc44869143d4a98ee982bdcb5be9237aff815808df1c64ebc7c9ed98b7944554",
+        "size_in_bytes": 11057
+      },
+      {
+        "_path": "share/Cppcheck/cfg/bento4.cfg",
+        "path_type": "hardlink",
+        "sha256": "c366497d749a286e2d239daa4c07eb323ebcf5ad6c5914444454d25289386a53",
+        "size_in_bytes": 8529
+      },
+      {
+        "_path": "share/Cppcheck/cfg/boost.cfg",
+        "path_type": "hardlink",
+        "sha256": "e7ff2b2d3015c08d7d95e8ec02ca2ea6a3a35d50ce9a1f76568534193cda6c81",
+        "size_in_bytes": 48134
+      },
+      {
+        "_path": "share/Cppcheck/cfg/bsd.cfg",
+        "path_type": "hardlink",
+        "sha256": "c9495c219e00758d1b7df61791772011f80b7d3c597c4260d8dd9f32f9c6f4fc",
+        "size_in_bytes": 15287
+      },
+      {
+        "_path": "share/Cppcheck/cfg/cairo.cfg",
+        "path_type": "hardlink",
+        "sha256": "b477fe7adca411582f6381360995fb3a0db4fb7ba6fa02491b504595bd87c3e9",
+        "size_in_bytes": 3390
+      },
+      {
+        "_path": "share/Cppcheck/cfg/cppcheck-lib.cfg",
+        "path_type": "hardlink",
+        "sha256": "514d56d57630fbee7767292242fab0cf21d822c5b6d0b8f55206a9913598fc21",
+        "size_in_bytes": 2066
+      },
+      {
+        "_path": "share/Cppcheck/cfg/cppunit.cfg",
+        "path_type": "hardlink",
+        "sha256": "97c3dec8036e1d793a41268af9af268064ab484819408e4bbd2ac01c8ec0d3cb",
+        "size_in_bytes": 2690
+      },
+      {
+        "_path": "share/Cppcheck/cfg/dpdk.cfg",
+        "path_type": "hardlink",
+        "sha256": "68f2190a35eb0305905b4ea4dab95c952ddd866ba749bec4016135801515633c",
+        "size_in_bytes": 219
+      },
+      {
+        "_path": "share/Cppcheck/cfg/embedded_sql.cfg",
+        "path_type": "hardlink",
+        "sha256": "d7a0efdf29a440ba5c23bb9739872cbd35d760f7054a06e52726094984ca060a",
+        "size_in_bytes": 109
+      },
+      {
+        "_path": "share/Cppcheck/cfg/emscripten.cfg",
+        "path_type": "hardlink",
+        "sha256": "af764fe98ee5014f0ec192d0a56af73dd6c9050953f6b7e2ed17da8413174323",
+        "size_in_bytes": 3843
+      },
+      {
+        "_path": "share/Cppcheck/cfg/ginac.cfg",
+        "path_type": "hardlink",
+        "sha256": "2e395a5e3f8fa1688b179909ea5a9ae1007b6cb3073f9a3af5243927e8fa385b",
+        "size_in_bytes": 402394
+      },
+      {
+        "_path": "share/Cppcheck/cfg/gnu.cfg",
+        "path_type": "hardlink",
+        "sha256": "f2794d59ba67fdbf600ee119ec32fa21cf8f67838eebae084c238c9fbe074577",
+        "size_in_bytes": 48478
+      },
+      {
+        "_path": "share/Cppcheck/cfg/googletest.cfg",
+        "path_type": "hardlink",
+        "sha256": "31e2007de2a0e886a2cf88638c26de9ccdbf1989370642e22856554e63e24830",
+        "size_in_bytes": 7337
+      },
+      {
+        "_path": "share/Cppcheck/cfg/gtk.cfg",
+        "path_type": "hardlink",
+        "sha256": "c0047fea76109184f7fc85eac94e9033a67b217ee80b624d2d953a18fe705b9b",
+        "size_in_bytes": 643880
+      },
+      {
+        "_path": "share/Cppcheck/cfg/icu.cfg",
+        "path_type": "hardlink",
+        "sha256": "47d5b0d2978a9474005f539396692f44d9081e84ef8fb3cce6b1126857ce25c1",
+        "size_in_bytes": 12688
+      },
+      {
+        "_path": "share/Cppcheck/cfg/kde.cfg",
+        "path_type": "hardlink",
+        "sha256": "c8d76a3c097833b10ea0574cb9ecdf89b77ae056b71a3f65d99d23c2daba8875",
+        "size_in_bytes": 4365
+      },
+      {
+        "_path": "share/Cppcheck/cfg/libcerror.cfg",
+        "path_type": "hardlink",
+        "sha256": "b8b96be5624990615c651f05589cad27849cb841b20fff61067deff0baa05687",
+        "size_in_bytes": 8511
+      },
+      {
+        "_path": "share/Cppcheck/cfg/libcurl.cfg",
+        "path_type": "hardlink",
+        "sha256": "3152649875d16aecdcba768b7c5040da34431a1e361176e7121ab3aeb19726b8",
+        "size_in_bytes": 14564
+      },
+      {
+        "_path": "share/Cppcheck/cfg/libsigc++.cfg",
+        "path_type": "hardlink",
+        "sha256": "5649e267d47bff4c229691ad8ec960358a40152413b7484a1c6b86f5db9f213d",
+        "size_in_bytes": 2553
+      },
+      {
+        "_path": "share/Cppcheck/cfg/lua.cfg",
+        "path_type": "hardlink",
+        "sha256": "dfed667375ce835c09890623930b46b27b37b01f7365547a99bad0279f46a73f",
+        "size_in_bytes": 9461
+      },
+      {
+        "_path": "share/Cppcheck/cfg/mfc.cfg",
+        "path_type": "hardlink",
+        "sha256": "a19e6c156960e7b32da9dd66acf95544106114d279eb768e0c104492ddf5175a",
+        "size_in_bytes": 13193
+      },
+      {
+        "_path": "share/Cppcheck/cfg/microsoft_atl.cfg",
+        "path_type": "hardlink",
+        "sha256": "ef9bd78e0baa9539adeb7b73106f3da514fdad3b357e3f7da5b95bcb7f1e209d",
+        "size_in_bytes": 2414
+      },
+      {
+        "_path": "share/Cppcheck/cfg/microsoft_sal.cfg",
+        "path_type": "hardlink",
+        "sha256": "11b45f139cdcd358357ab8e046ef5edc717d31145a016c4ef013950aeade26e3",
+        "size_in_bytes": 26883
+      },
+      {
+        "_path": "share/Cppcheck/cfg/microsoft_unittest.cfg",
+        "path_type": "hardlink",
+        "sha256": "e46f80213bb1be64adcb82f8602a664d5911293027eb30c13fcffb8a5101f83d",
+        "size_in_bytes": 1340
+      },
+      {
+        "_path": "share/Cppcheck/cfg/motif.cfg",
+        "path_type": "hardlink",
+        "sha256": "39818d7e6e2469fb016fe81536f00070f9339521f8f4f9c025a37d4d9c6a91d9",
+        "size_in_bytes": 7553
+      },
+      {
+        "_path": "share/Cppcheck/cfg/nspr.cfg",
+        "path_type": "hardlink",
+        "sha256": "f1e7b6f3ff4af6eaa5e4ca083c58e1fbbdf0daa20b20dda5dfcd053cce72c1af",
+        "size_in_bytes": 1892
+      },
+      {
+        "_path": "share/Cppcheck/cfg/ntl.cfg",
+        "path_type": "hardlink",
+        "sha256": "4d167798a04a9693a39d6fd9f6fce3a9d85d5b181ea56ba1915aad815f6e6bb5",
+        "size_in_bytes": 196090
+      },
+      {
+        "_path": "share/Cppcheck/cfg/opencv2.cfg",
+        "path_type": "hardlink",
+        "sha256": "907ca603c91c8876d94088ae087e748a716fed914812d295d50b76e413bf59e1",
+        "size_in_bytes": 5268
+      },
+      {
+        "_path": "share/Cppcheck/cfg/opengl.cfg",
+        "path_type": "hardlink",
+        "sha256": "22f42037f1ebe8aa33a5cbcc9f29fc4a76fa09dabe9152170fde5e2e821c0031",
+        "size_in_bytes": 22079
+      },
+      {
+        "_path": "share/Cppcheck/cfg/openmp.cfg",
+        "path_type": "hardlink",
+        "sha256": "8eb80a62460dbc7bd9072ff88b72f9bba06da53caf3de6c0af1c3d5ae18fe750",
+        "size_in_bytes": 4853
+      },
+      {
+        "_path": "share/Cppcheck/cfg/openssl.cfg",
+        "path_type": "hardlink",
+        "sha256": "15221ff2263b66d9a59bf8cf30129e4ae13480164a3c29ee471a5a4b9baeda27",
+        "size_in_bytes": 4881
+      },
+      {
+        "_path": "share/Cppcheck/cfg/pcre.cfg",
+        "path_type": "hardlink",
+        "sha256": "46c6838ffd00304a07bba4f75ddf77443a9383d65a1085361b409ad68769859f",
+        "size_in_bytes": 8490
+      },
+      {
+        "_path": "share/Cppcheck/cfg/posix.cfg",
+        "path_type": "hardlink",
+        "sha256": "14da78b242f004dbb483197c00c0533eb61609a0f5445d3d520cb0a08c00416f",
+        "size_in_bytes": 183202
+      },
+      {
+        "_path": "share/Cppcheck/cfg/protobuf.cfg",
+        "path_type": "hardlink",
+        "sha256": "3144a5ba8d35e47dff12381162bbf3fcb2b7dc5689f9c3dafd645c763c838c48",
+        "size_in_bytes": 391
+      },
+      {
+        "_path": "share/Cppcheck/cfg/python.cfg",
+        "path_type": "hardlink",
+        "sha256": "786de4a3371d961ccc2d8b7355aa2c8617dbceb896150d3afff80533cb25e34f",
+        "size_in_bytes": 20084
+      },
+      {
+        "_path": "share/Cppcheck/cfg/qt.cfg",
+        "path_type": "hardlink",
+        "sha256": "0bf3acc27a6fe8d0d6888043b336c9e0312a35c445ebc0387cdfef547187751c",
+        "size_in_bytes": 185868
+      },
+      {
+        "_path": "share/Cppcheck/cfg/ruby.cfg",
+        "path_type": "hardlink",
+        "sha256": "37eadf52eb27dde653b3d5e68eb735bd8d9287481d0a8025086af7a6b49ce895",
+        "size_in_bytes": 4233
+      },
+      {
+        "_path": "share/Cppcheck/cfg/sdl.cfg",
+        "path_type": "hardlink",
+        "sha256": "a6bf8ca06a3cee242fa96507cf4b1fbeaf2a0813124a7b10d7eb8e13893f4dd3",
+        "size_in_bytes": 10585
+      },
+      {
+        "_path": "share/Cppcheck/cfg/selinux.cfg",
+        "path_type": "hardlink",
+        "sha256": "dda6ef427e7d111d2aa7e29c4ec5f49f59529cac1160956698cc488ced6d7d1a",
+        "size_in_bytes": 102564
+      },
+      {
+        "_path": "share/Cppcheck/cfg/sfml.cfg",
+        "path_type": "hardlink",
+        "sha256": "272fe67983530da70b5bf80a01f9aef09f9776766b8ae9f5c2d5b8173bb469ce",
+        "size_in_bytes": 9228
+      },
+      {
+        "_path": "share/Cppcheck/cfg/sqlite3.cfg",
+        "path_type": "hardlink",
+        "sha256": "3c5d6c7980a8461939e5af631cb8628c18b8efe7d72896519866b522eaf9791a",
+        "size_in_bytes": 60296
+      },
+      {
+        "_path": "share/Cppcheck/cfg/std.cfg",
+        "path_type": "hardlink",
+        "sha256": "bce5d1255322fa059733740eeb32f71e7445755e1e4beecc603d77d7c1d7270b",
+        "size_in_bytes": 286761
+      },
+      {
+        "_path": "share/Cppcheck/cfg/tinyxml2.cfg",
+        "path_type": "hardlink",
+        "sha256": "d00da58a297a31c56a16780806f19d99ecf627a2cbe5f31a6f352950c9b1d511",
+        "size_in_bytes": 1275
+      },
+      {
+        "_path": "share/Cppcheck/cfg/vcl.cfg",
+        "path_type": "hardlink",
+        "sha256": "3b820ed0853178d0f155d34cbac58291c03be2efc6cc28ee62af3e42513773ee",
+        "size_in_bytes": 94
+      },
+      {
+        "_path": "share/Cppcheck/cfg/windows.cfg",
+        "path_type": "hardlink",
+        "sha256": "84f7a8d1330a5fbcbbfaeb2eb67d9f227c9e2129b94e6a4c35004d1e71e69e90",
+        "size_in_bytes": 792075
+      },
+      {
+        "_path": "share/Cppcheck/cfg/wxsqlite3.cfg",
+        "path_type": "hardlink",
+        "sha256": "146495c7da6f2c06a782e980996a019800e2974fb138cbbbde8cde8c7d1d7095",
+        "size_in_bytes": 65719
+      },
+      {
+        "_path": "share/Cppcheck/cfg/wxsvg.cfg",
+        "path_type": "hardlink",
+        "sha256": "aa22d6122eed8978629a3d80a8a1fb25b423f23d4c8e4c825b026609db30c0d6",
+        "size_in_bytes": 594782
+      },
+      {
+        "_path": "share/Cppcheck/cfg/wxwidgets.cfg",
+        "path_type": "hardlink",
+        "sha256": "5733b59ccf96f801ad6b8ee2e5cd1149be11e85200c037a14a186afcce78eab6",
+        "size_in_bytes": 742427
+      },
+      {
+        "_path": "share/Cppcheck/cfg/zephyr.cfg",
+        "path_type": "hardlink",
+        "sha256": "9df492b41cf390351bf722080b1fd1a70080099a4d42f52c0ed87d5df7628959",
+        "size_in_bytes": 2743
+      },
+      {
+        "_path": "share/Cppcheck/cfg/zlib.cfg",
+        "path_type": "hardlink",
+        "sha256": "7cb1646be7a81058d0c3bfea9b61f4ee70ab69ffa9d53b814a8b145981820f78",
+        "size_in_bytes": 38503
+      },
+      {
+        "_path": "share/Cppcheck/platforms/aix_ppc64.xml",
+        "path_type": "hardlink",
+        "sha256": "3ed18f82aaf2bd55a51a3c0816d4b5de9983422b7400bd2d5ac6f1232a6f73f1",
+        "size_in_bytes": 388
+      },
+      {
+        "_path": "share/Cppcheck/platforms/arm32-wchar_t2.xml",
+        "path_type": "hardlink",
+        "sha256": "098c4b23e5a392625fc8c5b0a5977b59a8eee2596bf09060c0148ca610a984c7",
+        "size_in_bytes": 388
+      },
+      {
+        "_path": "share/Cppcheck/platforms/arm32-wchar_t4.xml",
+        "path_type": "hardlink",
+        "sha256": "b7cc6947ea5aa6e1e98305ca0eb77f0bf460c71d0db275716e75b3120584aa8b",
+        "size_in_bytes": 388
+      },
+      {
+        "_path": "share/Cppcheck/platforms/arm64-wchar_t2.xml",
+        "path_type": "hardlink",
+        "sha256": "ac6590ba00cbc14c751ae885a66d0e387f6dba7830b4815b31dfe9a6f8a51e5e",
+        "size_in_bytes": 388
+      },
+      {
+        "_path": "share/Cppcheck/platforms/arm64-wchar_t4.xml",
+        "path_type": "hardlink",
+        "sha256": "bc2e36780f16672bf5533753261a809772282b62d80c7e4a16979a53619f34a3",
+        "size_in_bytes": 388
+      },
+      {
+        "_path": "share/Cppcheck/platforms/avr8.xml",
+        "path_type": "hardlink",
+        "sha256": "9658397f08c39e9468a551afa71e64df32151a99b352083da0838a86686c1d48",
+        "size_in_bytes": 388
+      },
+      {
+        "_path": "share/Cppcheck/platforms/cray_sv1.xml",
+        "path_type": "hardlink",
+        "sha256": "6e42d99a15a8c0e8a378ba7bf3f143f0605d1ac74f3570083591716b8c79aec5",
+        "size_in_bytes": 389
+      },
+      {
+        "_path": "share/Cppcheck/platforms/elbrus-e1cp.xml",
+        "path_type": "hardlink",
+        "sha256": "dd11c47b5474700b618a4ce21f5e1992c54cf6ad5e408dc06fe498c9704f0ec4",
+        "size_in_bytes": 389
+      },
+      {
+        "_path": "share/Cppcheck/platforms/mips32.xml",
+        "path_type": "hardlink",
+        "sha256": "8e6e469e3e84f8565d33a87b8ea761d31d2ee727afea55e1b0c7085f1362dbe5",
+        "size_in_bytes": 386
+      },
+      {
+        "_path": "share/Cppcheck/platforms/msp430_eabi_large_datamodel.xml",
+        "path_type": "hardlink",
+        "sha256": "8ad88b76c44ff89bab7813adc23bc86a71cc3f17e0fcb5e5e3a17221aa765e69",
+        "size_in_bytes": 386
+      },
+      {
+        "_path": "share/Cppcheck/platforms/pic16.xml",
+        "path_type": "hardlink",
+        "sha256": "9ed772d7721a01053e66406ab9143f879df7dc0b697a5d90dc9d7c48862240af",
+        "size_in_bytes": 388
+      },
+      {
+        "_path": "share/Cppcheck/platforms/pic8-enhanced.xml",
+        "path_type": "hardlink",
+        "sha256": "9658397f08c39e9468a551afa71e64df32151a99b352083da0838a86686c1d48",
+        "size_in_bytes": 388
+      },
+      {
+        "_path": "share/Cppcheck/platforms/pic8.xml",
+        "path_type": "hardlink",
+        "sha256": "40b2c8bb150af91b7303417e9f9e8240e826fbc9096a8b8b2d3c9610f4b4ffb5",
+        "size_in_bytes": 388
+      },
+      {
+        "_path": "share/Cppcheck/platforms/unix32-unsigned.xml",
+        "path_type": "hardlink",
+        "sha256": "10cb9a8063bd69312f55cc4b3e7d3b1e297cf09c847660bc5cfc69610850d3f4",
+        "size_in_bytes": 389
+      },
+      {
+        "_path": "share/Cppcheck/platforms/unix64-unsigned.xml",
+        "path_type": "hardlink",
+        "sha256": "dd11c47b5474700b618a4ce21f5e1992c54cf6ad5e408dc06fe498c9704f0ec4",
+        "size_in_bytes": 389
+      },
+      {
+        "_path": "Library/bin/cppcheck.exe",
+        "path_type": "hardlink",
+        "sha256": "c9e7e8acf57e97eb65d563a8c1609fd664025341b5b261f0b170a98be6cd3670",
+        "size_in_bytes": 4462592
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "0f91c02c89c78f80173b78fc82255cc09a0650799f522ae8a87d3666e8e718b7",
+        "size_in_bytes": 763
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "b0a783a7f2bc49b6d4d6ae0fae5a2bb3d4a9893b4e1965c25827a482f084b6d0",
+        "size_in_bytes": 1155
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "31d8bd3c3370119a6d3a34e551c02d87b5c90c5b4aac761a40c3ee9597810a24",
+        "size_in_bytes": 91
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "04256cf83d9995b08eac5b343a98e3338c088c6c45e74943f841986a5c337f1d",
+        "size_in_bytes": 80
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "f0073775c1b6b4495d56cf291e3845cb4fc37abb8281c0d32a900456aea88df8",
+        "size_in_bytes": 69
+      },
+      {
+        "_path": "Lib/site-packages/cppcheck_htmlreport-2.15.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "67fc780085ed6663b0d66cf1f418c34a14126e60b4cc93683907a3df71d1f5b1",
+        "size_in_bytes": 20
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\cppcheck-2.15.0-py312h6f9174a_1",
+    "type": 1
+  }
+}

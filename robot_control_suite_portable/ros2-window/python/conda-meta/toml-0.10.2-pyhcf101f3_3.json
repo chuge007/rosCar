@@ -1,0 +1,160 @@
+{
+  "build": "pyhcf101f3_3",
+  "build_number": 3,
+  "depends": [
+    "python >=3.10",
+    "python"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "d0fc809fa4c4d85e959ce4ab6e1de800",
+  "name": "toml",
+  "noarch": "python",
+  "sha256": "fd30e43699cb22ab32ff3134d3acf12d6010b5bbaa63293c37076b50009b91f8",
+  "size": 24017,
+  "subdir": "noarch",
+  "timestamp": 1764486833072,
+  "version": "0.10.2",
+  "fn": "toml-0.10.2-pyhcf101f3_3.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/toml-0.10.2-pyhcf101f3_3.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\toml-0.10.2-pyhcf101f3_3",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/toml-0.10.2.dist-info/INSTALLER",
+    "Lib/site-packages/toml-0.10.2.dist-info/METADATA",
+    "Lib/site-packages/toml-0.10.2.dist-info/RECORD",
+    "Lib/site-packages/toml-0.10.2.dist-info/REQUESTED",
+    "Lib/site-packages/toml-0.10.2.dist-info/WHEEL",
+    "Lib/site-packages/toml-0.10.2.dist-info/direct_url.json",
+    "Lib/site-packages/toml-0.10.2.dist-info/top_level.txt",
+    "Lib/site-packages/toml-0.10.2.dist-info/licenses/LICENSE",
+    "Lib/site-packages/toml/__init__.py",
+    "Lib/site-packages/toml/__init__.pyi",
+    "Lib/site-packages/toml/decoder.py",
+    "Lib/site-packages/toml/decoder.pyi",
+    "Lib/site-packages/toml/encoder.py",
+    "Lib/site-packages/toml/encoder.pyi",
+    "Lib/site-packages/toml/ordered.py",
+    "Lib/site-packages/toml/ordered.pyi",
+    "Lib/site-packages/toml/tz.py",
+    "Lib/site-packages/toml/tz.pyi"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/toml-0.10.2.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "bc33022edcb7639ff53355b4e91dade50a0bbf0299efeb6171d1ec0ba5029cfc",
+        "size_in_bytes": 6
+      },
+      {
+        "_path": "Lib/site-packages/toml-0.10.2.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "8c19c493028e4f09b61ac94c1e87280d8f598d223ad8453308dc1a4222d3537d",
+        "size_in_bytes": 7323
+      },
+      {
+        "_path": "Lib/site-packages/toml-0.10.2.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "d5698e50a76df95927a05df81ff308a454e72f332e507848bcd9617865b5f807",
+        "size_in_bytes": 1594
+      },
+      {
+        "_path": "Lib/site-packages/toml-0.10.2.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/toml-0.10.2.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "24d5a1d459b551dc08415d3be609429f8315b8246cd2ca2d248abe27aadbc425",
+        "size_in_bytes": 109
+      },
+      {
+        "_path": "Lib/site-packages/toml-0.10.2.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "48006f8db9d3bf0f93a491aec329529f88e1ee23b69618289909cf7101d66f7d",
+        "size_in_bytes": 115
+      },
+      {
+        "_path": "Lib/site-packages/toml-0.10.2.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "d813bc651367bc95a05f2890bfae8b05bfeff3ba81cdca14b4405e7c0ef93ae9",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/toml-0.10.2.dist-info/licenses/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "2d9294823df6c89357c8be4927fce79361d6561e5ee7532d5926e63939aaa536",
+        "size_in_bytes": 1252
+      },
+      {
+        "_path": "Lib/site-packages/toml/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "02ede4a82c0a0f47236dfe322463a9505c29b18d161ec0b56511af5a020a9a97",
+        "size_in_bytes": 723
+      },
+      {
+        "_path": "Lib/site-packages/toml/__init__.pyi",
+        "path_type": "hardlink",
+        "sha256": "ca16235ccebc73b21fc1e7dc59a722315c46bbb687fc893ae749eccea40505ad",
+        "size_in_bytes": 603
+      },
+      {
+        "_path": "Lib/site-packages/toml/decoder.py",
+        "path_type": "hardlink",
+        "sha256": "8521932dffb65810d9fdd768087585cba37ae3b5f2312875a37acdda8e1d1058",
+        "size_in_bytes": 38942
+      },
+      {
+        "_path": "Lib/site-packages/toml/decoder.pyi",
+        "path_type": "hardlink",
+        "sha256": "4594cc6bed16a888659f41e849d2f6959cc61085ac256423132889d34e3854f2",
+        "size_in_bytes": 2003
+      },
+      {
+        "_path": "Lib/site-packages/toml/encoder.py",
+        "path_type": "hardlink",
+        "sha256": "5e305cf1acafbe5b0bc9dfea0c0e2d3160cd98c1514b80e9c2db8349606aef3a",
+        "size_in_bytes": 9940
+      },
+      {
+        "_path": "Lib/site-packages/toml/encoder.pyi",
+        "path_type": "hardlink",
+        "sha256": "9b0b72b4d013ab069e3bb78fd47b62f0b7f2a2259573462ce14a172f6e31c36a",
+        "size_in_bytes": 1234
+      },
+      {
+        "_path": "Lib/site-packages/toml/ordered.py",
+        "path_type": "hardlink",
+        "sha256": "9b3d37959995d1b99cf65b1844850eba3ec3b2ee4fb70abe52d195ab915d559e",
+        "size_in_bytes": 354
+      },
+      {
+        "_path": "Lib/site-packages/toml/ordered.pyi",
+        "path_type": "hardlink",
+        "sha256": "d4bbdf2be1280843434ff0c572f9d1a923854d405c19ba7baca6a74e521b5d54",
+        "size_in_bytes": 224
+      },
+      {
+        "_path": "Lib/site-packages/toml/tz.py",
+        "path_type": "hardlink",
+        "sha256": "fb9be0f30920fdab67562d939c4bde7b121513b4ff171055afffb65957ced680",
+        "size_in_bytes": 701
+      },
+      {
+        "_path": "Lib/site-packages/toml/tz.pyi",
+        "path_type": "hardlink",
+        "sha256": "150c980a146598924d8ba2f8765057f9c2746a516351304855c2f081422a916d",
+        "size_in_bytes": 276
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\toml-0.10.2-pyhcf101f3_3",
+    "type": 1
+  }
+}

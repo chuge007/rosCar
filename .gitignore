@@ -35,6 +35,7 @@ tmp/
 target_board_release/runtime/
 target_board_release/install/
 target_board_release/vendor/
+target_board_release/run.pid
 target_board_release.previous*.zip
 target_board_release.zip
 **/dist/*.zip

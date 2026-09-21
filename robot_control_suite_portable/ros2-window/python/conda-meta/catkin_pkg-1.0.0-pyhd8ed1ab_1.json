@@ -1,0 +1,415 @@
+{
+  "build": "pyhd8ed1ab_1",
+  "build_number": 1,
+  "depends": [
+    "docutils",
+    "pyparsing >=1.5.7",
+    "python >=3.9",
+    "python-dateutil",
+    "setuptools"
+  ],
+  "license": "BSD-3-Clause",
+  "license_family": "BSD",
+  "md5": "016600de0d8b1a8c5ccc99845f51f9da",
+  "name": "catkin_pkg",
+  "noarch": "python",
+  "sha256": "f210ad987595a6ea0bf37ff600a820627e9f7a5eba2e6b2db02f714e925e8624",
+  "size": 53393,
+  "subdir": "noarch",
+  "timestamp": 1734127327150,
+  "version": "1.0.0",
+  "fn": "catkin_pkg-1.0.0-pyhd8ed1ab_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/catkin_pkg-1.0.0-pyhd8ed1ab_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\catkin_pkg-1.0.0-pyhd8ed1ab_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/catkin_pkg-1.0.0.dist-info/INSTALLER",
+    "Lib/site-packages/catkin_pkg-1.0.0.dist-info/LICENSE",
+    "Lib/site-packages/catkin_pkg-1.0.0.dist-info/METADATA",
+    "Lib/site-packages/catkin_pkg-1.0.0.dist-info/RECORD",
+    "Lib/site-packages/catkin_pkg-1.0.0.dist-info/REQUESTED",
+    "Lib/site-packages/catkin_pkg-1.0.0.dist-info/WHEEL",
+    "Lib/site-packages/catkin_pkg-1.0.0.dist-info/direct_url.json",
+    "Lib/site-packages/catkin_pkg-1.0.0.dist-info/entry_points.txt",
+    "Lib/site-packages/catkin_pkg-1.0.0.dist-info/top_level.txt",
+    "Lib/site-packages/catkin_pkg/__init__.py",
+    "Lib/site-packages/catkin_pkg/changelog.py",
+    "Lib/site-packages/catkin_pkg/changelog_generator.py",
+    "Lib/site-packages/catkin_pkg/changelog_generator_vcs.py",
+    "Lib/site-packages/catkin_pkg/cmake.py",
+    "Lib/site-packages/catkin_pkg/condition.py",
+    "Lib/site-packages/catkin_pkg/group_dependency.py",
+    "Lib/site-packages/catkin_pkg/group_membership.py",
+    "Lib/site-packages/catkin_pkg/metapackage.py",
+    "Lib/site-packages/catkin_pkg/package.py",
+    "Lib/site-packages/catkin_pkg/package_templates.py",
+    "Lib/site-packages/catkin_pkg/package_version.py",
+    "Lib/site-packages/catkin_pkg/packages.py",
+    "Lib/site-packages/catkin_pkg/python_setup.py",
+    "Lib/site-packages/catkin_pkg/rospack.py",
+    "Lib/site-packages/catkin_pkg/terminal_color.py",
+    "Lib/site-packages/catkin_pkg/tool_detection.py",
+    "Lib/site-packages/catkin_pkg/topological_order.py",
+    "Lib/site-packages/catkin_pkg/workspace_vcs.py",
+    "Lib/site-packages/catkin_pkg/workspaces.py",
+    "Lib/site-packages/catkin_pkg/templates/CMakeLists.txt.in",
+    "Lib/site-packages/catkin_pkg/templates/metapackage.cmake.in",
+    "Lib/site-packages/catkin_pkg/templates/package.xml.in",
+    "Lib/site-packages/catkin_pkg/cli/__init__.py",
+    "Lib/site-packages/catkin_pkg/cli/create_pkg.py",
+    "Lib/site-packages/catkin_pkg/cli/find_pkg.py",
+    "Lib/site-packages/catkin_pkg/cli/generate_changelog.py",
+    "Lib/site-packages/catkin_pkg/cli/package_version.py",
+    "Lib/site-packages/catkin_pkg/cli/prepare_release.py",
+    "Lib/site-packages/catkin_pkg/cli/tag_changelog.py",
+    "Lib/site-packages/catkin_pkg/cli/test_changelog.py",
+    "Scripts/catkin_create_pkg-script.py",
+    "Scripts/catkin_create_pkg.exe",
+    "Scripts/catkin_find_pkg-script.py",
+    "Scripts/catkin_find_pkg.exe",
+    "Scripts/catkin_generate_changelog-script.py",
+    "Scripts/catkin_generate_changelog.exe",
+    "Scripts/catkin_package_version-script.py",
+    "Scripts/catkin_package_version.exe",
+    "Scripts/catkin_prepare_release-script.py",
+    "Scripts/catkin_prepare_release.exe",
+    "Scripts/catkin_tag_changelog-script.py",
+    "Scripts/catkin_tag_changelog.exe",
+    "Scripts/catkin_test_changelog-script.py",
+    "Scripts/catkin_test_changelog.exe"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/catkin_pkg-1.0.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg-1.0.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "94576a0a774f18bdfea15126e5b89b935472296d722ec7852bd80a9d62f5b103",
+        "size_in_bytes": 1537
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg-1.0.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "6154085b266609337d5ed6475e9589f3f3826be9f2006a3e0fe834f50133ee0d",
+        "size_in_bytes": 1225
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg-1.0.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "230ac1c35e9b20fb9da77c1fb074d8cc4958dc8152bb104b2614d3869b995d53",
+        "size_in_bytes": 5667
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg-1.0.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg-1.0.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "3d9504c5d7fbd548bfb28ebb417a724ae1ed0a2dfe277c2f1783912ba93f4bc5",
+        "size_in_bytes": 91
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg-1.0.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "afa614416644c8e70305cdf003703d1f6b7fcc935186aaeee324178f8fba03c7",
+        "size_in_bytes": 106
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg-1.0.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "a864b87bcbbcf62c2dd8281d742e9973b46eeccf9b88df3de508a398431a0633",
+        "size_in_bytes": 444
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg-1.0.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "c1dbcc9725113fef9d340762ab6892db54e4103278d4711b0f681476115b5b9f",
+        "size_in_bytes": 11
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "d015c15b1cd4d963e28e3d6092b8835ac83583b7022225e6f6b08e3e8dfde68c",
+        "size_in_bytes": 1741
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/changelog.py",
+        "path_type": "hardlink",
+        "sha256": "d51c9235c205be47db55b91423fb953101805407d17a30b181652c10f941457a",
+        "size_in_bytes": 19388
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/changelog_generator.py",
+        "path_type": "hardlink",
+        "sha256": "5022d6a9ed5cd01112c5f6790f3b3f28856ead51a7245cef4d065ddbdb5a6c59",
+        "size_in_bytes": 11908
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/changelog_generator_vcs.py",
+        "path_type": "hardlink",
+        "sha256": "62d84d7eb98b613c3e5ea14424e0efea1b7de6186791036008a978dd3294ae88",
+        "size_in_bytes": 17184
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/cmake.py",
+        "path_type": "hardlink",
+        "sha256": "388a1337aa816e70df734fd8742e0f903a2a3260e6d169bc4277ecc4c0c66dc7",
+        "size_in_bytes": 3128
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/condition.py",
+        "path_type": "hardlink",
+        "sha256": "92fdc96a6fbbf337379a398aa6902abb200a5fc787543763f00b8c11be2afdcf",
+        "size_in_bytes": 4067
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/group_dependency.py",
+        "path_type": "hardlink",
+        "sha256": "78891095e6dfc4afc8d1f106428edb2608f25e5adddd2e59ce402adeb36f09de",
+        "size_in_bytes": 2151
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/group_membership.py",
+        "path_type": "hardlink",
+        "sha256": "6068520c2785ace77b2038a9b3f7e7484f8a08d59b42e4f097b9e861cfa59c72",
+        "size_in_bytes": 1745
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/metapackage.py",
+        "path_type": "hardlink",
+        "sha256": "30a7a73bfb61825424d375f2a0d89126979bc6b6b212a9bd65c03aeccc6171c3",
+        "size_in_bytes": 6610
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/package.py",
+        "path_type": "hardlink",
+        "sha256": "0ff3aeb2e3e3b6d2c710a13f81ddb4870a9c00006e7a1c859b1a649a63834f8d",
+        "size_in_bytes": 33666
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/package_templates.py",
+        "path_type": "hardlink",
+        "sha256": "f0fc4ac04fd0e122eef4a88f373b1e5d6d00b910d28f3ca93a49ed0b14b38c4c",
+        "size_in_bytes": 18361
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/package_version.py",
+        "path_type": "hardlink",
+        "sha256": "c6399e25e2c154a53eef870174a66cebadfeb457c347d4009a58076a2ae20329",
+        "size_in_bytes": 9006
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/packages.py",
+        "path_type": "hardlink",
+        "sha256": "17297dc239d68c3ca0be23148d0cfb85d85cbc50735630c80a3b92eb5ae7dccb",
+        "size_in_bytes": 8370
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/python_setup.py",
+        "path_type": "hardlink",
+        "sha256": "bd012c6f0b45a3e636d730ef8f74f1e1f0111bb06a2cc14393a39f96e384beed",
+        "size_in_bytes": 6113
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/rospack.py",
+        "path_type": "hardlink",
+        "sha256": "959b328fb2c9e109dc57deaca77df5f6d4b141f666ee9c1f9b116776f1d36fcd",
+        "size_in_bytes": 1974
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/terminal_color.py",
+        "path_type": "hardlink",
+        "sha256": "06217f193505913119df570d45d40debd951dd71f8017597e226d4d086d5609c",
+        "size_in_bytes": 4287
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/tool_detection.py",
+        "path_type": "hardlink",
+        "sha256": "b7ea7e8469711006704bcca2f0f38ec28d7c85003ff3ecca0f89defceddb8586",
+        "size_in_bytes": 3209
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/topological_order.py",
+        "path_type": "hardlink",
+        "sha256": "4f92d794a0e040acc455c9f33ab7c87a71fa33455d63e117bf7f3c16264143dd",
+        "size_in_bytes": 14195
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/workspace_vcs.py",
+        "path_type": "hardlink",
+        "sha256": "045c99edc228e102a86b46b07fa075396d3fd4c19533b989a2d12eaffaf1ef19",
+        "size_in_bytes": 2698
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/workspaces.py",
+        "path_type": "hardlink",
+        "sha256": "6f8bbe66bdebce202b92ccc02ef7c08eb09bf1a8477c1445b084d9c21171e4b4",
+        "size_in_bytes": 4310
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/templates/CMakeLists.txt.in",
+        "path_type": "hardlink",
+        "sha256": "de25e18792766c2efaf1998d7716cd7ade95ce98fbae715b756c3809a0ca6628",
+        "size_in_bytes": 7028
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/templates/metapackage.cmake.in",
+        "path_type": "hardlink",
+        "sha256": "70fc70c83f3d5a99d534319a74c7c58c7a77f14361946625fcff30df564bac69",
+        "size_in_bytes": 128
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/templates/package.xml.in",
+        "path_type": "hardlink",
+        "sha256": "862a4a7ab6059a50dfb67b9739856bfa0e13be67ef31bf05712a8225a8d088eb",
+        "size_in_bytes": 2423
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/cli/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/cli/create_pkg.py",
+        "path_type": "hardlink",
+        "sha256": "fcd28b67178f733050e41630381368aa909a4cdc41b62685760e976843478f22",
+        "size_in_bytes": 3048
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/cli/find_pkg.py",
+        "path_type": "hardlink",
+        "sha256": "c2fc5c8ed87f6fee4fe34f95b8dedf2eed9294afbdb20577b6b6b1e46d1198af",
+        "size_in_bytes": 896
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/cli/generate_changelog.py",
+        "path_type": "hardlink",
+        "sha256": "690469364836d45af7933b02a6ec01bc4ddda95f17753e5564bae5b2a326a10c",
+        "size_in_bytes": 6689
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/cli/package_version.py",
+        "path_type": "hardlink",
+        "sha256": "2340c9fb85f2f86e0ea2076ee8e3314f8192c2be8dab2c522f4706fce684cd7b",
+        "size_in_bytes": 1568
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/cli/prepare_release.py",
+        "path_type": "hardlink",
+        "sha256": "38cab8373fafd82bba8924da16004008c7391affe5061bc767080060b9c6dc16",
+        "size_in_bytes": 21268
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/cli/tag_changelog.py",
+        "path_type": "hardlink",
+        "sha256": "2b2a8bb261279296dab4a12044bc3633d9e05a4679e39451e57fcd197700ecfb",
+        "size_in_bytes": 4989
+      },
+      {
+        "_path": "Lib/site-packages/catkin_pkg/cli/test_changelog.py",
+        "path_type": "hardlink",
+        "sha256": "744ee25ea4552fedeb7f38bb7911468d94b2317dd9b7aa956ac9da3620f35fc7",
+        "size_in_bytes": 1563
+      },
+      {
+        "_path": "Scripts/catkin_create_pkg-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "74054e3abf876d76c647cadb39a750fffa9ba5ab598cac23a048e6217106b761",
+        "size_in_bytes": 203
+      },
+      {
+        "_path": "Scripts/catkin_create_pkg.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/catkin_find_pkg-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "8da07bcecd727c7086321423bde2559916e016cec83b09f2ec50bae437938c07",
+        "size_in_bytes": 201
+      },
+      {
+        "_path": "Scripts/catkin_find_pkg.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/catkin_generate_changelog-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "09bb538ec9bf01e3ec8d69335ba7c14730098e1b3d669a94d8240250a9ac6d0b",
+        "size_in_bytes": 257
+      },
+      {
+        "_path": "Scripts/catkin_generate_changelog.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/catkin_package_version-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "6674e51b3404d287335ab244a19badd79a8d2c052cc041a5a332d47683beb829",
+        "size_in_bytes": 208
+      },
+      {
+        "_path": "Scripts/catkin_package_version.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/catkin_prepare_release-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "3f47d1e4f006373b31f1876af49f448614f0e2a1cb2f2bbc426923d64c4f44c5",
+        "size_in_bytes": 208
+      },
+      {
+        "_path": "Scripts/catkin_prepare_release.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/catkin_tag_changelog-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "a5f1077142f8311d4207e4fb22dd9661c2299e4a9496553ddcbbc02dc74b511f",
+        "size_in_bytes": 206
+      },
+      {
+        "_path": "Scripts/catkin_tag_changelog.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      },
+      {
+        "_path": "Scripts/catkin_test_changelog-script.py",
+        "path_type": "windows_python_entry_point_script",
+        "sha256": "767a5f70f4a7c98df3bffc6f1bdbab65566e4c55522dcc53f9aa820a39e4a526",
+        "size_in_bytes": 207
+      },
+      {
+        "_path": "Scripts/catkin_test_changelog.exe",
+        "path_type": "windows_python_entry_point_exe",
+        "sha256": "28b001bb9a72ae7a24242bfab248d767a1ac5dec981c672a3944f7a072375e9a",
+        "size_in_bytes": 74752
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\catkin_pkg-1.0.0-pyhd8ed1ab_1",
+    "type": 1
+  }
+}

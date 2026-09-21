@@ -1,0 +1,79 @@
+{
+  "arch": "x86_64",
+  "build": "he647baa_0",
+  "build_number": 0,
+  "depends": [
+    "libglib 2.86.3 h0c9aed9_0",
+    "libintl >=0.22.5,<1.0a0",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.3,<15",
+    "vc14_runtime >=14.44.35208"
+  ],
+  "license": "LGPL-2.1-or-later",
+  "md5": "5644653839beb5c3ca15454f362cd9e5",
+  "name": "glib-tools",
+  "platform": "win",
+  "sha256": "2722d194f2e6d936eb6cd97bde9624984bfe8243b03098ca2e68fded1cfbce3d",
+  "size": 97743,
+  "subdir": "win-64",
+  "timestamp": 1765222215322,
+  "version": "2.86.3",
+  "fn": "glib-tools-2.86.3-he647baa_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/glib-tools-2.86.3-he647baa_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\glib-tools-2.86.3-he647baa_0",
+  "requested_specs": [],
+  "files": [
+    "Library/bin/gdbus.exe",
+    "Library/bin/gio-querymodules.exe",
+    "Library/bin/gio.exe",
+    "Library/bin/glib-compile-schemas.exe",
+    "Library/bin/gresource.exe",
+    "Library/bin/gsettings.exe"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/bin/gdbus.exe",
+        "path_type": "hardlink",
+        "sha256": "d73443a763554a7f1b2eccf7ba64e72b2239bec9733746da6de19f71f15af5dc",
+        "size_in_bytes": 40960
+      },
+      {
+        "_path": "Library/bin/gio-querymodules.exe",
+        "path_type": "hardlink",
+        "sha256": "4c9d7b9f1411a45090935135e9e57a2a8cbf6a87a726e0e2d406f25e9f206298",
+        "size_in_bytes": 12800
+      },
+      {
+        "_path": "Library/bin/gio.exe",
+        "path_type": "hardlink",
+        "sha256": "fa8ed46cca188248452a9b2ca6e48f60aed4def3f02541f3d77c1850d730e0c6",
+        "size_in_bytes": 71680
+      },
+      {
+        "_path": "Library/bin/glib-compile-schemas.exe",
+        "path_type": "hardlink",
+        "sha256": "c84c30c94fa147c63b413b088a6cd38ba52cf3f547c16e8f69898141184b2c84",
+        "size_in_bytes": 46080
+      },
+      {
+        "_path": "Library/bin/gresource.exe",
+        "path_type": "hardlink",
+        "sha256": "2138453bef1e5f950ca1981147cb8db200a70e5d6ab491b22bcb2b3f87a3bf16",
+        "size_in_bytes": 14848
+      },
+      {
+        "_path": "Library/bin/gsettings.exe",
+        "path_type": "hardlink",
+        "sha256": "b47239bf2e9233f120ef5c3f76eca10076e2ff6b7642e87a8601adcdd2e2ec90",
+        "size_in_bytes": 24576
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\glib-tools-2.86.3-he647baa_0",
+    "type": 1
+  }
+}

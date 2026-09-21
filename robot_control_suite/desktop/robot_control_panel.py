@@ -413,8 +413,11 @@ class ControlPanel(tk.Tk):
                     pressed = set(self._pressed)
                 if "up" in pressed:
                     linear += self._speed_value
-                if "down" in pressed:
+                elif "down" in pressed:
                     linear -= self._speed_value
+                elif "left" in pressed or "right" in pressed:
+                    # Keep both physical wheels moving forward while turning.
+                    linear += self._speed_value
                 if "left" in pressed:
                     angular += self._turn_rate_value
                 if "right" in pressed:
@@ -426,7 +429,9 @@ class ControlPanel(tk.Tk):
             if now - self._last_status_query >= 1.0:
                 self._last_status_query = now
                 self.bridge.read_status_once()
-            time.sleep(0.1)
+            # Match the 50 Hz drive-node heartbeat so held keys do not add
+            # another 100 ms of command latency between immediate presses.
+            time.sleep(0.02)
 
     def _poll_status(self) -> None:
         self.bridge.spin_once()

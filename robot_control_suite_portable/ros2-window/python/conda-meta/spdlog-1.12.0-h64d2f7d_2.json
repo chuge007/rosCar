@@ -1,0 +1,712 @@
+{
+  "arch": "x86_64",
+  "build": "h64d2f7d_2",
+  "build_number": 2,
+  "depends": [
+    "fmt >=10.1.1,<11.0a0",
+    "ucrt >=10.0.20348.0",
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "e039fdff30fd25fbfc7cb91755d80a4f",
+  "name": "spdlog",
+  "platform": "win",
+  "sha256": "4b582768ebb9d234c0a9e0eae482733f167d53e316f0f48aac19a028a83a8570",
+  "size": 160999,
+  "subdir": "win-64",
+  "timestamp": 1697421628776,
+  "version": "1.12.0",
+  "fn": "spdlog-1.12.0-h64d2f7d_2.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/spdlog-1.12.0-h64d2f7d_2.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\spdlog-1.12.0-h64d2f7d_2",
+  "requested_specs": [],
+  "files": [
+    "Library/lib/pkgconfig/spdlog.pc",
+    "Library/include/spdlog/sinks/android_sink.h",
+    "Library/include/spdlog/sinks/ansicolor_sink-inl.h",
+    "Library/include/spdlog/sinks/ansicolor_sink.h",
+    "Library/include/spdlog/sinks/base_sink-inl.h",
+    "Library/include/spdlog/sinks/base_sink.h",
+    "Library/include/spdlog/sinks/basic_file_sink-inl.h",
+    "Library/include/spdlog/sinks/basic_file_sink.h",
+    "Library/include/spdlog/sinks/callback_sink.h",
+    "Library/include/spdlog/sinks/daily_file_sink.h",
+    "Library/include/spdlog/sinks/dist_sink.h",
+    "Library/include/spdlog/sinks/dup_filter_sink.h",
+    "Library/include/spdlog/sinks/hourly_file_sink.h",
+    "Library/include/spdlog/sinks/kafka_sink.h",
+    "Library/include/spdlog/sinks/mongo_sink.h",
+    "Library/include/spdlog/sinks/msvc_sink.h",
+    "Library/include/spdlog/sinks/null_sink.h",
+    "Library/include/spdlog/sinks/ostream_sink.h",
+    "Library/include/spdlog/sinks/qt_sinks.h",
+    "Library/include/spdlog/sinks/ringbuffer_sink.h",
+    "Library/include/spdlog/sinks/rotating_file_sink-inl.h",
+    "Library/include/spdlog/sinks/rotating_file_sink.h",
+    "Library/include/spdlog/sinks/sink-inl.h",
+    "Library/include/spdlog/sinks/sink.h",
+    "Library/include/spdlog/sinks/stdout_color_sinks-inl.h",
+    "Library/include/spdlog/sinks/stdout_color_sinks.h",
+    "Library/include/spdlog/sinks/stdout_sinks-inl.h",
+    "Library/include/spdlog/sinks/stdout_sinks.h",
+    "Library/include/spdlog/sinks/syslog_sink.h",
+    "Library/include/spdlog/sinks/systemd_sink.h",
+    "Library/include/spdlog/sinks/tcp_sink.h",
+    "Library/include/spdlog/sinks/udp_sink.h",
+    "Library/include/spdlog/sinks/win_eventlog_sink.h",
+    "Library/include/spdlog/sinks/wincolor_sink-inl.h",
+    "Library/include/spdlog/sinks/wincolor_sink.h",
+    "Library/lib/spdlog.lib",
+    "Library/include/spdlog/cfg/argv.h",
+    "Library/include/spdlog/cfg/env.h",
+    "Library/include/spdlog/cfg/helpers-inl.h",
+    "Library/include/spdlog/cfg/helpers.h",
+    "Library/include/spdlog/async.h",
+    "Library/include/spdlog/async_logger-inl.h",
+    "Library/include/spdlog/async_logger.h",
+    "Library/include/spdlog/common-inl.h",
+    "Library/include/spdlog/common.h",
+    "Library/include/spdlog/formatter.h",
+    "Library/include/spdlog/fwd.h",
+    "Library/include/spdlog/logger-inl.h",
+    "Library/include/spdlog/logger.h",
+    "Library/include/spdlog/pattern_formatter-inl.h",
+    "Library/include/spdlog/pattern_formatter.h",
+    "Library/include/spdlog/spdlog-inl.h",
+    "Library/include/spdlog/spdlog.h",
+    "Library/include/spdlog/stopwatch.h",
+    "Library/include/spdlog/tweakme.h",
+    "Library/include/spdlog/version.h",
+    "Library/include/spdlog/details/backtracer-inl.h",
+    "Library/include/spdlog/details/backtracer.h",
+    "Library/include/spdlog/details/circular_q.h",
+    "Library/include/spdlog/details/console_globals.h",
+    "Library/include/spdlog/details/file_helper-inl.h",
+    "Library/include/spdlog/details/file_helper.h",
+    "Library/include/spdlog/details/fmt_helper.h",
+    "Library/include/spdlog/details/log_msg-inl.h",
+    "Library/include/spdlog/details/log_msg.h",
+    "Library/include/spdlog/details/log_msg_buffer-inl.h",
+    "Library/include/spdlog/details/log_msg_buffer.h",
+    "Library/include/spdlog/details/mpmc_blocking_q.h",
+    "Library/include/spdlog/details/null_mutex.h",
+    "Library/include/spdlog/details/os-inl.h",
+    "Library/include/spdlog/details/os.h",
+    "Library/include/spdlog/details/periodic_worker-inl.h",
+    "Library/include/spdlog/details/periodic_worker.h",
+    "Library/include/spdlog/details/registry-inl.h",
+    "Library/include/spdlog/details/registry.h",
+    "Library/include/spdlog/details/synchronous_factory.h",
+    "Library/include/spdlog/details/tcp_client-windows.h",
+    "Library/include/spdlog/details/tcp_client.h",
+    "Library/include/spdlog/details/thread_pool-inl.h",
+    "Library/include/spdlog/details/thread_pool.h",
+    "Library/include/spdlog/details/udp_client-windows.h",
+    "Library/include/spdlog/details/udp_client.h",
+    "Library/include/spdlog/details/windows_include.h",
+    "Library/bin/spdlog.dll",
+    "Library/lib/cmake/spdlog/spdlogConfig.cmake",
+    "Library/lib/cmake/spdlog/spdlogConfigTargets-release.cmake",
+    "Library/lib/cmake/spdlog/spdlogConfigTargets.cmake",
+    "Library/lib/cmake/spdlog/spdlogConfigVersion.cmake",
+    "Library/include/spdlog/fmt/bin_to_hex.h",
+    "Library/include/spdlog/fmt/chrono.h",
+    "Library/include/spdlog/fmt/compile.h",
+    "Library/include/spdlog/fmt/fmt.h",
+    "Library/include/spdlog/fmt/ostr.h",
+    "Library/include/spdlog/fmt/ranges.h",
+    "Library/include/spdlog/fmt/std.h",
+    "Library/include/spdlog/fmt/xchar.h"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/lib/pkgconfig/spdlog.pc",
+        "path_type": "hardlink",
+        "sha256": "9c4b3d4659300b3b7c459df346f976a662193eaeeafe849acaa7aaee403f6fe3",
+        "sha256_in_prefix": "236365a087989de0c5c6f215a7681e020f0bb19effe95d8b35a3995ee21e0bcb",
+        "size_in_bytes": 401,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/spdlog_1697421207349/_h_env"
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/android_sink.h",
+        "path_type": "hardlink",
+        "sha256": "6dd14228b1be2f939e3e8dc7c5cf17cf75b88c633a8fd1a40bb117d3b41c7ca7",
+        "size_in_bytes": 4659
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/ansicolor_sink-inl.h",
+        "path_type": "hardlink",
+        "sha256": "6085accf0bf3d45362cd9c234cfe5df8c3ecb62d3184d4d9cf53b0192fc41f2c",
+        "size_in_bytes": 4621
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/ansicolor_sink.h",
+        "path_type": "hardlink",
+        "sha256": "db1599443032f920270ce031c9309a8b0ff09db6cfaafc79e669b07832c9ac74",
+        "size_in_bytes": 3954
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/base_sink-inl.h",
+        "path_type": "hardlink",
+        "sha256": "d472f7c04f5d3cfe1be58c7957e97da03afa43b2e8b4350ac2eb4d894a1105a6",
+        "size_in_bytes": 1778
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/base_sink.h",
+        "path_type": "hardlink",
+        "sha256": "9eefa1720fef73c88792a853b1e9240e69150268a7b78a13aab315142159bc80",
+        "size_in_bytes": 1565
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/basic_file_sink-inl.h",
+        "path_type": "hardlink",
+        "sha256": "cdbeabb97de19f0aedfdf80f948d431cbe2e9e034fba397a72953d2ea74154d6",
+        "size_in_bytes": 1102
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/basic_file_sink.h",
+        "path_type": "hardlink",
+        "sha256": "1aa556a49d87fb217b40e2ca10a87df4cdd2cef716f4e0216a907d2916895b15",
+        "size_in_bytes": 1834
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/callback_sink.h",
+        "path_type": "hardlink",
+        "sha256": "eb8eb62de8ae637fdbe6746d0b80aeeb9686a83b3d4d10e7ab361b93f7edaf3a",
+        "size_in_bytes": 1620
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/daily_file_sink.h",
+        "path_type": "hardlink",
+        "sha256": "6c22dc7046397f89ddb5a150b44f330b969de7bf97c31690637fb66d5f32ede3",
+        "size_in_bytes": 8655
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/dist_sink.h",
+        "path_type": "hardlink",
+        "sha256": "235a0ab07aaf1daec7ec3f4efa7158163e4c9e3d83da0c06417590b7c21adf53",
+        "size_in_bytes": 2454
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/dup_filter_sink.h",
+        "path_type": "hardlink",
+        "sha256": "0b952bc6b9f482844d42010cb236e57722a15af8e951b7b76b7f0182e4990135",
+        "size_in_bytes": 3165
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/hourly_file_sink.h",
+        "path_type": "hardlink",
+        "sha256": "794d7f67a774e608c340d1f22cc22b26eeb06fab1783e056d6bc32d2f6d9b4c5",
+        "size_in_bytes": 6623
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/kafka_sink.h",
+        "path_type": "hardlink",
+        "sha256": "5492adfe0231e7cae7f78d011506661773d19ad3d1c19eace0c93b59d26f9124",
+        "size_in_bytes": 4336
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/mongo_sink.h",
+        "path_type": "hardlink",
+        "sha256": "b65db467656675307c6b78560d279286379f599ae939da2a8a6f900ff77072b3",
+        "size_in_bytes": 3744
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/msvc_sink.h",
+        "path_type": "hardlink",
+        "sha256": "fd7e9793ec924bb2a3814eb32aed5849c55667f30da9871e81bd68a24b00fd0b",
+        "size_in_bytes": 2053
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/null_sink.h",
+        "path_type": "hardlink",
+        "sha256": "4688c997c8aaff5b626be7b05e98ce70399d6a69997002b81a040f3d848c741e",
+        "size_in_bytes": 1229
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/ostream_sink.h",
+        "path_type": "hardlink",
+        "sha256": "f6da7181d286e9ea066a690b574b68354edf6d3009b7b16239a3afb147eab210",
+        "size_in_bytes": 1250
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/qt_sinks.h",
+        "path_type": "hardlink",
+        "sha256": "b0958b5ef858e9c51fd2e96d52ed4e67cf7df7f24c063b19ea0e35ff922069d1",
+        "size_in_bytes": 10341
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/ringbuffer_sink.h",
+        "path_type": "hardlink",
+        "sha256": "49ac585176d7933beae7c83caf25798d622d5092c725207472e0c87b61da57a6",
+        "size_in_bytes": 2110
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/rotating_file_sink-inl.h",
+        "path_type": "hardlink",
+        "sha256": "9d04424cbc49352b1691a06873c2009b8869d36a0c0dd1718df537adb778593e",
+        "size_in_bytes": 4733
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/rotating_file_sink.h",
+        "path_type": "hardlink",
+        "sha256": "02db42b36b2b4a55504252982f6aedeacceb7242a4de99d548bce4aea45edbc7",
+        "size_in_bytes": 2648
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/sink-inl.h",
+        "path_type": "hardlink",
+        "sha256": "8f1eb365f5aa47ada219d562133e66971a7e7ca4221782f85c116c345beb6d25",
+        "size_in_bytes": 725
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/sink.h",
+        "path_type": "hardlink",
+        "sha256": "612eca39db380b957538cd2dc9eec82037aad45b24a0022f8e1773434afc6882",
+        "size_in_bytes": 891
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/stdout_color_sinks-inl.h",
+        "path_type": "hardlink",
+        "sha256": "a5165ed7e8a5df3d9134b28ac806d5ad9f00a05e51e9326aa1c44f61563fbf14",
+        "size_in_bytes": 1214
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/stdout_color_sinks.h",
+        "path_type": "hardlink",
+        "sha256": "afc08e03a7638ffa1758a1e3d4f0d4ad95dc72fc863ea678e0435c6baabf2287",
+        "size_in_bytes": 1626
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/stdout_sinks-inl.h",
+        "path_type": "hardlink",
+        "sha256": "0b99e173fbfabb5c6b26d84b37e7de2842ded2eef18d538324e731ed2bb3eab5",
+        "size_in_bytes": 4299
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/stdout_sinks.h",
+        "path_type": "hardlink",
+        "sha256": "2d43d1bc2d9bc1b8012a5e9aeba03d5514a2dba310fbc5e02afe932193094716",
+        "size_in_bytes": 2419
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/syslog_sink.h",
+        "path_type": "hardlink",
+        "sha256": "2c6cdc86700f6bb351cdf57bfe62c640c4350a33340c884804c31c121ed199a5",
+        "size_in_bytes": 3727
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/systemd_sink.h",
+        "path_type": "hardlink",
+        "sha256": "18a5882f3ab1277ebfe34542c17d4e5eda52ac708fa0261d535db2e43a60b116",
+        "size_in_bytes": 4353
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/tcp_sink.h",
+        "path_type": "hardlink",
+        "sha256": "8df9dea85b4a3618459c314730ffd2a5df6c2e56981cb141643397f0b1ea68d1",
+        "size_in_bytes": 2147
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/udp_sink.h",
+        "path_type": "hardlink",
+        "sha256": "442a8c59d4ae3e423e8765d1edccc9569ab57b90052772fe02ee518bb18a143d",
+        "size_in_bytes": 1820
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/win_eventlog_sink.h",
+        "path_type": "hardlink",
+        "sha256": "d07a3c1218439db122ac75a4ff1834f35beaf0d3137412b6d055ffaa4f129e36",
+        "size_in_bytes": 8872
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/wincolor_sink-inl.h",
+        "path_type": "hardlink",
+        "sha256": "4808b91f2cdeb157cab14ab352f4e559712d20c6c3bb44127599eb04de76ce36",
+        "size_in_bytes": 6357
+      },
+      {
+        "_path": "Library/include/spdlog/sinks/wincolor_sink.h",
+        "path_type": "hardlink",
+        "sha256": "5a7b92a38a16c895cd77687a427143b5ad8575fe7e22f22defca23d050c9a176",
+        "size_in_bytes": 2711
+      },
+      {
+        "_path": "Library/lib/spdlog.lib",
+        "path_type": "hardlink",
+        "sha256": "966fc8a7439a0630591dad37af56ae5068478deb5750ac05657114efc8b3baea",
+        "size_in_bytes": 197796
+      },
+      {
+        "_path": "Library/include/spdlog/cfg/argv.h",
+        "path_type": "hardlink",
+        "sha256": "71836983a61d2ccf1e574535761b9138a9e849e8f6e515798f8196295f93e3b8",
+        "size_in_bytes": 1229
+      },
+      {
+        "_path": "Library/include/spdlog/cfg/env.h",
+        "path_type": "hardlink",
+        "sha256": "d6cc51d0e1da7220cde60d9d13d668162bb7ca0a3ceee8cc964cbaabbd52502c",
+        "size_in_bytes": 988
+      },
+      {
+        "_path": "Library/include/spdlog/cfg/helpers-inl.h",
+        "path_type": "hardlink",
+        "sha256": "d7a002b455cbb78a6f2dcc4adb3e8c12ee82c534d3bb20f0d4b60914a781e6c5",
+        "size_in_bytes": 3174
+      },
+      {
+        "_path": "Library/include/spdlog/cfg/helpers.h",
+        "path_type": "hardlink",
+        "sha256": "efa9c281f8e526b11d7b3d0f88c797cc13b9f0656f66dc6e14e0ec9391b30971",
+        "size_in_bytes": 714
+      },
+      {
+        "_path": "Library/include/spdlog/async.h",
+        "path_type": "hardlink",
+        "sha256": "af42806840fa4e3bb83f5d91c9c5d0d868c2f58d7e6aa90fdb416a0b535c8e1d",
+        "size_in_bytes": 3584
+      },
+      {
+        "_path": "Library/include/spdlog/async_logger-inl.h",
+        "path_type": "hardlink",
+        "sha256": "a819ec7f5dd6a7afbb8724c5c55956fe9cb0f518c4da9cdb0eac46c519baecd4",
+        "size_in_bytes": 2516
+      },
+      {
+        "_path": "Library/include/spdlog/async_logger.h",
+        "path_type": "hardlink",
+        "sha256": "846c9a216eb4cc2171eaaefc1ce4a51ab5af810b5b6bafc6119e773f647d607e",
+        "size_in_bytes": 2276
+      },
+      {
+        "_path": "Library/include/spdlog/common-inl.h",
+        "path_type": "hardlink",
+        "sha256": "4364e0a6297275f57f53e2cce8485b8265d5b9169af6858d2684e354a9047a3f",
+        "size_in_bytes": 2064
+      },
+      {
+        "_path": "Library/include/spdlog/common.h",
+        "path_type": "hardlink",
+        "sha256": "b89a6ee3c0053d954fa33e723af4f3ca5e0851ebebcea40301d7f62fbbc5c443",
+        "size_in_bytes": 14197
+      },
+      {
+        "_path": "Library/include/spdlog/formatter.h",
+        "path_type": "hardlink",
+        "sha256": "48524fd1570012c2199c23a5cbd952d514e80ae76ec7075fee6a78cebb9f928e",
+        "size_in_bytes": 462
+      },
+      {
+        "_path": "Library/include/spdlog/fwd.h",
+        "path_type": "hardlink",
+        "sha256": "2e14e4f2aaa335ccdcbc6f7421f6f69da391a7f845dfcd671641d2c81c347feb",
+        "size_in_bytes": 304
+      },
+      {
+        "_path": "Library/include/spdlog/logger-inl.h",
+        "path_type": "hardlink",
+        "sha256": "c2d6d56455cfbd9a642f5628085f327f3f54cef6261ab9328fa336e78b902d45",
+        "size_in_bytes": 7052
+      },
+      {
+        "_path": "Library/include/spdlog/logger.h",
+        "path_type": "hardlink",
+        "sha256": "592c2fd8da983f92f1b7742db5204c3996f09dbf74797cff014afcb2be02b204",
+        "size_in_bytes": 14623
+      },
+      {
+        "_path": "Library/include/spdlog/pattern_formatter-inl.h",
+        "path_type": "hardlink",
+        "sha256": "91edf77e45a1c2ba2fc46096487fe4980fb8bfe42ba80168bb4215d203583073",
+        "size_in_bytes": 43590
+      },
+      {
+        "_path": "Library/include/spdlog/pattern_formatter.h",
+        "path_type": "hardlink",
+        "sha256": "af95c5feabab55bddd34e2124d800e4c7c66a42ec93a13efcc3c0520f35376d1",
+        "size_in_bytes": 3602
+      },
+      {
+        "_path": "Library/include/spdlog/spdlog-inl.h",
+        "path_type": "hardlink",
+        "sha256": "3b7fd84717d87e25819c3e86765bcb91f754746d2b0082c0bdd6a4c6551896f3",
+        "size_in_bytes": 3132
+      },
+      {
+        "_path": "Library/include/spdlog/spdlog.h",
+        "path_type": "hardlink",
+        "sha256": "89e27519fb7235632b9e84da958c95dcc179bfdaacb7651e64b36cd1700e3119",
+        "size_in_bytes": 11596
+      },
+      {
+        "_path": "Library/include/spdlog/stopwatch.h",
+        "path_type": "hardlink",
+        "sha256": "c3677fc77c8fbd98d8b16ec00db7fcb304b30eb64234315dddfd8d4a56f6c8da",
+        "size_in_bytes": 1732
+      },
+      {
+        "_path": "Library/include/spdlog/tweakme.h",
+        "path_type": "hardlink",
+        "sha256": "25d8b5089b456da2c28770486d99f367cf79c844a9f7037bf2b3f49654463cd4",
+        "size_in_bytes": 6389
+      },
+      {
+        "_path": "Library/include/spdlog/version.h",
+        "path_type": "hardlink",
+        "sha256": "11ea5b570c7e7a0a1f213c50bf6df96342acbe67346469ad1b1197f3d19c98a4",
+        "size_in_bytes": 331
+      },
+      {
+        "_path": "Library/include/spdlog/details/backtracer-inl.h",
+        "path_type": "hardlink",
+        "sha256": "0bfe40514594f525dd01e2839783e72de2bc2a9a274152dc862e637dc9bd9a9f",
+        "size_in_bytes": 2010
+      },
+      {
+        "_path": "Library/include/spdlog/details/backtracer.h",
+        "path_type": "hardlink",
+        "sha256": "873974241bc91bdd1c120d8a9b72ef7b82fa8cf3b8f5e19013585b684f581a5c",
+        "size_in_bytes": 1163
+      },
+      {
+        "_path": "Library/include/spdlog/details/circular_q.h",
+        "path_type": "hardlink",
+        "sha256": "2ee52f1fc702d53ba978eea7394df0cfe9d0e1cfdb2da256ce919b14543d3d91",
+        "size_in_bytes": 3512
+      },
+      {
+        "_path": "Library/include/spdlog/details/console_globals.h",
+        "path_type": "hardlink",
+        "sha256": "eced1eda8e8abe003fb70b29be5df42e7b706b60d5292c1f3e842f3c888a5d66",
+        "size_in_bytes": 609
+      },
+      {
+        "_path": "Library/include/spdlog/details/file_helper-inl.h",
+        "path_type": "hardlink",
+        "sha256": "ad0232470c8ee60f94687cada3d1e28c11ece69bd6fdcd796480f934cf4d4381",
+        "size_in_bytes": 4753
+      },
+      {
+        "_path": "Library/include/spdlog/details/file_helper.h",
+        "path_type": "hardlink",
+        "sha256": "67ae9917645b1f49286b9523ea4f801311336e0cff0411540635f91059a733d0",
+        "size_in_bytes": 1756
+      },
+      {
+        "_path": "Library/include/spdlog/details/fmt_helper.h",
+        "path_type": "hardlink",
+        "sha256": "76a0c9c1f8c3ce2b8d43f0e26cbc0e604ef8838d8b7757271d15b37782a434c8",
+        "size_in_bytes": 4438
+      },
+      {
+        "_path": "Library/include/spdlog/details/log_msg-inl.h",
+        "path_type": "hardlink",
+        "sha256": "cc56ddea61fbf6d4ba6ef06aa649bd28875e3c7e632afa9f332d04b2ee59e147",
+        "size_in_bytes": 1104
+      },
+      {
+        "_path": "Library/include/spdlog/details/log_msg.h",
+        "path_type": "hardlink",
+        "sha256": "eda416f5e6d69541f0087c0d3dc3a2b19e06bb6378e044d3d106e0ae2289dcc4",
+        "size_in_bytes": 1154
+      },
+      {
+        "_path": "Library/include/spdlog/details/log_msg_buffer-inl.h",
+        "path_type": "hardlink",
+        "sha256": "9814ad90de51a780ac4ed8b37b899cecf68842b967d8b7255036785be0635b9b",
+        "size_in_bytes": 1656
+      },
+      {
+        "_path": "Library/include/spdlog/details/log_msg_buffer.h",
+        "path_type": "hardlink",
+        "sha256": "ee20038a4d8870893276e6dcacf72801511881a6cab65a58febc9f2d79f038f8",
+        "size_in_bytes": 933
+      },
+      {
+        "_path": "Library/include/spdlog/details/mpmc_blocking_q.h",
+        "path_type": "hardlink",
+        "sha256": "4d532838d0d63e1df9db2f51832952471da74547e46d6597bdf4483c12d1c06e",
+        "size_in_bytes": 4348
+      },
+      {
+        "_path": "Library/include/spdlog/details/null_mutex.h",
+        "path_type": "hardlink",
+        "sha256": "02edd271e232b7a69c0e37aab61246fcb4b31c1d43f1a20b5c2572ba7b730956",
+        "size_in_bytes": 967
+      },
+      {
+        "_path": "Library/include/spdlog/details/os-inl.h",
+        "path_type": "hardlink",
+        "sha256": "ee0aa46b385650144d4e41a5db471679f09aceef8a5a9e907fd1c82b08410556",
+        "size_in_bytes": 17677
+      },
+      {
+        "_path": "Library/include/spdlog/details/os.h",
+        "path_type": "hardlink",
+        "sha256": "792ff825790d746be51d0bca58d02dca8e8522c0c2de18eb52d462540ef7d880",
+        "size_in_bytes": 3914
+      },
+      {
+        "_path": "Library/include/spdlog/details/periodic_worker-inl.h",
+        "path_type": "hardlink",
+        "sha256": "6051a2a06de524b0e0319bb06cfe0bdc559627e874d48fc14846a452bfe4f4a2",
+        "size_in_bytes": 622
+      },
+      {
+        "_path": "Library/include/spdlog/details/periodic_worker.h",
+        "path_type": "hardlink",
+        "sha256": "2c46cc105d3b426fffa3fd5e4f14337d695e96f33c824c6cc47c3859e197d9d0",
+        "size_in_bytes": 1766
+      },
+      {
+        "_path": "Library/include/spdlog/details/registry-inl.h",
+        "path_type": "hardlink",
+        "sha256": "b23a3e939b4e7790bcd7eb1763cd864133dd11776bd6019aa3462ab68bd98c8f",
+        "size_in_bytes": 8779
+      },
+      {
+        "_path": "Library/include/spdlog/details/registry.h",
+        "path_type": "hardlink",
+        "sha256": "3ec9a11a47adc46c79b15676fb975ace534282032f152b678e36f513d67c0597",
+        "size_in_bytes": 4007
+      },
+      {
+        "_path": "Library/include/spdlog/details/synchronous_factory.h",
+        "path_type": "hardlink",
+        "sha256": "d2f742ffd54151670a8044922f4a0c501d125642906359b4f94d3a73f54e38b1",
+        "size_in_bytes": 753
+      },
+      {
+        "_path": "Library/include/spdlog/details/tcp_client-windows.h",
+        "path_type": "hardlink",
+        "sha256": "77c4d46910d56cb55773056b0380f6acb89bed31138a308f234f185abe9d4929",
+        "size_in_bytes": 4359
+      },
+      {
+        "_path": "Library/include/spdlog/details/tcp_client.h",
+        "path_type": "hardlink",
+        "sha256": "16876b69db9aece4d56cc457b6ec388c0e434da4657685c65b3211dfe3734aa5",
+        "size_in_bytes": 3965
+      },
+      {
+        "_path": "Library/include/spdlog/details/thread_pool-inl.h",
+        "path_type": "hardlink",
+        "sha256": "77ca06d41ae536998da39b6fa4da6f832574a560fe70329a0f80f4d6c7cf88c2",
+        "size_in_bytes": 3530
+      },
+      {
+        "_path": "Library/include/spdlog/details/thread_pool.h",
+        "path_type": "hardlink",
+        "sha256": "3257bf66b3bd1145e4c9e9a62b2d246081301384293f5cc349e550807c967e56",
+        "size_in_bytes": 3394
+      },
+      {
+        "_path": "Library/include/spdlog/details/udp_client-windows.h",
+        "path_type": "hardlink",
+        "sha256": "d71cea27dc2cc94725563ec66ca7b38b7b452911c7a53b1027c3e77ad5ce6077",
+        "size_in_bytes": 3148
+      },
+      {
+        "_path": "Library/include/spdlog/details/udp_client.h",
+        "path_type": "hardlink",
+        "sha256": "b530589d9e612bf322a505625039249cfa29edb141b1c77f595ec23b683fd63f",
+        "size_in_bytes": 2282
+      },
+      {
+        "_path": "Library/include/spdlog/details/windows_include.h",
+        "path_type": "hardlink",
+        "sha256": "367900d91844b67b65fcee1f41d025937d6e577f66fedafaf408ed024b807f13",
+        "size_in_bytes": 187
+      },
+      {
+        "_path": "Library/bin/spdlog.dll",
+        "path_type": "hardlink",
+        "sha256": "2cfdf513639bf58a25f679c2705c511dffe81256ae70966e90c1e31a7f00df92",
+        "size_in_bytes": 253440
+      },
+      {
+        "_path": "Library/lib/cmake/spdlog/spdlogConfig.cmake",
+        "path_type": "hardlink",
+        "sha256": "f583c3c7bd43053053ce0f4b179cb846e86841b635962fbec3c237dcb62982fa",
+        "size_in_bytes": 1402
+      },
+      {
+        "_path": "Library/lib/cmake/spdlog/spdlogConfigTargets-release.cmake",
+        "path_type": "hardlink",
+        "sha256": "e425d89d1a0ff5336acc0c05e560a8a075f0848937f81162ad2c52afbee8f88f",
+        "size_in_bytes": 906
+      },
+      {
+        "_path": "Library/lib/cmake/spdlog/spdlogConfigTargets.cmake",
+        "path_type": "hardlink",
+        "sha256": "0080314e155597114e98303ca9faac6e550af20f7d95d5ef4006dfcb72a6025a",
+        "size_in_bytes": 4788
+      },
+      {
+        "_path": "Library/lib/cmake/spdlog/spdlogConfigVersion.cmake",
+        "path_type": "hardlink",
+        "sha256": "5e706440da7a4ae27f17444f5741c5409e4354a787ffebd3c5e5cd791caac738",
+        "size_in_bytes": 2830
+      },
+      {
+        "_path": "Library/include/spdlog/fmt/bin_to_hex.h",
+        "path_type": "hardlink",
+        "sha256": "da697234c89d14ca0035038adc968a51cc81b1d1bc3b40d1d41f23b3d49d1fda",
+        "size_in_bytes": 7326
+      },
+      {
+        "_path": "Library/include/spdlog/fmt/chrono.h",
+        "path_type": "hardlink",
+        "sha256": "356bc0bdb9adbe7f6e3d1c1657cd9b1f6eff0961daf73307434024756764cea9",
+        "size_in_bytes": 523
+      },
+      {
+        "_path": "Library/include/spdlog/fmt/compile.h",
+        "path_type": "hardlink",
+        "sha256": "9705f3ab618494dcd31ec530b22151a968850ba8616b3f8af24b4227a9f1c1d8",
+        "size_in_bytes": 531
+      },
+      {
+        "_path": "Library/include/spdlog/fmt/fmt.h",
+        "path_type": "hardlink",
+        "sha256": "a64eed6f71470419d08f1ee7b6cbe8b4cd0fa9759daee078c2f4603a45c0428e",
+        "size_in_bytes": 1004
+      },
+      {
+        "_path": "Library/include/spdlog/fmt/ostr.h",
+        "path_type": "hardlink",
+        "sha256": "ebf57add553d132305fd8a34614c36efb3048dbb205227e4d2c2a2009564e15b",
+        "size_in_bytes": 526
+      },
+      {
+        "_path": "Library/include/spdlog/fmt/ranges.h",
+        "path_type": "hardlink",
+        "sha256": "005fdbc70388ed7d50a8851b7852377fcd402a7ccfb8524ac298b4788441241e",
+        "size_in_bytes": 523
+      },
+      {
+        "_path": "Library/include/spdlog/fmt/std.h",
+        "path_type": "hardlink",
+        "sha256": "e4fd6088da05eeaf94ca4536fadf8d02977ff0b6151ab12d37ff16c9696c838c",
+        "size_in_bytes": 613
+      },
+      {
+        "_path": "Library/include/spdlog/fmt/xchar.h",
+        "path_type": "hardlink",
+        "sha256": "c24f55d55439c277d2990b73f207d117ad96b9d10a776f508b82ca7e7bc2c3dc",
+        "size_in_bytes": 520
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\spdlog-1.12.0-h64d2f7d_2",
+    "type": 1
+  }
+}

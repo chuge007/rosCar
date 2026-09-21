@@ -1,0 +1,160 @@
+{
+  "build": "pyha770c72_0",
+  "build_number": 0,
+  "depends": [
+    "python >=3.8",
+    "zipp >=0.5"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "APACHE",
+  "md5": "80d2ed5fd22d7eb804f70c03f0d40b45",
+  "name": "importlib-metadata",
+  "noarch": "python",
+  "sha256": "81c149c12dc6dadc9836873282fa51a9c16507da94e89ccc6f3bdeb870b1cb73",
+  "size": 25527,
+  "subdir": "noarch",
+  "timestamp": 1676330831614,
+  "version": "4.13.0",
+  "fn": "importlib-metadata-4.13.0-pyha770c72_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/importlib-metadata-4.13.0-pyha770c72_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\importlib-metadata-4.13.0-pyha770c72_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/importlib_metadata-4.13.0.dist-info/INSTALLER",
+    "Lib/site-packages/importlib_metadata-4.13.0.dist-info/LICENSE",
+    "Lib/site-packages/importlib_metadata-4.13.0.dist-info/METADATA",
+    "Lib/site-packages/importlib_metadata-4.13.0.dist-info/RECORD",
+    "Lib/site-packages/importlib_metadata-4.13.0.dist-info/REQUESTED",
+    "Lib/site-packages/importlib_metadata-4.13.0.dist-info/WHEEL",
+    "Lib/site-packages/importlib_metadata-4.13.0.dist-info/direct_url.json",
+    "Lib/site-packages/importlib_metadata-4.13.0.dist-info/top_level.txt",
+    "Lib/site-packages/importlib_metadata/__init__.py",
+    "Lib/site-packages/importlib_metadata/_adapters.py",
+    "Lib/site-packages/importlib_metadata/_collections.py",
+    "Lib/site-packages/importlib_metadata/_compat.py",
+    "Lib/site-packages/importlib_metadata/_functools.py",
+    "Lib/site-packages/importlib_metadata/_itertools.py",
+    "Lib/site-packages/importlib_metadata/_meta.py",
+    "Lib/site-packages/importlib_metadata/_py39compat.py",
+    "Lib/site-packages/importlib_metadata/_text.py",
+    "Lib/site-packages/importlib_metadata/py.typed"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/importlib_metadata-4.13.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata-4.13.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_in_bytes": 11358
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata-4.13.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "a65ecee3bc77cfc511d9e5f6b042489d33ce448b482593899208805001f70c03",
+        "size_in_bytes": 4914
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata-4.13.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "a68519d1091bb9b7dedbcf48f7883da55e2f61c6383552f14ebe777cc6feeb48",
+        "size_in_bytes": 2175
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata-4.13.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata-4.13.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "db07a93359e4e034b8785a58ad6d534ea3dca0635f1e184efe2e66e1c3a299ba",
+        "size_in_bytes": 92
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata-4.13.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "a15d6c2ca880c966537e3422a19ee191b93460a7b5cfe6272925ccfebf92c9a6",
+        "size_in_bytes": 114
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata-4.13.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "08eddf0fdcb29403625e4acca38a872d5fe6a972f6b02e4914a82dd725804fe0",
+        "size_in_bytes": 19
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "963c017d792eca42285952702f16baeb5ce93d8dd613581627a35ffa0c8de35f",
+        "size_in_bytes": 31510
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata/_adapters.py",
+        "path_type": "hardlink",
+        "sha256": "07a7c28b9fbc98b543154663de4ac8e67028fa62a9d5d1ffa886afc88c85ac9b",
+        "size_in_bytes": 1862
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata/_collections.py",
+        "path_type": "hardlink",
+        "sha256": "089d0e4c21c88d6034648552e2fa0e440b27d91e11d9c40112d3ec6442690126",
+        "size_in_bytes": 743
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata/_compat.py",
+        "path_type": "hardlink",
+        "sha256": "f7338a7f478382408c9e7684854e64415c477753fc048615ed2b6ca3b6afe61f",
+        "size_in_bytes": 1857
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata/_functools.py",
+        "path_type": "hardlink",
+        "sha256": "3ec636fb8aeb297e1155e442d681a9d65075a660bd78a37cf3f7fe6c3f6e3a80",
+        "size_in_bytes": 2895
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata/_itertools.py",
+        "path_type": "hardlink",
+        "sha256": "72faffdaff0145bc5c225e71e6575fa9d1e3848f188bcb3cca4e741bf9e6ea34",
+        "size_in_bytes": 2068
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata/_meta.py",
+        "path_type": "hardlink",
+        "sha256": "fc5e3c1eefe317191f296cf9c1c612f2f3b6dea13281b55d17dafeeaa87e8631",
+        "size_in_bytes": 1154
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata/_py39compat.py",
+        "path_type": "hardlink",
+        "sha256": "c04529b3e1d7e04ee3fcbd0870fb065f1b03d5527e878ab769c0c583dae9bbe7",
+        "size_in_bytes": 1754
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata/_text.py",
+        "path_type": "hardlink",
+        "sha256": "1c2b0592c66924b7933f734493f9e0ac079755146d4ebb7287d78e001a113f80",
+        "size_in_bytes": 2166
+      },
+      {
+        "_path": "Lib/site-packages/importlib_metadata/py.typed",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\importlib-metadata-4.13.0-pyha770c72_0",
+    "type": 1
+  }
+}

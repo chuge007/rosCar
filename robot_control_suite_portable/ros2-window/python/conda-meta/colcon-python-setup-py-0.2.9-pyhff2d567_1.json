@@ -1,0 +1,140 @@
+{
+  "build": "pyhff2d567_1",
+  "build_number": 1,
+  "depends": [
+    "colcon-core >=0.6.1",
+    "python >=3.9",
+    "setuptools"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "APACHE",
+  "md5": "f9e99cee078c732ab49d547fa1a7a752",
+  "name": "colcon-python-setup-py",
+  "noarch": "python",
+  "sha256": "c3f6cb06b4e1f0fc0efc50ee7ca78fb8d1bcdfff92afcd0e9235c53eb521e61a",
+  "size": 16561,
+  "subdir": "noarch",
+  "timestamp": 1753971248803,
+  "version": "0.2.9",
+  "fn": "colcon-python-setup-py-0.2.9-pyhff2d567_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/colcon-python-setup-py-0.2.9-pyhff2d567_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-python-setup-py-0.2.9-pyhff2d567_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/licenses/LICENSE",
+    "Lib/site-packages/colcon_python_setup_py/package_augmentation/__init__.py",
+    "Lib/site-packages/colcon_python_setup_py/package_augmentation/python_setup_py.py",
+    "Lib/site-packages/colcon_python_setup_py/package_identification/__init__.py",
+    "Lib/site-packages/colcon_python_setup_py/package_identification/python_setup_py.py",
+    "Lib/site-packages/colcon_python_setup_py/__init__.py",
+    "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/INSTALLER",
+    "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/METADATA",
+    "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/RECORD",
+    "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/REQUESTED",
+    "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/WHEEL",
+    "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/direct_url.json",
+    "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/entry_points.txt",
+    "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/top_level.txt",
+    "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/zip-safe"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/licenses/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_in_bytes": 11358
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py/package_augmentation/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py/package_augmentation/python_setup_py.py",
+        "path_type": "hardlink",
+        "sha256": "d3a330dd5d78d599b512367a3df871648cc9c0dea96027ad15bce245ad26fc6e",
+        "size_in_bytes": 2274
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py/package_identification/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py/package_identification/python_setup_py.py",
+        "path_type": "hardlink",
+        "sha256": "be7ae31720f24354dcc73f24d12407329218ae7ac3414635e9f07a57826745dd",
+        "size_in_bytes": 10812
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "95fee13e8f550b6fa58538c87c4d08298a62656b4c924f02d877a4b2b4fa8f4d",
+        "size_in_bytes": 106
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "82ad0778b7df1a48566b03b01ef3e9df6440382e7b48cf0de65f0348a2b3a10b",
+        "size_in_bytes": 2093
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "939e3a3f9af839e743877dbd6129a40ea493f0f6295ade67895f453cdb0b70d2",
+        "size_in_bytes": 1975
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b",
+        "size_in_bytes": 91
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "e7374c3f6ba9a8c35dcd994450e88dfcc81e7c9410bc5163f5d8f723411115cc",
+        "size_in_bytes": 118
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "402e6985b13a6eaef5f4c37cdd0bc976a498fed83085b45c55214ef819bf778e",
+        "size_in_bytes": 285
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "8d86c596f5bb7c3b5ebf81f8eb18b128aed8cf27388cb62be17cc8422aee5005",
+        "size_in_bytes": 23
+      },
+      {
+        "_path": "Lib/site-packages/colcon_python_setup_py-0.2.9.dist-info/zip-safe",
+        "path_type": "hardlink",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "size_in_bytes": 1
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-python-setup-py-0.2.9-pyhff2d567_1",
+    "type": 1
+  }
+}

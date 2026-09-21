@@ -1,0 +1,125 @@
+{
+  "build": "pyhd8ed1ab_0",
+  "build_number": 0,
+  "depends": [
+    "colcon-core >=0.12.0",
+    "python >=3.9"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "APACHE",
+  "md5": "13e2d4daa3c127b5a144999e41eb7ae9",
+  "name": "colcon-ros-domain-id-coordinator",
+  "noarch": "python",
+  "sha256": "d829c30a58e698fc6b1aa5b075ee204b0119da297994ef44d0e0eccd82673f08",
+  "size": 14891,
+  "subdir": "noarch",
+  "timestamp": 1753971216917,
+  "version": "0.2.4",
+  "fn": "colcon-ros-domain-id-coordinator-0.2.4-pyhd8ed1ab_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/colcon-ros-domain-id-coordinator-0.2.4-pyhd8ed1ab_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-ros-domain-id-coordinator-0.2.4-pyhd8ed1ab_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/licenses/LICENSE",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/INSTALLER",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/METADATA",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/RECORD",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/REQUESTED",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/WHEEL",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/direct_url.json",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/entry_points.txt",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/top_level.txt",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/zip-safe",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator/shell/__init__.py",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator/shell/ros_domain_id.py",
+    "Lib/site-packages/colcon_ros_domain_id_coordinator/__init__.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/licenses/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_in_bytes": 11358
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "3b2c496bc89f3806442f6521254815f4c083bd5f5188c151610b4dc10198f1ff",
+        "size_in_bytes": 2375
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "ae5ec33a2a08b41222df5ca714b5bcfd0be5589da4bb22c0701618ca069a3b6d",
+        "size_in_bytes": 1659
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b",
+        "size_in_bytes": 91
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "93307b81de758df8514d6c8e6730327c3d1ddbb27868f5465b934b3d954c9c05",
+        "size_in_bytes": 128
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "c2f667f92d4672b91540e09ee44803e706fc4c0aaa5cb1ac04a1aba0b2adce20",
+        "size_in_bytes": 221
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "d8715b1dc6e9deee71b7b7381f70f1dac523e8af4cfe43e1f83b596290feffe4",
+        "size_in_bytes": 33
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator-0.2.4.dist-info/zip-safe",
+        "path_type": "hardlink",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "size_in_bytes": 1
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator/shell/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator/shell/ros_domain_id.py",
+        "path_type": "hardlink",
+        "sha256": "ae06bafff47fe4f32aa94581fd1c67212359cbbf1319e7f35933f753e1667069",
+        "size_in_bytes": 5613
+      },
+      {
+        "_path": "Lib/site-packages/colcon_ros_domain_id_coordinator/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "36066b6715b4d3f6869a21e1df0a6e813fe2911b51cd8c483e5695d463eb83bb",
+        "size_in_bytes": 106
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-ros-domain-id-coordinator-0.2.4-pyhd8ed1ab_0",
+    "type": 1
+  }
+}

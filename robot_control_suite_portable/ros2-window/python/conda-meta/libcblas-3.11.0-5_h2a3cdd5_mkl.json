@@ -1,0 +1,46 @@
+{
+  "arch": "x86_64",
+  "build": "5_h2a3cdd5_mkl",
+  "build_number": 5,
+  "constrains": [
+    "liblapack  3.11.0   5*_mkl",
+    "liblapacke 3.11.0   5*_mkl",
+    "blas 2.305   mkl"
+  ],
+  "depends": [
+    "libblas 3.11.0 5_hf2e6a31_mkl"
+  ],
+  "license": "BSD-3-Clause",
+  "license_family": "BSD",
+  "md5": "b3fa8e8b55310ba8ef0060103afb02b5",
+  "name": "libcblas",
+  "platform": "win",
+  "sha256": "49dc59d8e58360920314b8d276dd80da7866a1484a9abae4ee2760bc68f3e68d",
+  "size": 68079,
+  "subdir": "win-64",
+  "timestamp": 1765819124349,
+  "version": "3.11.0",
+  "fn": "libcblas-3.11.0-5_h2a3cdd5_mkl.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/libcblas-3.11.0-5_h2a3cdd5_mkl.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\libcblas-3.11.0-5_h2a3cdd5_mkl",
+  "requested_specs": [],
+  "files": [
+    "Library/bin/libcblas.dll"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/bin/libcblas.dll",
+        "path_type": "hardlink",
+        "sha256": "be597f6ee70807fdf428f8794f2bbb27f9d0ddd0d9babd75d5337e2ef007a6da",
+        "size_in_bytes": 110592
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\libcblas-3.11.0-5_h2a3cdd5_mkl",
+    "type": 1
+  }
+}

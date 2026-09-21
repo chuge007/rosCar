@@ -1,0 +1,11 @@
+prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+exec_prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: fmt
+Description: A modern formatting library
+Version: 10.2.1
+Libs: -L${libdir} -lfmt
+Cflags: -I${includedir}
+

@@ -1,0 +1,103 @@
+{
+  "build": "pyhd8ed1ab_1",
+  "build_number": 1,
+  "depends": [
+    "python >=3.9"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "827064ddfe0de2917fb29f1da4f8f533",
+  "name": "mccabe",
+  "noarch": "python",
+  "sha256": "9b0037171dad0100f0296699a11ae7d355237b55f42f9094aebc0f41512d96a1",
+  "size": 12934,
+  "subdir": "noarch",
+  "timestamp": 1733216573915,
+  "version": "0.7.0",
+  "fn": "mccabe-0.7.0-pyhd8ed1ab_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/mccabe-0.7.0-pyhd8ed1ab_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\mccabe-0.7.0-pyhd8ed1ab_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/mccabe-0.7.0.dist-info/INSTALLER",
+    "Lib/site-packages/mccabe-0.7.0.dist-info/LICENSE",
+    "Lib/site-packages/mccabe-0.7.0.dist-info/METADATA",
+    "Lib/site-packages/mccabe-0.7.0.dist-info/RECORD",
+    "Lib/site-packages/mccabe-0.7.0.dist-info/REQUESTED",
+    "Lib/site-packages/mccabe-0.7.0.dist-info/WHEEL",
+    "Lib/site-packages/mccabe-0.7.0.dist-info/direct_url.json",
+    "Lib/site-packages/mccabe-0.7.0.dist-info/entry_points.txt",
+    "Lib/site-packages/mccabe-0.7.0.dist-info/top_level.txt",
+    "Lib/site-packages/mccabe.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/mccabe-0.7.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/mccabe-0.7.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "10fbc003cbaf8a6b3cf7195b80dac96c86daf390039b2abf6e7b6e735afd7d74",
+        "size_in_bytes": 1221
+      },
+      {
+        "_path": "Lib/site-packages/mccabe-0.7.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "cff564e2a96bfde701359b028a24ad81e33c8d2e8d18c8b557a3110cc421cedb",
+        "size_in_bytes": 5015
+      },
+      {
+        "_path": "Lib/site-packages/mccabe-0.7.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "0b10b982837419d5e718242b6a252fea36acfc8c9dd3871e69657700405db39d",
+        "size_in_bytes": 855
+      },
+      {
+        "_path": "Lib/site-packages/mccabe-0.7.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/mccabe-0.7.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "a7178d5f925db427b9f0f51260ff6ea6673b8dd44f82f4f41a6f646f5487955c",
+        "size_in_bytes": 109
+      },
+      {
+        "_path": "Lib/site-packages/mccabe-0.7.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "cf423efb045d8d4d0b02735e59f10a8b926994295e0d7c959465ca02a75c711f",
+        "size_in_bytes": 102
+      },
+      {
+        "_path": "Lib/site-packages/mccabe-0.7.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "b531f92b9c6e2e25bb77f539904f4225563011f4ec1cbf48cdac9e3e89e1a570",
+        "size_in_bytes": 46
+      },
+      {
+        "_path": "Lib/site-packages/mccabe-0.7.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "db5717baa644fa5a5c7c0aaa00dbd7f448c8d440f5a7ccdc562bf4eb8bb744a0",
+        "size_in_bytes": 7
+      },
+      {
+        "_path": "Lib/site-packages/mccabe.py",
+        "path_type": "hardlink",
+        "sha256": "83f901f283e294d2de99d3a2acf699ca6432ca3a801f4928c2b9dc51069ac34d",
+        "size_in_bytes": 10654
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\mccabe-0.7.0-pyhd8ed1ab_1",
+    "type": 1
+  }
+}

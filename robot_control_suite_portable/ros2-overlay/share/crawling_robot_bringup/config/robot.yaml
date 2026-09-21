@@ -1,0 +1,160 @@
+base_drive_node:
+  ros__parameters:
+    left_motor_id: 1
+    right_motor_id: 2
+    left_motor_sign: 1
+    right_motor_sign: -1
+    wheel_radius_m: 0.04
+    wheel_separation_m: 0.30
+    motor_output_to_wheel_ratio: 1.0
+    max_wheel_speed_m_s: 0.12
+    max_linear_speed_m_s: 0.025
+    max_angular_speed_rad_s: 0.30
+    max_linear_accel_m_s2: 0.05
+    max_angular_accel_rad_s2: 0.90
+    command_timeout_ms: 200
+    can_tx_topic: /can/tx
+    can_rx_topic: /can/rx
+
+slcan_can_bridge_node:
+  ros__parameters:
+    serial_port: ""
+    serial_baud_rate: 115200
+    can_bitrate: 1000000
+    auto_open: false
+    can_tx_topic: /can/tx
+    can_rx_topic: /can/rx
+
+rim302_imu_node:
+  ros__parameters:
+    serial_port: "COM1"
+    baud_rate: 115200
+    frame_id: imu_link
+    configure_output: true
+    output_divider: 1
+    convert_frd_to_flu: true
+
+modbus_encoder_node:
+  ros__parameters:
+    serial_port: ""
+    baud_rate: 115200
+    unit_id: 1
+    counter_register: -1
+    high_word_first: true
+    read_interval_ms: 20
+    response_timeout_ms: 100
+    ticks_topic: /scan_encoder/ticks
+
+encoder_odom_node:
+  ros__parameters:
+    ticks_per_revolution: 4096.0
+    measuring_wheel_diameter_m: 0.05
+    encoder_sign: 1
+    odom_frame_id: odom
+    base_frame_id: base_link
+
+canopen_axis_node:
+  ros__parameters:
+    axis_names:
+      - scan_frame_vertical_joint
+      - scan_frame_lateral_joint
+      - probe_clamp_joint
+    node_ids: [10, 11, 12]
+    lower_limits_m: [0.0, 0.0, 0.0]
+    upper_limits_m: [0.0, 0.0, 0.0]
+    max_velocities_m_s: [0.0, 0.0, 0.0]
+    max_accelerations_m_s2: [0.0, 0.0, 0.0]
+    counts_per_meter: [0.0, 0.0, 0.0]
+    home_offsets_m: [0.0, 0.0, 0.0]
+    axis_signs: [1, 1, 1]
+    sdo_timeout_ms: 200
+    state_poll_period_ms: 100
+    can_tx_topic: /can/tx
+    can_rx_topic: /can/rx
+    dry_run: true
+    protocol_verified: false
+
+mv3dlp_laser_node:
+  ros__parameters:
+    serial_number: ""
+    device_ip: "192.168.1.4"
+    sdk_library_path: ""
+    frame_id: laser_link
+    acquisition_mode: range_image
+    fetch_timeout_ms: 2000
+    capture_period_ms: 33
+    reconnect_delay_ms: 2000
+    encoder_ticks_topic: /scan_encoder/ticks
+    points_topic: /laser_profile/points
+    profile_topic: /laser_profile/frame
+
+laser_path_follower_node:
+  ros__parameters:
+    profile_topic: /laser_profile/frame
+    odom_topic: /odom
+    cmd_vel_topic: /cmd_vel
+    status_topic: /laser_correction/status
+    lateral_axis: y
+    height_axis: z
+    forward_axis: x
+    forward_sign: 1
+    lateral_sign: 1
+    height_sign: 1
+    lateral_min_m: -0.20
+    lateral_max_m: 0.20
+    target_lateral_m: 0.0
+    prominence_threshold_m: 0.0015
+    confidence_scale_m: 0.004
+    min_candidate_points: 3
+    baseline_fraction: 0.60
+    median_window_points: 5
+    contour_half_width_m: 0.025
+    filter_alpha: 0.22
+    derivative_alpha: 0.18
+    kp: 3.0
+    kd: 0.35
+    steering_sign: 1
+    deadband_m: 0.0015
+    max_lateral_error_m: 0.08
+    target_speed_m_s: 0.025
+    min_speed_scale: 0.35
+    speed_reduction_gain: 0.8
+    max_angular_z_rad_s: 0.45
+    max_angular_accel_rad_s2: 0.9
+    max_linear_accel_m_s2: 0.05
+    control_period_ms: 20
+    profile_timeout_ms: 180
+    laser_forward_m: 0.0
+    laser_lateral_offset_m: 0.0
+    laser_yaw_rad: 0.0
+    trajectory_window_m: 0.12
+    max_trajectory_points: 80
+    min_fit_points: 6
+    fit_huber_delta_m: 0.006
+    max_fit_residual_m: 0.012
+    geometry_filter_alpha: 0.25
+    heading_gain: 1.6
+    max_odom_age_ms: 120
+    min_fit_span_m: 0.03
+    max_heading_error_rad: 0.785
+    preview_distance_m: 0.06
+    preview_filter_alpha: 0.25
+    curvature_feedforward_gain: 1.0
+    lateral_preview_gain: 2.4
+    # Keep at 0 until a repeatable static bias remains after extrinsic calibration.
+    integral_gain: 0.0
+    integral_limit_m_s: 0.03
+    integral_heading_gate_rad: 0.0524
+    integral_error_gate_m: 0.03
+    max_angular_jerk_rad_s3: 2.0
+    max_curvature_1pm: 8.0
+
+crawling_robot_monitor:
+  ros__parameters:
+    imu_topic: /imu/data
+    profile_topic: /laser_profile/frame
+    cmd_vel_topic: /cmd_vel
+    max_linear_speed_m_s: 0.025
+    max_angular_speed_rad_s: 0.30
+    max_linear_accel_m_s2: 0.05
+    max_angular_accel_rad_s2: 0.90

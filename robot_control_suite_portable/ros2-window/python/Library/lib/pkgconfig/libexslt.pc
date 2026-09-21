@@ -1,0 +1,12 @@
+prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+exec_prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+libdir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib
+includedir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/include
+
+
+Name: libexslt
+Version: 0.8.24
+Description: EXSLT Extension library
+Requires: libxml-2.0, libxslt
+Cflags: -I${includedir}
+Libs: -L${libdir} -lexslt

@@ -1,0 +1,189 @@
+{
+  "build": "pyhd8ed1ab_1",
+  "build_number": 1,
+  "depends": [
+    "colcon-core >=0.12",
+    "python >=3.9",
+    "pyyaml"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "APACHE",
+  "md5": "8f6f5ee1a01268b62a07ff35e818c522",
+  "name": "colcon-mixin",
+  "noarch": "python",
+  "sha256": "beabb15276e1e246b7b5715f82b7fa43593dda6cb51e0fee229729e0d4a8f2aa",
+  "size": 25148,
+  "subdir": "noarch",
+  "timestamp": 1736162602690,
+  "version": "0.2.3",
+  "fn": "colcon-mixin-0.2.3-pyhd8ed1ab_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/colcon-mixin-0.2.3-pyhd8ed1ab_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-mixin-0.2.3-pyhd8ed1ab_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/colcon_mixin/mixin/__init__.py",
+    "Lib/site-packages/colcon_mixin/mixin/mixin_argument.py",
+    "Lib/site-packages/colcon_mixin/mixin/repository.py",
+    "Lib/site-packages/colcon_mixin/__init__.py",
+    "Lib/site-packages/colcon_mixin/subverb/__init__.py",
+    "Lib/site-packages/colcon_mixin/subverb/add.py",
+    "Lib/site-packages/colcon_mixin/subverb/list.py",
+    "Lib/site-packages/colcon_mixin/subverb/remove.py",
+    "Lib/site-packages/colcon_mixin/subverb/show.py",
+    "Lib/site-packages/colcon_mixin/subverb/update.py",
+    "Lib/site-packages/colcon_mixin-0.2.3.dist-info/INSTALLER",
+    "Lib/site-packages/colcon_mixin-0.2.3.dist-info/LICENSE",
+    "Lib/site-packages/colcon_mixin-0.2.3.dist-info/METADATA",
+    "Lib/site-packages/colcon_mixin-0.2.3.dist-info/RECORD",
+    "Lib/site-packages/colcon_mixin-0.2.3.dist-info/REQUESTED",
+    "Lib/site-packages/colcon_mixin-0.2.3.dist-info/WHEEL",
+    "Lib/site-packages/colcon_mixin-0.2.3.dist-info/direct_url.json",
+    "Lib/site-packages/colcon_mixin-0.2.3.dist-info/entry_points.txt",
+    "Lib/site-packages/colcon_mixin-0.2.3.dist-info/top_level.txt",
+    "Lib/site-packages/colcon_mixin-0.2.3.dist-info/zip-safe",
+    "Lib/site-packages/colcon_mixin/verb/__init__.py",
+    "Lib/site-packages/colcon_mixin/verb/mixin.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/colcon_mixin/mixin/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "a687cdc16c7ec955babe5c08566578d7d40bcc9efdd3c64b0e2ea2726adcf597",
+        "size_in_bytes": 3752
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/mixin/mixin_argument.py",
+        "path_type": "hardlink",
+        "sha256": "454b21afe15f8f08724ec1a90077da025a19210bca02100579d2e14c1cbf368e",
+        "size_in_bytes": 12318
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/mixin/repository.py",
+        "path_type": "hardlink",
+        "sha256": "d673214cece24e95de912410ec87730d36d10e7d9e5aa1c5c2d066c0ff6c8815",
+        "size_in_bytes": 3197
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "f93eea82a86251e1fe53373a13bdcf92933a020f59c648cbe1d8dfd8b1a68337",
+        "size_in_bytes": 106
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/subverb/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "7bb5812c11fecd9dbb57167edcec47c9eb9a60ab95b5dc59e4c205f7416a5f3d",
+        "size_in_bytes": 1652
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/subverb/add.py",
+        "path_type": "hardlink",
+        "sha256": "34035fc1eb3fc0870ae03e96d82f0e88e1a3363e09a669a089a1f85aedc36bdf",
+        "size_in_bytes": 1749
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/subverb/list.py",
+        "path_type": "hardlink",
+        "sha256": "08e88044a2314ba786cfa07eeeff006f501c7cb248d4665f7c062b10a69663b8",
+        "size_in_bytes": 2213
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/subverb/remove.py",
+        "path_type": "hardlink",
+        "sha256": "7fc20c6d920e8e17ad78d907cf31827b49acd000627f19673af87bd43b746d7c",
+        "size_in_bytes": 1357
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/subverb/show.py",
+        "path_type": "hardlink",
+        "sha256": "6b5b21e5dcfdc800f7e18c5e64ce21a73a4bb2b7d7eaf642a9765135c0f1ff56",
+        "size_in_bytes": 3094
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/subverb/update.py",
+        "path_type": "hardlink",
+        "sha256": "4305f87a80622fe8785869b17e79969bda5841cdc155af2e8edce14e0ac743b3",
+        "size_in_bytes": 5936
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin-0.2.3.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin-0.2.3.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_in_bytes": 11358
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin-0.2.3.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "d4d29d85716277d2c76c19d11ae732e705992ac1d36cfb9f5b931bfe07f983b9",
+        "size_in_bytes": 1962
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin-0.2.3.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "6e7cffa387487fbdc4e45d76c0fbb1bb2683dcca3969db4b84986c96629c55ad",
+        "size_in_bytes": 2631
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin-0.2.3.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin-0.2.3.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "3d9504c5d7fbd548bfb28ebb417a724ae1ed0a2dfe277c2f1783912ba93f4bc5",
+        "size_in_bytes": 91
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin-0.2.3.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "6703e71c281c94c319ef61ddbf7ad9fc847ce281aef18d70eaf64dc9b244fe04",
+        "size_in_bytes": 108
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin-0.2.3.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "e06754c3f46c5abcef57be4b899529705b18152c1074f17b9b9bb55a1a6a7e1d",
+        "size_in_bytes": 634
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin-0.2.3.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "8cfc8bcca4c91fb03df3e08bd98cb80246e3aa0ca2568bc4052de06e145de7fd",
+        "size_in_bytes": 13
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin-0.2.3.dist-info/zip-safe",
+        "path_type": "hardlink",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "size_in_bytes": 1
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/verb/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_mixin/verb/mixin.py",
+        "path_type": "hardlink",
+        "sha256": "af7c8593e5d8376dfc4d67e17d427f4f0649f40b942d5ccfb8b3c310a4eb7b4f",
+        "size_in_bytes": 1166
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-mixin-0.2.3-pyhd8ed1ab_1",
+    "type": 1
+  }
+}

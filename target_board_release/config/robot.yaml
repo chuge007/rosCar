@@ -2,12 +2,19 @@ base_drive_node:
   ros__parameters:
     left_motor_id: 1
     right_motor_id: 2
-    left_motor_sign: 1
+    # 已按实机电机安装方向校验：物理前进为左 1 号负向、右 2 号正向。
+    left_motor_sign: -1
     right_motor_sign: 1
-    wheel_radius_m: 0.0
-    wheel_separation_m: 0.0
+    # Conservative measured values used by the local USB-CAN drive test.
+    wheel_radius_m: 0.04
+    wheel_separation_m: 0.30
     motor_output_to_wheel_ratio: 1.0
-    max_wheel_speed_m_s: 0.0
+    max_wheel_speed_m_s: 0.30
+    max_linear_speed_m_s: 0.15
+    max_angular_speed_rad_s: 1.00
+    max_linear_accel_m_s2: 0.50
+    max_angular_accel_rad_s2: 2.00
+    minimum_inner_wheel_ratio: 0.50
     command_timeout_ms: 200
     can_tx_topic: /can/tx
     can_rx_topic: /can/rx
@@ -16,7 +23,7 @@ slcan_can_bridge_node:
   ros__parameters:
     serial_port: ""
     serial_baud_rate: 115200
-    can_bitrate: 500000
+    can_bitrate: 1000000
     auto_open: false
     can_tx_topic: /can/tx
     can_rx_topic: /can/rx
@@ -81,12 +88,18 @@ mv3dlp_laser_node:
     # Relative to the release folder. The launcher sets the working directory.
     sdk_library_path: vendor/mv3dlp_sdk/Mv3dLp.dll
     frame_id: laser_link
-    acquisition_mode: range_image
+    # Use the SDK point-cloud image output. The camera's original_image mode
+    # is not an XYZ/depth frame and cannot be converted to PointCloud2.
+    acquisition_mode: point_cloud_image
+    trigger_mode: 0
+    # 7 is the trigger source used by the last known-good continuous capture configuration.
+    trigger_source: 7
     fetch_timeout_ms: 2000
     capture_period_ms: 33
     reconnect_delay_ms: 2000
     encoder_ticks_topic: /scan_encoder/ticks
     points_topic: /laser_profile/points
+    display_points_topic: /laser_profile/display_points
     profile_topic: /laser_profile/frame
 
 laser_path_follower_node:
@@ -149,3 +162,15 @@ laser_path_follower_node:
     integral_error_gate_m: 0.03
     max_angular_jerk_rad_s3: 2.0
     max_curvature_1pm: 8.0
+
+crawling_robot_monitor:
+  ros__parameters:
+    imu_topic: /imu/data
+    profile_topic: /laser_profile/frame
+    cmd_vel_topic: /cmd_vel
+    max_linear_speed_m_s: 0.15
+    max_angular_speed_rad_s: 1.00
+    max_linear_accel_m_s2: 0.50
+    max_angular_accel_rad_s2: 2.00
+    max_wheel_speed_m_s: 0.30
+    minimum_inner_wheel_ratio: 0.50

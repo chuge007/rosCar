@@ -1,0 +1,218 @@
+{
+  "build": "pyhd8ed1ab_1",
+  "build_number": 1,
+  "depends": [
+    "colcon-core",
+    "colcon-library-path",
+    "colcon-test-result >=0.3.3",
+    "python >=3.10"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "APACHE",
+  "md5": "b5b23d06f0def5724475bd12365f1aa5",
+  "name": "colcon-cmake",
+  "noarch": "python",
+  "sha256": "edc01069635b0bb7d9a58c1f36371d1c841ecf90b8e74397df418436209ce01c",
+  "size": 26257,
+  "subdir": "noarch",
+  "timestamp": 1757616401522,
+  "version": "0.2.29",
+  "fn": "colcon-cmake-0.2.29-pyhd8ed1ab_1.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/colcon-cmake-0.2.29-pyhd8ed1ab_1.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-cmake-0.2.29-pyhd8ed1ab_1",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/colcon_cmake/__init__.py",
+    "Lib/site-packages/colcon_cmake/package_identification/__init__.py",
+    "Lib/site-packages/colcon_cmake/package_identification/cmake.py",
+    "Lib/site-packages/colcon_cmake/event_handler/__init__.py",
+    "Lib/site-packages/colcon_cmake/event_handler/compile_commands.py",
+    "Lib/site-packages/colcon_cmake-0.2.29.dist-info/INSTALLER",
+    "Lib/site-packages/colcon_cmake-0.2.29.dist-info/METADATA",
+    "Lib/site-packages/colcon_cmake-0.2.29.dist-info/RECORD",
+    "Lib/site-packages/colcon_cmake-0.2.29.dist-info/REQUESTED",
+    "Lib/site-packages/colcon_cmake-0.2.29.dist-info/WHEEL",
+    "Lib/site-packages/colcon_cmake-0.2.29.dist-info/direct_url.json",
+    "Lib/site-packages/colcon_cmake-0.2.29.dist-info/entry_points.txt",
+    "Lib/site-packages/colcon_cmake-0.2.29.dist-info/top_level.txt",
+    "Lib/site-packages/colcon_cmake-0.2.29.dist-info/zip-safe",
+    "Lib/site-packages/colcon_cmake/test_result/__init__.py",
+    "Lib/site-packages/colcon_cmake/test_result/ctest.py",
+    "Lib/site-packages/colcon_cmake-0.2.29.dist-info/licenses/LICENSE",
+    "Lib/site-packages/colcon_cmake/argcomplete_completer/__init__.py",
+    "Lib/site-packages/colcon_cmake/argcomplete_completer/cmake_args.py",
+    "Lib/site-packages/colcon_cmake/task/cmake/__init__.py",
+    "Lib/site-packages/colcon_cmake/task/cmake/build.py",
+    "Lib/site-packages/colcon_cmake/task/cmake/test.py",
+    "Lib/site-packages/colcon_cmake/task/__init__.py",
+    "Lib/site-packages/colcon_cmake/environment/__init__.py",
+    "Lib/site-packages/colcon_cmake/environment/cmake_module_path.py",
+    "Lib/site-packages/colcon_cmake/environment/cmake_prefix_path.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/colcon_cmake/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "226e8bb181d143f8d0ca838b954c0b5bbe7824511fce647604df72f6e6e80a70",
+        "size_in_bytes": 107
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/package_identification/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/package_identification/cmake.py",
+        "path_type": "hardlink",
+        "sha256": "4de71905d8b80f7d6c3e2d5db437940306adacd56cf5670a83fef6d6e5157f8f",
+        "size_in_bytes": 8279
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/event_handler/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/event_handler/compile_commands.py",
+        "path_type": "hardlink",
+        "sha256": "08d2796a67c83818412e58caadfcf69a25e072819424d42767bf3a0f88061da1",
+        "size_in_bytes": 4937
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake-0.2.29.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake-0.2.29.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "eec69e2d97dbb0e51756ce12ceb063617f45bcbe36b19ae2d39fb6a5d147df74",
+        "size_in_bytes": 1992
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake-0.2.29.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "d84b5ebcde12f502acd58fdc36c95917750154022c495e335340435e11cd1ed7",
+        "size_in_bytes": 3523
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake-0.2.29.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake-0.2.29.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b",
+        "size_in_bytes": 91
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake-0.2.29.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "a31985141b2bde15eb142bcb00872d9914186b2998252e5f58d271a557db514e",
+        "size_in_bytes": 108
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake-0.2.29.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "3df1fb3238388d01f84ab8af0231b79c2c9722b3150d4df9f0e414992aac298c",
+        "size_in_bytes": 1000
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake-0.2.29.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "2eabb0ea2cd110777f1b7a2df4355ffe3aad0684dc67552577c14dc8e891a554",
+        "size_in_bytes": 13
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake-0.2.29.dist-info/zip-safe",
+        "path_type": "hardlink",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "size_in_bytes": 1
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/test_result/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/test_result/ctest.py",
+        "path_type": "hardlink",
+        "sha256": "7a8b6c7847593b85dfcff470896b0c6346f4f5baa4bc057bd966eab9f255487e",
+        "size_in_bytes": 4196
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake-0.2.29.dist-info/licenses/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_in_bytes": 11358
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/argcomplete_completer/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/argcomplete_completer/cmake_args.py",
+        "path_type": "hardlink",
+        "sha256": "2af2a9f20f02c02b6910509af11b4eca30e2e5e365c7cd1254147c21f2a2299e",
+        "size_in_bytes": 1480
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/task/cmake/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "aff869bf1b877ea8fa9cfa386e472842f9007bd23ea9e25c2efb1f8323a2982d",
+        "size_in_bytes": 10669
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/task/cmake/build.py",
+        "path_type": "hardlink",
+        "sha256": "ebdcb781e89c3cb459875386ae58725af04d7099fee59e578cdd0c569cb7688a",
+        "size_in_bytes": 13888
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/task/cmake/test.py",
+        "path_type": "hardlink",
+        "sha256": "5f5551f0a98aa0b16d308e91844fe9127b048539de925569c593b70297175220",
+        "size_in_bytes": 5653
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/task/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/environment/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/environment/cmake_module_path.py",
+        "path_type": "hardlink",
+        "sha256": "bc3dd789b9dfccca73b47e8b03b6fcaa20362e8c7925b612fe024815e3e127b9",
+        "size_in_bytes": 4607
+      },
+      {
+        "_path": "Lib/site-packages/colcon_cmake/environment/cmake_prefix_path.py",
+        "path_type": "hardlink",
+        "sha256": "0c6a682fe87f7d2de7a394f1e565de6dac3e94824d67c72679b8ab45e4e07471",
+        "size_in_bytes": 1300
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-cmake-0.2.29-pyhd8ed1ab_1",
+    "type": 1
+  }
+}

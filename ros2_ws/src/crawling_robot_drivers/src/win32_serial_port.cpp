@@ -91,7 +91,24 @@ std::size_t Win32SerialPort::read(std::uint8_t* destination, std::size_t capacit
   if (!isOpen()) {
     throw std::runtime_error("Serial port is not open.");
   }
-  const DWORD request = static_cast<DWORD>(std::min<std::size_t>(capacity, MAXDWORD));
+  if (capacity == 0) {
+    return 0;
+  }
+
+  // Do not rely on COMMTIMEOUTS alone for a zero-byte read. Some USB-serial
+  // drivers still block ReadFile until a byte arrives, which stalls the CAN
+  // bridge timer and lets the transmit queue fill with stale commands.
+  COMSTAT status{};
+  DWORD errors = 0;
+  if (!ClearCommError(asHandle(handle_), &errors, &status)) {
+    throw std::runtime_error(lastError("Checking serial input"));
+  }
+  if (status.cbInQue == 0) {
+    return 0;
+  }
+
+  const DWORD request = static_cast<DWORD>(
+      std::min<std::size_t>(std::min<std::size_t>(capacity, status.cbInQue), MAXDWORD));
   DWORD read_count = 0;
   if (!ReadFile(asHandle(handle_), destination, request, &read_count, nullptr)) {
     throw std::runtime_error(lastError("Reading serial port"));

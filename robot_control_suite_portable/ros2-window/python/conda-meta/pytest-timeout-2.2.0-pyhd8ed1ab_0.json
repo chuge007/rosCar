@@ -1,0 +1,104 @@
+{
+  "build": "pyhd8ed1ab_0",
+  "build_number": 0,
+  "depends": [
+    "pytest >=5.0.0",
+    "python >=3.7"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "29039d5c3c5dea77ba64b8dfccd641a3",
+  "name": "pytest-timeout",
+  "noarch": "python",
+  "sha256": "1c3baaa6762aabc503c37aba7bfa6bb92e1e323ba7412e735b642e0ad83ce89c",
+  "size": 18355,
+  "subdir": "noarch",
+  "timestamp": 1696770193274,
+  "version": "2.2.0",
+  "fn": "pytest-timeout-2.2.0-pyhd8ed1ab_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/pytest-timeout-2.2.0-pyhd8ed1ab_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\pytest-timeout-2.2.0-pyhd8ed1ab_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/pytest_timeout-2.2.0.dist-info/INSTALLER",
+    "Lib/site-packages/pytest_timeout-2.2.0.dist-info/LICENSE",
+    "Lib/site-packages/pytest_timeout-2.2.0.dist-info/METADATA",
+    "Lib/site-packages/pytest_timeout-2.2.0.dist-info/RECORD",
+    "Lib/site-packages/pytest_timeout-2.2.0.dist-info/REQUESTED",
+    "Lib/site-packages/pytest_timeout-2.2.0.dist-info/WHEEL",
+    "Lib/site-packages/pytest_timeout-2.2.0.dist-info/direct_url.json",
+    "Lib/site-packages/pytest_timeout-2.2.0.dist-info/entry_points.txt",
+    "Lib/site-packages/pytest_timeout-2.2.0.dist-info/top_level.txt",
+    "Lib/site-packages/pytest_timeout.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/pytest_timeout-2.2.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/pytest_timeout-2.2.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "1e66470a1b2dbf6395b236bb2c14a4fbd563812101447558d317d2cd4281cece",
+        "size_in_bytes": 1085
+      },
+      {
+        "_path": "Lib/site-packages/pytest_timeout-2.2.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "6653a5adf8f45fd6a79a874c1cf5123b1b7e4f8b141438354aa1c0f55e360f75",
+        "size_in_bytes": 17448
+      },
+      {
+        "_path": "Lib/site-packages/pytest_timeout-2.2.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "f5b806ad839d88dd0b80cea2b3b77117faa2dc7927da73952112b7a13f45cfdb",
+        "size_in_bytes": 945
+      },
+      {
+        "_path": "Lib/site-packages/pytest_timeout-2.2.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/pytest_timeout-2.2.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "c903798389a0e00c9b4639208bef72cb889010589b1909a5cfbf0f8a4e4eafe0",
+        "size_in_bytes": 92
+      },
+      {
+        "_path": "Lib/site-packages/pytest_timeout-2.2.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "84ea3a37a9eaed119ecb448585ed81793abf13ddf023654ef6d23a63a2e069b8",
+        "size_in_bytes": 110
+      },
+      {
+        "_path": "Lib/site-packages/pytest_timeout-2.2.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "1a8e3a0a6bb10153d96ec3fa916b131c10f1cef0079f3d47d5085717d03f7a74",
+        "size_in_bytes": 36
+      },
+      {
+        "_path": "Lib/site-packages/pytest_timeout-2.2.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "ea0d6a4cd670564534f3e1dae4146b30c8ffbb3944b60daf1556f3283c1c22bf",
+        "size_in_bytes": 15
+      },
+      {
+        "_path": "Lib/site-packages/pytest_timeout.py",
+        "path_type": "hardlink",
+        "sha256": "e825bcbb3f31251745151fa45518c959cf623d8025e17f8fe5117fbb1e594c76",
+        "size_in_bytes": 17584
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\pytest-timeout-2.2.0-pyhd8ed1ab_0",
+    "type": 1
+  }
+}

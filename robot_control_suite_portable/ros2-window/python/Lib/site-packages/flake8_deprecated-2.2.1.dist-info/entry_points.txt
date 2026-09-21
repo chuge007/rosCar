@@ -1,0 +1,2 @@
+[flake8.extension]
+D001 = flake8_deprecated:Flake8Deprecated

@@ -1,0 +1,14 @@
+prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
+exec_prefix=${prefix}
+libdir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib
+includedir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/include
+
+Name: libavcodec
+Description: FFmpeg codec library
+Version: 60.31.102
+Requires: 
+Requires.private: libswresample >= 4.12.100, libavutil >= 58.29.100
+Conflicts:
+Libs: -L${libdir}  -lavcodec 
+Libs.private: iconv.lib lzma.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib dav1d.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib aom.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib opus.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib SvtAv1Enc.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib libx264.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib x265.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib openh264.lib mfuuid.lib ole32.lib strmiids.lib ole32.lib user32.lib -LD:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib zlib.lib
+Cflags: -I${includedir}

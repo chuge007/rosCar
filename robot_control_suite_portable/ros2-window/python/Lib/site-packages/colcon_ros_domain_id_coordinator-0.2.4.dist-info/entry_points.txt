@@ -1,0 +1,5 @@
+[colcon_core.event_handler]
+ros_domain_id = colcon_ros_domain_id_coordinator.shell.ros_domain_id:ROSDomainIDShell
+
+[colcon_core.shell]
+ros_domain_id = colcon_ros_domain_id_coordinator.shell.ros_domain_id:ROSDomainIDShell

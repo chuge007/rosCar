@@ -1,0 +1,104 @@
+{
+  "build": "pyhd8ed1ab_0",
+  "build_number": 0,
+  "depends": [
+    "flake8",
+    "python >=3.7"
+  ],
+  "license": "GPL-2.0-only",
+  "license_family": "GPL2",
+  "md5": "3c29cd1983018e45a22cacdaced31f95",
+  "name": "flake8-builtins",
+  "noarch": "python",
+  "sha256": "e86c99eac6bee08f68822684ff26784e7291e1ad972c6158d75c6748c3cc7800",
+  "size": 18131,
+  "subdir": "noarch",
+  "timestamp": 1671823588776,
+  "version": "2.1.0",
+  "fn": "flake8-builtins-2.1.0-pyhd8ed1ab_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/flake8-builtins-2.1.0-pyhd8ed1ab_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\flake8-builtins-2.1.0-pyhd8ed1ab_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/flake8_builtins-2.1.0.dist-info/INSTALLER",
+    "Lib/site-packages/flake8_builtins-2.1.0.dist-info/LICENSE",
+    "Lib/site-packages/flake8_builtins-2.1.0.dist-info/METADATA",
+    "Lib/site-packages/flake8_builtins-2.1.0.dist-info/RECORD",
+    "Lib/site-packages/flake8_builtins-2.1.0.dist-info/REQUESTED",
+    "Lib/site-packages/flake8_builtins-2.1.0.dist-info/WHEEL",
+    "Lib/site-packages/flake8_builtins-2.1.0.dist-info/direct_url.json",
+    "Lib/site-packages/flake8_builtins-2.1.0.dist-info/entry_points.txt",
+    "Lib/site-packages/flake8_builtins-2.1.0.dist-info/top_level.txt",
+    "Lib/site-packages/flake8_builtins.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/flake8_builtins-2.1.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/flake8_builtins-2.1.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+        "size_in_bytes": 18092
+      },
+      {
+        "_path": "Lib/site-packages/flake8_builtins-2.1.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "f4008ca7da502e8bc6974aaec431c08c1e132f94a0addc76119c47ebb70ffe8d",
+        "size_in_bytes": 8608
+      },
+      {
+        "_path": "Lib/site-packages/flake8_builtins-2.1.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "9cc750c4fd621d5411f214469a8464717a399f02b7fa50f86949e0149956f281",
+        "size_in_bytes": 955
+      },
+      {
+        "_path": "Lib/site-packages/flake8_builtins-2.1.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/flake8_builtins-2.1.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "db07a93359e4e034b8785a58ad6d534ea3dca0635f1e184efe2e66e1c3a299ba",
+        "size_in_bytes": 92
+      },
+      {
+        "_path": "Lib/site-packages/flake8_builtins-2.1.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "dbb5f3215233b45456fdae3887f8590a8c27438c715eca35627aa0eb18f980ad",
+        "size_in_bytes": 111
+      },
+      {
+        "_path": "Lib/site-packages/flake8_builtins-2.1.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "5b6fc10d0d69e144e34c2c04ae52c37d0c604b8f278dca57cf7606f4344bc488",
+        "size_in_bytes": 57
+      },
+      {
+        "_path": "Lib/site-packages/flake8_builtins-2.1.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "9776ac897b55f3d6d8e9c68ba6d0c93867e0a96643ef33f75923e3ee8256e997",
+        "size_in_bytes": 16
+      },
+      {
+        "_path": "Lib/site-packages/flake8_builtins.py",
+        "path_type": "hardlink",
+        "sha256": "047369b3e24b5511da950a25b308b8cd1758cd55957e25a5861fc0cef3cd29ed",
+        "size_in_bytes": 8560
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\flake8-builtins-2.1.0-pyhd8ed1ab_0",
+    "type": 1
+  }
+}

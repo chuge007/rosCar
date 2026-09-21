@@ -1,0 +1,34 @@
+{
+  "arch": "x86_64",
+  "build": "h6d21bc8_5",
+  "build_number": 5,
+  "depends": [
+    "bullet-cpp 3.25 hc128f0a_5",
+    "numpy",
+    "pybullet 3.25 py312h3d6c809_5",
+    "python"
+  ],
+  "license": "Zlib",
+  "md5": "b0d61f357032e7f10a12a871bdd9784b",
+  "name": "bullet",
+  "platform": "win",
+  "sha256": "23527ede1259c76cf61151e46e7fc2cedf5d987a8e91a31d0afe00ba59674edc",
+  "size": 12095,
+  "subdir": "win-64",
+  "timestamp": 1761043917282,
+  "version": "3.25",
+  "fn": "bullet-3.25-h6d21bc8_5.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/bullet-3.25-h6d21bc8_5.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\bullet-3.25-h6d21bc8_5",
+  "requested_specs": [],
+  "files": [],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": []
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\bullet-3.25-h6d21bc8_5",
+    "type": 1
+  }
+}

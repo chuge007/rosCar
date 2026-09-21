@@ -1,0 +1,111 @@
+{
+  "build": "py_0",
+  "build_number": 0,
+  "depends": [
+    "colcon-core",
+    "python >=3.5"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "APACHE",
+  "md5": "434ecb5d163df485879081aedebd59bf",
+  "name": "colcon-pkg-config",
+  "noarch": "python",
+  "sha256": "c8c6baf7ba174c908d501c6df577c140de73f46aadea09a6b3aaf405406e3b5a",
+  "size": 10397,
+  "subdir": "noarch",
+  "timestamp": 1571038968482,
+  "version": "0.1.0",
+  "fn": "colcon-pkg-config-0.1.0-py_0.tar.bz2",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/colcon-pkg-config-0.1.0-py_0.tar.bz2",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-pkg-config-0.1.0-py_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/colcon_pkg_config/environment/__init__.py",
+    "Lib/site-packages/colcon_pkg_config/environment/pkg_config.py",
+    "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/INSTALLER",
+    "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/LICENSE",
+    "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/METADATA",
+    "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/RECORD",
+    "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/WHEEL",
+    "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/entry_points.txt",
+    "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/top_level.txt",
+    "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/zip-safe",
+    "Lib/site-packages/colcon_pkg_config/__init__.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config/environment/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config/environment/pkg_config.py",
+        "path_type": "hardlink",
+        "sha256": "40cdcf6a366de884eca24e7ba6fcb0eb9280099ad61abda5c8945a5ddef82afb",
+        "size_in_bytes": 1197
+      },
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "size_in_bytes": 11358
+      },
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "4f244524df11b350b5a2d1a00a292830ab48d5448adb8b6ace7391e2bdc25ddc",
+        "size_in_bytes": 1148
+      },
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "d5f5c61a08eeab9b471d363a9b3d23d1793ec6939810d330f3ad4b8f510c5c26",
+        "size_in_bytes": 1224
+      },
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "c18058d843b9d0584071c9295a63b77376709363002c00b1ea53c097a8152a71",
+        "size_in_bytes": 93
+      },
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "253059713fa3d44302932b29f7f48fd5d300e95e411d8ec638a9b35da0a739c5",
+        "size_in_bytes": 102
+      },
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "8197738cdf6674d5c72d89de5a4eb97ce972c978a33b5109a9a4954a1728acfb",
+        "size_in_bytes": 18
+      },
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config-0.1.0.dist-info/zip-safe",
+        "path_type": "hardlink",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "size_in_bytes": 1
+      },
+      {
+        "_path": "Lib/site-packages/colcon_pkg_config/__init__.py",
+        "path_type": "hardlink",
+        "sha256": "ce229a328e5cde1581bf834c9054c932c3e7ed5508117da5449537f9b1ac6ad0",
+        "size_in_bytes": 101
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\colcon-pkg-config-0.1.0-py_0",
+    "type": 1
+  }
+}

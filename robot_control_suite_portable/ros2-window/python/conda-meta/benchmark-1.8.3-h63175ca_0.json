@@ -1,0 +1,228 @@
+{
+  "arch": "x86_64",
+  "build": "h63175ca_0",
+  "build_number": 0,
+  "depends": [
+    "ucrt >=10.0.20348.0",
+    "vc >=14.2,<15",
+    "vc14_runtime >=14.29.30139"
+  ],
+  "license": "Apache-2.0",
+  "license_family": "Apache",
+  "md5": "91a06b23c7e3b36f008cfc42dd03e783",
+  "name": "benchmark",
+  "platform": "win",
+  "sha256": "537051529820cc13c10bade6aae9e8f286b3ee9706100741187e99c2ef344941",
+  "size": 212944,
+  "subdir": "win-64",
+  "timestamp": 1693564828142,
+  "version": "1.8.3",
+  "fn": "benchmark-1.8.3-h63175ca_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/win-64/benchmark-1.8.3-h63175ca_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\benchmark-1.8.3-h63175ca_0",
+  "requested_specs": [],
+  "files": [
+    "Library/share/doc/benchmark/assets/images/icon.png",
+    "Library/share/doc/benchmark/assets/images/icon.xcf",
+    "Library/share/doc/benchmark/assets/images/icon_black.png",
+    "Library/share/doc/benchmark/assets/images/icon_black.xcf",
+    "Library/bin/benchmark.dll",
+    "Library/bin/benchmark_main.dll",
+    "Library/include/benchmark/benchmark.h",
+    "Library/include/benchmark/export.h",
+    "Library/lib/benchmark.lib",
+    "Library/lib/benchmark_main.lib",
+    "Library/lib/cmake/benchmark/benchmarkConfig.cmake",
+    "Library/lib/cmake/benchmark/benchmarkConfigVersion.cmake",
+    "Library/lib/cmake/benchmark/benchmarkTargets-release.cmake",
+    "Library/lib/cmake/benchmark/benchmarkTargets.cmake",
+    "Library/lib/pkgconfig/benchmark.pc",
+    "Library/share/doc/benchmark/AssemblyTests.md",
+    "Library/share/doc/benchmark/_config.yml",
+    "Library/share/doc/benchmark/dependencies.md",
+    "Library/share/doc/benchmark/index.md",
+    "Library/share/doc/benchmark/perf_counters.md",
+    "Library/share/doc/benchmark/platform_specific_build_instructions.md",
+    "Library/share/doc/benchmark/python_bindings.md",
+    "Library/share/doc/benchmark/random_interleaving.md",
+    "Library/share/doc/benchmark/reducing_variance.md",
+    "Library/share/doc/benchmark/releasing.md",
+    "Library/share/doc/benchmark/tools.md",
+    "Library/share/doc/benchmark/user_guide.md"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Library/share/doc/benchmark/assets/images/icon.png",
+        "path_type": "hardlink",
+        "sha256": "61aace4f506b43a100adf6020509023fc7420234501e1c0e568e5ddba86db63b",
+        "size_in_bytes": 11106
+      },
+      {
+        "_path": "Library/share/doc/benchmark/assets/images/icon.xcf",
+        "path_type": "hardlink",
+        "sha256": "45aa432b27648b5003604666b2f1d4d043efd55b3ffd2e4afe91a18662207de4",
+        "size_in_bytes": 25934
+      },
+      {
+        "_path": "Library/share/doc/benchmark/assets/images/icon_black.png",
+        "path_type": "hardlink",
+        "sha256": "24dceea1d8b95df3e929b0d79a05be9e6abafcdf0526325206beaf28993ecec6",
+        "size_in_bytes": 11559
+      },
+      {
+        "_path": "Library/share/doc/benchmark/assets/images/icon_black.xcf",
+        "path_type": "hardlink",
+        "sha256": "6c925911ccce1e4887697c7c9cd8c07695306739ab2edc04f03704f0927c90d5",
+        "size_in_bytes": 36322
+      },
+      {
+        "_path": "Library/bin/benchmark.dll",
+        "path_type": "hardlink",
+        "sha256": "f7e05e5c0b95e4fcda7234536a309cd40bc8526875b2bcafe0bf770d2784818a",
+        "size_in_bytes": 272384
+      },
+      {
+        "_path": "Library/bin/benchmark_main.dll",
+        "path_type": "hardlink",
+        "sha256": "1ce350508a597b07e81bbd01574f6c6622602a2e7ce06ede08949213f924d083",
+        "size_in_bytes": 43008
+      },
+      {
+        "_path": "Library/include/benchmark/benchmark.h",
+        "path_type": "hardlink",
+        "sha256": "8ef82b9faf75ae9a99b26f4076f7621cce8dea24bfd941eaca61f438934707b9",
+        "size_in_bytes": 72385
+      },
+      {
+        "_path": "Library/include/benchmark/export.h",
+        "path_type": "hardlink",
+        "sha256": "d2de28d4d9b82bfef5636ad2d88ac464e130a55b810f110c7f47203d6ba0d5e2",
+        "size_in_bytes": 1481
+      },
+      {
+        "_path": "Library/lib/benchmark.lib",
+        "path_type": "hardlink",
+        "sha256": "a519600b2ca095c6c4753ac00cfb497598e8d8ca4e06bf1f1f02a66df01cf57e",
+        "size_in_bytes": 114520
+      },
+      {
+        "_path": "Library/lib/benchmark_main.lib",
+        "path_type": "hardlink",
+        "sha256": "7412aa783a844ec649e8bd95134158fa82bc86415cb9202e7734d0c03a670798",
+        "size_in_bytes": 28826
+      },
+      {
+        "_path": "Library/lib/cmake/benchmark/benchmarkConfig.cmake",
+        "path_type": "hardlink",
+        "sha256": "d3936d5fd494eaa48ceb4d4eb7b23038457e73260f77cc9f63e21cd51f52748d",
+        "size_in_bytes": 555
+      },
+      {
+        "_path": "Library/lib/cmake/benchmark/benchmarkConfigVersion.cmake",
+        "path_type": "hardlink",
+        "sha256": "f1a53bab346c6578ff6e894ef8d434debccb7631b7b82414f96f642833517dd1",
+        "size_in_bytes": 2827
+      },
+      {
+        "_path": "Library/lib/cmake/benchmark/benchmarkTargets-release.cmake",
+        "path_type": "hardlink",
+        "sha256": "57f166277a5927f2b78381a16b0b15d876591a3e881ee4c0518f17ce4c3ca1a5",
+        "size_in_bytes": 1554
+      },
+      {
+        "_path": "Library/lib/cmake/benchmark/benchmarkTargets.cmake",
+        "path_type": "hardlink",
+        "sha256": "8f43617183d70b2a0ae5226bfcd50cf23f5de27ef235d110e6f8c97815fd0335",
+        "size_in_bytes": 4477
+      },
+      {
+        "_path": "Library/lib/pkgconfig/benchmark.pc",
+        "path_type": "hardlink",
+        "sha256": "b7ac893e5f97644e92d927f911888f0d96983c0d3675c315656a900d6ac7344e",
+        "sha256_in_prefix": "1169e2dff5a11df9df535e4ec73b8e14a4ab94d9c2ec12ac707fcd1dc308626a",
+        "size_in_bytes": 392,
+        "file_mode": "text",
+        "prefix_placeholder": "D:/bld/benchmark_1693564482313/_h_env"
+      },
+      {
+        "_path": "Library/share/doc/benchmark/AssemblyTests.md",
+        "path_type": "hardlink",
+        "sha256": "f3dd4d1ccb04e1836c00f3a7cfaf636610f5fde315fd91d7a808afd2fd9a96c3",
+        "size_in_bytes": 5324
+      },
+      {
+        "_path": "Library/share/doc/benchmark/_config.yml",
+        "path_type": "hardlink",
+        "sha256": "7c8e50e0f2d5346de683277eba604d99bb2c8b121a1fe2e19a6b8b15aa5a599a",
+        "size_in_bytes": 85
+      },
+      {
+        "_path": "Library/share/doc/benchmark/dependencies.md",
+        "path_type": "hardlink",
+        "sha256": "c7c64533f9352aa2520a15ddeb074bb9b2751962f702c45f7c7e668f78345e44",
+        "size_in_bytes": 543
+      },
+      {
+        "_path": "Library/share/doc/benchmark/index.md",
+        "path_type": "hardlink",
+        "sha256": "8fa1ea40391734c90f2c61f2bdad8d51b248b432dec08a6e1d01f7545ceef4d9",
+        "size_in_bytes": 412
+      },
+      {
+        "_path": "Library/share/doc/benchmark/perf_counters.md",
+        "path_type": "hardlink",
+        "sha256": "3d94fb31f0f0c206ed09fdc49ce360c449b592a7362ca3fab0785c0def39fa6c",
+        "size_in_bytes": 1567
+      },
+      {
+        "_path": "Library/share/doc/benchmark/platform_specific_build_instructions.md",
+        "path_type": "hardlink",
+        "sha256": "daf7194cc2acecc7e12bc751d5572e9ac5f35eb37354bb837b8d45a8b3d749d7",
+        "size_in_bytes": 1997
+      },
+      {
+        "_path": "Library/share/doc/benchmark/python_bindings.md",
+        "path_type": "hardlink",
+        "sha256": "69f8cb873b84fdff0e5d54f3ae01e439d3e26c3e23305be86c900986023daf43",
+        "size_in_bytes": 1442
+      },
+      {
+        "_path": "Library/share/doc/benchmark/random_interleaving.md",
+        "path_type": "hardlink",
+        "sha256": "e68c0e88e2323b82c119b21417f925aab77d9017bbb615393d836da971f214ed",
+        "size_in_bytes": 647
+      },
+      {
+        "_path": "Library/share/doc/benchmark/reducing_variance.md",
+        "path_type": "hardlink",
+        "sha256": "5113374fdebba959a1dbffcd3a51e985b03217ea74bd392a5979a180c31ca3a1",
+        "size_in_bytes": 3701
+      },
+      {
+        "_path": "Library/share/doc/benchmark/releasing.md",
+        "path_type": "hardlink",
+        "sha256": "561847bc05f444d2ccc10b871b1e7ec6b16d07f8b8b8f547786072cf8607e2bb",
+        "size_in_bytes": 1351
+      },
+      {
+        "_path": "Library/share/doc/benchmark/tools.md",
+        "path_type": "hardlink",
+        "sha256": "b87daa6d90dede4916bd561f55ae298a08327c4baf0aac1800b9b2de9e2d84ab",
+        "size_in_bytes": 19213
+      },
+      {
+        "_path": "Library/share/doc/benchmark/user_guide.md",
+        "path_type": "hardlink",
+        "sha256": "1226f420ecd8353dcd494fe71ebedb3e7a66477886698af08b8d79e08fb671dd",
+        "size_in_bytes": 43746
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\benchmark-1.8.3-h63175ca_0",
+    "type": 1
+  }
+}

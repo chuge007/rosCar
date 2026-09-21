@@ -11,6 +11,9 @@ param(
     [string]$CxxCompiler = "",
     [string]$CCompiler = "",
     [string]$Package = "",
+    [int]$ParallelWorkers = 0,
+    [switch]$BuildTests,
+    [switch]$Reconfigure,
     [switch]$NoBuild,
     [switch]$NoSync
 )
@@ -23,8 +26,10 @@ if ([string]::IsNullOrWhiteSpace($RosRoot)) { $RosRoot = $env:ROS_DISTRO_ROOT }
 if ([string]::IsNullOrWhiteSpace($RosRoot) -and (Test-Path -LiteralPath "D:\ros2\ros2-window")) {
     $RosRoot = "D:\ros2\ros2-window"
 }
-if ([string]::IsNullOrWhiteSpace($BuildBase)) { $BuildBase = Join-Path $repoRoot "tmp\incremental_build" }
-if ([string]::IsNullOrWhiteSpace($InstallBase)) { $InstallBase = Join-Path $repoRoot "tmp\incremental_install" }
+if ([string]::IsNullOrWhiteSpace($BuildBase)) { $BuildBase = Join-Path $ReleaseRoot "build" }
+# Keep the incremental install overlay in the release tree. This is the
+# artifact that is later copied to the target board over SSH.
+if ([string]::IsNullOrWhiteSpace($InstallBase)) { $InstallBase = Join-Path $ReleaseRoot "install" }
 if ([string]::IsNullOrWhiteSpace($LogBase)) { $LogBase = Join-Path $repoRoot "tmp\incremental_log" }
 if ([string]::IsNullOrWhiteSpace($TargetRoot)) { $TargetRoot = $ReleaseRoot }
 if ([string]::IsNullOrWhiteSpace($CxxCompiler)) {
@@ -84,6 +89,7 @@ if (-not $NoBuild) {
     ) | Where-Object { Test-Path -LiteralPath $_ }
     if (-not $pythonCandidates) { throw "No Python executable was found below '$RosRoot'." }
     $pythonExecutable = $pythonCandidates | Select-Object -First 1
+    $pythonCmakePath = $pythonExecutable.Replace('\', '/')
     $env:COLCON_PYTHON_EXECUTABLE = $pythonExecutable
     $pixiEnvRoot = Join-Path $RosRoot ".pixi\envs\default"
     $pathEntries = @(
@@ -109,7 +115,8 @@ if (-not $NoBuild) {
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_CXX_STANDARD=17",
         "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
-        "-DPython3_EXECUTABLE=$pythonExecutable",
+        "-DBUILD_TESTING=$(if ($BuildTests) { 'ON' } else { 'OFF' })",
+        "-DPython3_EXECUTABLE=$pythonCmakePath",
         "-DPython3_FIND_STRATEGY=LOCATION"
     )
     if ($CmakeGenerator) { $cmakeArgs += @("-G", $CmakeGenerator) }
@@ -121,7 +128,32 @@ if (-not $NoBuild) {
         $packageNames = ($Package -split ",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
         $packageArgs = " --packages-up-to " + (($packageNames | ForEach-Object { '"' + $_ + '"' }) -join " ")
     }
-    $buildCommand = "call `"$(Join-Path $RosRoot 'local_setup.bat')`" && colcon --log-base `"$LogBase`" build --merge-install --build-base `"$BuildBase`" --install-base `"$InstallBase`"$packageArgs --cmake-args $cmakeArgText"
+    $workerArgs = ""
+    if ($ParallelWorkers -gt 0) {
+        $workerArgs = " --parallel-workers $ParallelWorkers"
+    }
+    $cleanCacheArgs = ""
+    if ($Reconfigure) {
+        $cleanCacheArgs = " --cmake-clean-cache"
+    } else {
+        # A CMake cache keeps its original install prefix. When an existing
+        # build tree is reused with a different overlay, generated headers
+        # can be installed under the old prefix while dependents search the
+        # new one. Detect that one-time migration and reconfigure only then.
+        $expectedPrefix = $InstallBase.Replace('\', '/')
+        $cacheFiles = Get-ChildItem -LiteralPath $BuildBase -Recurse -Filter "CMakeCache.txt" -File -ErrorAction SilentlyContinue
+        foreach ($cache in $cacheFiles) {
+            $prefixLine = Select-String -LiteralPath $cache.FullName -Pattern '^CMAKE_INSTALL_PREFIX:PATH=(.+)$' -SimpleMatch:$false |
+                Select-Object -First 1
+            if ($prefixLine -and $prefixLine.Matches[0].Groups[1].Value.Replace('\', '/') -ne $expectedPrefix) {
+                $cleanCacheArgs = " --cmake-clean-cache"
+                Write-Host "CMake install prefix changed; reconfiguring affected cache(s)." -ForegroundColor Yellow
+                break
+            }
+        }
+    }
+    $buildCommand = "call `"$(Join-Path $RosRoot 'local_setup.bat')`" && colcon --log-base `"$LogBase`" build --merge-install --base-paths src --build-base `"$BuildBase`" --install-base `"$InstallBase`"$packageArgs$workerArgs$cleanCacheArgs --cmake-args $cmakeArgText"
+    Write-Host "Incremental install output: $InstallBase" -ForegroundColor DarkGray
     Write-Host "Incremental build: $buildCommand" -ForegroundColor DarkGray
     Push-Location $WorkspaceRoot
     try {
@@ -138,9 +170,42 @@ if (-not $NoSync) {
     Require-Path (Join-Path $TargetRoot "runtime") "bundled runtime in target/release directory"
     $destinationInstall = Join-Path $TargetRoot "install"
     New-Item -ItemType Directory -Force -Path $destinationInstall | Out-Null
-    & robocopy.exe $InstallBase $destinationInstall /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-    if ($LASTEXITCODE -gt 7) { throw "Failed to sync install overlay (robocopy exit $LASTEXITCODE)." }
+    if ([IO.Path]::GetFullPath($InstallBase) -ne [IO.Path]::GetFullPath($destinationInstall)) {
+        & robocopy.exe $InstallBase $destinationInstall /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+        if ($LASTEXITCODE -gt 7) { throw "Failed to sync install overlay (robocopy exit $LASTEXITCODE)." }
+    } else {
+        Write-Host "Install overlay is already the target overlay; skipping duplicate copy." -ForegroundColor DarkGray
+    }
     Repair-RelocatableOverlay $destinationInstall
+    $releaseFiles = @(
+        "run_robot.ps1",
+        "run_drive_test.ps1",
+        "run_drive_test.cmd",
+        "stop_robot.ps1",
+        "start_monitor.cmd"
+    )
+    foreach ($releaseFile in $releaseFiles) {
+        $sourcePath = Join-Path $repoRoot "target_board_release\$releaseFile"
+        if (-not (Test-Path -LiteralPath $sourcePath)) {
+            throw "Required release launcher file is missing: $sourcePath"
+        }
+        $destinationPath = Join-Path $TargetRoot $releaseFile
+        if ([IO.Path]::GetFullPath($sourcePath) -ne [IO.Path]::GetFullPath($destinationPath)) {
+            Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+        }
+    }
+    $targetConfig = Join-Path $TargetRoot "config"
+    New-Item -ItemType Directory -Force -Path $targetConfig | Out-Null
+    foreach ($configFile in @("robot.yaml", "drive_test.yaml", "fastdds_profile.xml")) {
+        $sourcePath = Join-Path $repoRoot "target_board_release\config\$configFile"
+        if (-not (Test-Path -LiteralPath $sourcePath)) {
+            throw "Required release configuration file is missing: $sourcePath"
+        }
+        $destinationPath = Join-Path $targetConfig $configFile
+        if ([IO.Path]::GetFullPath($sourcePath) -ne [IO.Path]::GetFullPath($destinationPath)) {
+            Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+        }
+    }
     Write-Host "Updated target overlay: $destinationInstall" -ForegroundColor Green
 }
 Write-Host "Incremental update complete. Runtime and ZIP were not rebuilt." -ForegroundColor Green

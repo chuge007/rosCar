@@ -1,0 +1,13 @@
+prefix=C:/ci/ws/install/opt/rviz_ogre_vendor
+exec_prefix=C:/ci/ws/install/opt/rviz_ogre_vendor
+libdir=C:/ci/ws/build/rviz_ogre_vendor/zlib_vendor-prefix/install/lib
+sharedlibdir=C:/ci/ws/build/rviz_ogre_vendor/zlib_vendor-prefix/install/lib
+includedir=C:/ci/ws/build/rviz_ogre_vendor/zlib_vendor-prefix/install/include
+
+Name: zlib
+Description: zlib compression library
+Version: 1.3
+
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lz
+Cflags: -I${includedir}

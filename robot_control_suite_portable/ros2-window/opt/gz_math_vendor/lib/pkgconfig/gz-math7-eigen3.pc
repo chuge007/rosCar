@@ -1,0 +1,12 @@
+prefix=${pcfiledir}/../../
+libdir=${prefix}/lib
+includedir=${prefix}/include/gz/math7
+
+Name: Gazebo math eigen3
+Description: A set of math eigen3 classes for robot applications
+Version: 7.5.2
+Requires: eigen3 gz-math7 = 7.5.2
+Requires.private: 
+Libs: -L${libdir}  
+Libs.private: 
+CFLags: -I${includedir} 

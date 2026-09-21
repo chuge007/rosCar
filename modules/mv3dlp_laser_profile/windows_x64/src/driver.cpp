@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -207,6 +209,8 @@ public:
             handle = nullptr;
             connected = false;
         }
+        image_queue.clear();
+        image_condition.notify_all();
     }
 
     void ensureConnected() const {
@@ -226,6 +230,13 @@ public:
         throwIfError(
             sdk.registerExceptionCallBack(handle, &Impl::exceptionCallbackThunk, this),
             "MV3D_LP_RegisterExceptionCallBack failed");
+    }
+
+    void registerImageCallbackLocked() {
+        ensureConnected();
+        throwIfError(
+            sdk.registerImageDataCallBack(handle, &Impl::imageCallbackThunk, this),
+            "MV3D_LP_RegisterImageDataCallBack failed");
     }
 
     void onException(vendor::ExceptionInfoRaw* info) {
@@ -257,6 +268,36 @@ public:
         }
     }
 
+    void onImage(vendor::ImageDataRaw* raw) {
+        if (raw == nullptr) {
+            return;
+        }
+        Frame frame;
+        try {
+            frame = copyFrame(*raw);
+        } catch (...) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!connected || handle == nullptr) {
+            return;
+        }
+        constexpr std::size_t kMaxQueuedFrames = 8;
+        if (image_queue.size() >= kMaxQueuedFrames) {
+            image_queue.pop_front();
+        }
+        image_queue.push_back(std::move(frame));
+        image_condition.notify_one();
+    }
+
+    static void MV3DLP_CALL imageCallbackThunk(vendor::ImageDataRaw* raw, void* user) {
+        auto* self = static_cast<Impl*>(user);
+        if (self != nullptr) {
+            self->onImage(raw);
+        }
+    }
+
     DriverOptions options;
     vendor::VendorSdk sdk;
     mutable std::mutex mutex;
@@ -264,6 +305,8 @@ public:
     bool connected = false;
     bool acquiring = false;
     std::function<void(std::string)> exception_handler;
+    std::deque<Frame> image_queue;
+    std::condition_variable image_condition;
 };
 
 SdkError::SdkError(std::string message, std::int32_t status)
@@ -400,6 +443,7 @@ void Driver::connectBySerial(const std::string& serial_number) {
     impl_->handle = handle;
     impl_->connected = true;
     impl_->registerExceptionCallbackLocked();
+    impl_->registerImageCallbackLocked();
 }
 
 void Driver::connectByIp(const std::string& ip_address) {
@@ -421,6 +465,7 @@ void Driver::connectByIp(const std::string& ip_address) {
     impl_->handle = handle;
     impl_->connected = true;
     impl_->registerExceptionCallbackLocked();
+    impl_->registerImageCallbackLocked();
 }
 
 void Driver::disconnect() {
@@ -517,20 +562,23 @@ void Driver::softTrigger() {
 }
 
 std::optional<Frame> Driver::tryFetchFrame(std::chrono::milliseconds timeout) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::unique_lock<std::mutex> lock(impl_->mutex);
     impl_->ensureConnected();
     impl_->ensureAcquiring();
 
-    vendor::ImageDataRaw raw{};
-    const vendor::Status status =
-        impl_->sdk.getImage(impl_->handle, &raw, static_cast<std::uint32_t>(std::max<std::int64_t>(timeout.count(), 0)));
-
-    if (status == vendor::kErrorNoData) {
+    const auto wait_time = std::chrono::milliseconds{std::max<std::int64_t>(timeout.count(), 0)};
+    if (impl_->image_queue.empty() &&
+        !impl_->image_condition.wait_for(lock, wait_time, [&] {
+            return !impl_->image_queue.empty() || !impl_->acquiring;
+        })) {
         return std::nullopt;
     }
-
-    throwIfError(status, "MV3D_LP_GetImage failed");
-    return copyFrame(raw);
+    if (impl_->image_queue.empty()) {
+        return std::nullopt;
+    }
+    Frame frame = std::move(impl_->image_queue.front());
+    impl_->image_queue.pop_front();
+    return frame;
 }
 
 Frame Driver::fetchFrame(std::chrono::milliseconds timeout) {
@@ -576,4 +624,3 @@ void Driver::setExceptionHandler(std::function<void(std::string)> handler) {
 }
 
 }  // namespace mv3dlp
-

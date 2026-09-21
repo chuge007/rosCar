@@ -1,0 +1,15 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from rosbag2_interfaces/srv/Stop.srv
+// generated code does not contain a copyright notice
+
+
+module rosbag2_interfaces {
+  module srv {
+    struct Stop_Request {
+      uint8 structure_needs_at_least_one_member;
+    };
+    struct Stop_Response {
+      uint8 structure_needs_at_least_one_member;
+    };
+  };
+};

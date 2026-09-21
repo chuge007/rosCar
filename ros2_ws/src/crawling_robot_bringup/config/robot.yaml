@@ -2,12 +2,19 @@ base_drive_node:
   ros__parameters:
     left_motor_id: 1
     right_motor_id: 2
-    left_motor_sign: 1
+    # Verified on the installed motors: physical forward needs motor 1 negative
+    # and motor 2 positive because the output shafts face opposite directions.
+    left_motor_sign: -1
     right_motor_sign: 1
-    wheel_radius_m: 0.0
-    wheel_separation_m: 0.0
+    wheel_radius_m: 0.04
+    wheel_separation_m: 0.30
     motor_output_to_wheel_ratio: 1.0
-    max_wheel_speed_m_s: 0.0
+    max_wheel_speed_m_s: 0.30
+    max_linear_speed_m_s: 0.15
+    max_angular_speed_rad_s: 1.00
+    max_linear_accel_m_s2: 0.50
+    max_angular_accel_rad_s2: 2.00
+    minimum_inner_wheel_ratio: 0.50
     command_timeout_ms: 200
     can_tx_topic: /can/tx
     can_rx_topic: /can/rx
@@ -16,7 +23,7 @@ slcan_can_bridge_node:
   ros__parameters:
     serial_port: ""
     serial_baud_rate: 115200
-    can_bitrate: 500000
+    can_bitrate: 1000000
     auto_open: false
     can_tx_topic: /can/tx
     can_rx_topic: /can/rx
@@ -150,5 +157,9 @@ crawling_robot_monitor:
     imu_topic: /imu/data
     profile_topic: /laser_profile/frame
     cmd_vel_topic: /cmd_vel
-    max_linear_speed_m_s: 0.025
-    max_angular_speed_rad_s: 0.30
+    max_linear_speed_m_s: 0.15
+    max_angular_speed_rad_s: 1.00
+    max_linear_accel_m_s2: 0.50
+    max_angular_accel_rad_s2: 2.00
+    max_wheel_speed_m_s: 0.30
+    minimum_inner_wheel_ratio: 0.50

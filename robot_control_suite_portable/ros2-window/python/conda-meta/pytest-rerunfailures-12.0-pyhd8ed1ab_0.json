@@ -1,0 +1,107 @@
+{
+  "build": "pyhd8ed1ab_0",
+  "build_number": 0,
+  "depends": [
+    "importlib-metadata",
+    "packaging >=17.1",
+    "pytest >=6.2",
+    "python >=3.7",
+    "setuptools"
+  ],
+  "license": "MPL-2.0",
+  "license_family": "OTHER",
+  "md5": "fcc871605c19635ec554e6640b211a49",
+  "name": "pytest-rerunfailures",
+  "noarch": "python",
+  "sha256": "30c7aee20eeaf9b2d95115cd2c00fcaba8697430e0f5d6c58410f2acf499e212",
+  "size": 18150,
+  "subdir": "noarch",
+  "timestamp": 1688559736220,
+  "version": "12.0",
+  "fn": "pytest-rerunfailures-12.0-pyhd8ed1ab_0.conda",
+  "url": "https://conda.anaconda.org/conda-forge/noarch/pytest-rerunfailures-12.0-pyhd8ed1ab_0.conda",
+  "channel": "https://conda.anaconda.org/conda-forge/",
+  "extracted_package_dir": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\pytest-rerunfailures-12.0-pyhd8ed1ab_0",
+  "requested_specs": [],
+  "files": [
+    "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/INSTALLER",
+    "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/LICENSE",
+    "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/METADATA",
+    "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/RECORD",
+    "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/REQUESTED",
+    "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/WHEEL",
+    "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/direct_url.json",
+    "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/entry_points.txt",
+    "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/top_level.txt",
+    "Lib/site-packages/pytest_rerunfailures.py"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/INSTALLER",
+        "path_type": "hardlink",
+        "sha256": "d0edee15f91b406f3f99726e44eb990be6e34fd0345b52b910c568e0eef6a2a8",
+        "size_in_bytes": 5
+      },
+      {
+        "_path": "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/LICENSE",
+        "path_type": "hardlink",
+        "sha256": "bb431ce4826f858054138be02ed6d3f35d65ce58e10369e9260cfe64d953738d",
+        "size_in_bytes": 198
+      },
+      {
+        "_path": "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/METADATA",
+        "path_type": "hardlink",
+        "sha256": "21b2b464186531e862f68c6e330221d01b316b32ca061aa46f872f61badd9d6e",
+        "size_in_bytes": 18102
+      },
+      {
+        "_path": "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/RECORD",
+        "path_type": "hardlink",
+        "sha256": "5c71e037199333219ef0ce6dc2d1a8b3e81de47516de1bb1652e96c30f1c51c6",
+        "size_in_bytes": 1001
+      },
+      {
+        "_path": "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/REQUESTED",
+        "path_type": "hardlink",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_in_bytes": 0
+      },
+      {
+        "_path": "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/WHEEL",
+        "path_type": "hardlink",
+        "sha256": "a6472d658cd44b8018567e9d27eef7ebb389662bc5d9ef1103d6ff6418e27f5f",
+        "size_in_bytes": 92
+      },
+      {
+        "_path": "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/direct_url.json",
+        "path_type": "hardlink",
+        "sha256": "25cb329b249006b7bfa989f0ab535d7b01ff276a95bb1fa4c4c4d2145bc6b05a",
+        "size_in_bytes": 116
+      },
+      {
+        "_path": "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/entry_points.txt",
+        "path_type": "hardlink",
+        "sha256": "ff25d87d01c65f6e2a67eb6c316749dbbdbd6e2d079f3b71e0a9c93e53955482",
+        "size_in_bytes": 48
+      },
+      {
+        "_path": "Lib/site-packages/pytest_rerunfailures-12.0.dist-info/top_level.txt",
+        "path_type": "hardlink",
+        "sha256": "5a696e8021614de93c9888f848456ba5ab732ec33f7de77f2c7823631b61710c",
+        "size_in_bytes": 21
+      },
+      {
+        "_path": "Lib/site-packages/pytest_rerunfailures.py",
+        "path_type": "hardlink",
+        "sha256": "6467fa34150f65fe1d92ccf42a4049130deefca600981dea54fbe5860b67e8d4",
+        "size_in_bytes": 21876
+      }
+    ]
+  },
+  "link": {
+    "source": "C:\\Users\\a\\AppData\\Local\\rattler\\cache\\pkgs\\pytest-rerunfailures-12.0-pyhd8ed1ab_0",
+    "type": 1
+  }
+}
