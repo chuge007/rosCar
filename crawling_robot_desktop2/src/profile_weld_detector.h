@@ -121,18 +121,28 @@ class ProfileWeldDetector final {
       }
       if (std::min(left,right) < shoulder) continue;
       const double center = (start+end)*.5/(n-1);
-      const double width = double(length)/(n-1);
+      // Profile exports can contain invalid slots and zero padding after the
+      // last real scan sample. Normalize the raised footprint by the valid
+      // scan extent, otherwise padding makes an unchanged weld appear to
+      // change width from frame to frame.
+      const double validAxisSpan =
+          std::max(1, valid.back() - valid.front());
+      const double width = double(length) / validAxisSpan;
       if ((config.expectedAbsoluteCenterRatio >= 0 &&
            std::abs(center-config.expectedAbsoluteCenterRatio) > config.maximumAbsoluteCenterJumpRatio) ||
           (config.referenceAbsoluteCenterRatio >= 0 &&
            std::abs(center-config.referenceAbsoluteCenterRatio) > config.maximumReferenceCenterDriftRatio)) {
         result.continuityRejected = true; continue;
       }
-      if (config.expectedAbsoluteGapWidthRatio > 0 &&
-          std::abs(width-config.expectedAbsoluteGapWidthRatio) > config.maximumTrackingGapWidthJumpRatio) {
-        result.widthRejected = true; continue;
-      }
+      // Raised weld shoulders can change apparent width as the raw profile
+      // crosses a sloped seam or contains invalid scan slots. Width is useful
+      // for ranking candidates, but it must not erase a candidate whose center
+      // and two shoulder supports remain continuous.
+      const bool widthJump = config.expectedAbsoluteGapWidthRatio > 0 &&
+          std::abs(width-config.expectedAbsoluteGapWidthRatio) >
+              config.maximumTrackingGapWidthJumpRatio;
       double score = area / seed;
+      if (widthJump) score *= 0.45;
       if (config.expectedAbsoluteCenterRatio >= 0)
         score /= 1 + 12*std::abs(center-config.expectedAbsoluteCenterRatio);
       if (score <= best) { runnerUp = std::max(runnerUp,score); continue; }

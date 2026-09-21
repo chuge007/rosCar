@@ -68,8 +68,9 @@ struct LaserCorrectionSettings {
   int telemetryTimeoutMs = 600;
   int detectionTimeoutMs = 500;
   int transientDetectionHoldMs = 500;
-  // A rejected candidate is not a camera outage. Reduce stale steering
-  // authority while fresh frames are used to reacquire the main stripe.
+  // A rejected candidate or temporarily unusable SDK profile is not a camera
+  // outage. Reduce stale steering authority while fresh source frames are
+  // used to reacquire the main weld.
   int detectionRecoveryTimeoutMs = 1800;
   int motionStallTimeoutMs = 5000;
   LaserGapDetectorConfig detector;
@@ -359,6 +360,12 @@ class LaserCorrectionController final : public QObject {
   // must not clear a known edge risk or let inferred centers renew its age.
   bool boundaryObservationReliable_ = false;
   bool boundaryStopLatched_ = false;
+  // A rejected candidate, or a temporarily unusable SDK profile, still
+  // carries continuity evidence from the live source stream. Keep the
+  // boundary age gate aligned with its bounded reacquisition window instead
+  // of treating it as a hard outage.
+  bool boundaryCandidateRecoveryActive_ = false;
+  qint64 boundaryCandidateRecoveryUntilMs_ = -1;
   qint64 boundaryObservationMs_ = -1;
   double boundaryLineStartRatio_ = 0.0;
   double boundaryLineEndRatio_ = 1.0;

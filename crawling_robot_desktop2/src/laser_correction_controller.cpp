@@ -59,9 +59,14 @@ constexpr double kMinimumContainmentAngularRadps = 0.04;
 constexpr double kScanContainmentMarginRatio = 0.25;
 constexpr double kScanContainmentReleaseRatio = 0.29;
 constexpr double kScanStopMarginRatio = 0.04;
+// A live source frame and a positive measured margin are enough to keep a
+// short recovery window alive. Predicted margin is steering guidance only;
+// it must not turn an in-range weld into an immediate stop.
 constexpr qint64 kBoundaryObservationGraceMs = 500;
 constexpr qint64 kBoundaryResponseGraceMs = 700;
-constexpr qint64 kMaximumUnmeasuredSeamMs = 1000;
+constexpr qint64 kDetectionSearchDelayMs = 250;
+constexpr qint64 kDetectionSearchHalfCycleMs = 650;
+constexpr double kDetectionSearchAngularRadps = 0.025;
 constexpr double kLaserCenterDeadbandM = 0.0015;
 constexpr double kLaserCenterTurnErrorM = 0.012;
 constexpr double kLaserCenterAngularLimitRadps = 0.16;
@@ -256,7 +261,7 @@ void LaserCorrectionController::setEnabled(bool enabled) {
           .arg(settings_.headingFitBlend * 100.0, 0, 'f', 0)
           .arg(settings_.laserCenterFeedbackGain * 100.0, 0, 'f', 0));
   emit logMessage(
-      CRAWLING_TEXT("激光检测恢复：普通沿用 %1 ms，候选跳变恢复 %2 ms，"
+      CRAWLING_TEXT("激光检测恢复：普通图像沿用 %1 ms，原始轮廓/候选恢复 %2 ms，"
                     "原始图像超时 %3 ms")
           .arg(settings_.transientDetectionHoldMs)
           .arg(settings_.detectionRecoveryTimeoutMs)
@@ -412,8 +417,8 @@ void LaserCorrectionController::processObservation(
   if (status_.active && gapTrackerValid_ && lastTwoEdgeDetectionMs_ >= 0 &&
       !liveContourTrack &&
       now - lastTwoEdgeDetectionMs_ >
-          std::min<qint64>(settings_.detectionRecoveryTimeoutMs,
-                           kMaximumUnmeasuredSeamMs / 2)) {
+           std::max<qint64>(settings_.detectionRecoveryTimeoutMs,
+                            settings_.transientDetectionHoldMs)) {
     // Leave time for multi-frame confirmation before the independent
     // measured-seam timeout. Reacquisition must not extend that deadline.
     beginSeamReacquisition(CRAWLING_TEXT("真实双边缘持续缺失，解除旧候选锁定"));
@@ -718,7 +723,32 @@ void LaserCorrectionController::processObservation(
 
   if (!status_.gapValid) {
     boundaryObservationReliable_ = false;
-    if (stopIfScanBoundaryUnsafe(now)) return;
+    const bool candidateJump = detection.continuityRejected ||
+                               detection.widthRejected;
+    const qint64 heldDetectionAgeMs = now - lastValidDetectionMs_;
+    // A native SDK profile with no candidate is still different from a camera
+    // outage when the source frame was just received. The X/Z scan may be
+    // temporarily washed out, clipped, or split into a contour that the
+    // current association gate cannot accept. Treat that live profile as a
+    // bounded recovery attempt; the legacy image path keeps its stricter
+    // blank-frame boundary timeout.
+    const bool freshSourceFrame = lastImageMs_ >= enabledAtMs_ &&
+        now - lastImageMs_ <= settings_.imageTimeoutMs;
+    boundaryCandidateRecoveryActive_ = gapTrackerValid_ &&
+                                       heldDetectionAgeMs >= 0 &&
+                                       freshSourceFrame &&
+                                       (candidateJump || profile != nullptr);
+    const qint64 candidateRecoveryLimitMs =
+        std::max<qint64>(settings_.detectionRecoveryTimeoutMs,
+                         settings_.transientDetectionHoldMs);
+    // Give the bounded previous-gap/trajectory hold below a chance to keep a
+    // fresh camera stream moving. The independent hard outside-envelope check
+    // still runs immediately; an aging observation is evaluated again after
+    // the hold state has been established.
+    if (boundaryMeasuredMarginRatio_ <= 0.0 &&
+        stopIfScanBoundaryUnsafe(now)) {
+      return;
+    }
     ++invalidDetectionCount_;
     status_.confidence = 0.0;
     if (!status_.active) {
@@ -726,7 +756,6 @@ void LaserCorrectionController::processObservation(
       publishStatus();
       return;
     }
-    const qint64 heldDetectionAgeMs = now - lastValidDetectionMs_;
     // The detected laser span normally touches the image border (for example
     // x=2..1933 in a 2048 px frame). That is not evidence that the weld gap
     // itself is at the optical boundary. Use the gap position, not the line
@@ -735,23 +764,22 @@ void LaserCorrectionController::processObservation(
         trackedGapCenterRatio_ < 0.10 || trackedGapCenterRatio_ > 0.90 ||
         trackedGapAbsoluteCenterRatio_ < 0.12 ||
         trackedGapAbsoluteCenterRatio_ > 0.88;
-    const bool candidateJump = detection.continuityRejected ||
-                               detection.widthRejected;
-    const qint64 detectionHoldLimitMs =
-        candidateJump
-            ? std::max<qint64>(settings_.detectionRecoveryTimeoutMs,
-                               settings_.transientDetectionHoldMs)
-            : (trackedNearLaserBoundary
-                   ? std::max<qint64>(settings_.transientDetectionHoldMs,
-                                      settings_.detectionTimeoutMs)
-                   : settings_.transientDetectionHoldMs);
-    if (candidateJump &&
+    const qint64 detectionHoldLimitMs = boundaryCandidateRecoveryActive_
+        ? candidateRecoveryLimitMs
+        : (trackedNearLaserBoundary
+               ? std::max<qint64>(settings_.transientDetectionHoldMs,
+                                  settings_.detectionTimeoutMs)
+               : settings_.transientDetectionHoldMs);
+    boundaryCandidateRecoveryUntilMs_ = boundaryCandidateRecoveryActive_
+        ? lastValidDetectionMs_ + candidateRecoveryLimitMs
+        : -1;
+    if ((candidateJump || boundaryCandidateRecoveryActive_) &&
         (lastDetectionRejectLogMs_ < 0 ||
          now - lastDetectionRejectLogMs_ >= kDetectionDiagnosticIntervalMs)) {
       lastDetectionRejectLogMs_ = now;
       emit logMessage(
-          CRAWLING_TEXT("激光候选拒绝：连续性=%1，宽度=%2，"
-                        "图像仍在到达，进入 %3 ms 恢复窗口")
+          CRAWLING_TEXT("激光候选暂时无效：连续性=%1，宽度=%2，"
+                        "原始数据仍在到达，进入 %3 ms 恢复窗口")
               .arg(detection.continuityRejected ? CRAWLING_TEXT("是")
                                                  : CRAWLING_TEXT("否"))
               .arg(detection.widthRejected ? CRAWLING_TEXT("是")
@@ -778,19 +806,23 @@ void LaserCorrectionController::processObservation(
               ? CRAWLING_TEXT("缺口宽度突变")
               : (detection.continuityRejected
                      ? CRAWLING_TEXT("候选跳变")
-                     : CRAWLING_TEXT("短时遮挡"));
+                     : (profile != nullptr
+                            ? CRAWLING_TEXT("SDK 原始轮廓暂时无有效凸起候选")
+                            : CRAWLING_TEXT("短时遮挡")));
       status_.reason = detection.widthRejected
                            ? CRAWLING_TEXT("激光缺口宽度突变，平滑沿用上一帧断口")
                            : (detection.continuityRejected
                                   ? CRAWLING_TEXT("激光候选跳变，平滑沿用上一帧断口")
-                                  : CRAWLING_TEXT("激光短时遮挡，平滑沿用上一帧断口"));
+                                  : (profile != nullptr
+                                         ? CRAWLING_TEXT("SDK 原始轮廓暂时不稳定，平滑沿用上一帧并重新搜索")
+                                         : CRAWLING_TEXT("激光短时遮挡，平滑沿用上一帧断口")));
       if (lastDetectionDiagnosticMs_ < 0 ||
           now - lastDetectionDiagnosticMs_ >= kDetectionDiagnosticIntervalMs) {
         lastDetectionDiagnosticMs_ = now;
         emit logMessage(
             CRAWLING_TEXT("激光诊断：阶段 %1，模式 previous_gap_reuse，"
                           "线内中心 %2%，图像中心 %3%，宽度 %4%，置信度 %5，"
-                          "无效帧 %6，沿用帧 %7，原因 %8，沿用上限 %9 ms")
+                          "无效帧 %6，沿用帧 %7，原因 %8，首段恢复窗口 %9 ms")
                 .arg(phaseName(phase_))
                 .arg(trackedGapCenterRatio_ * 100.0, 0, 'f', 2)
                 .arg(trackedGapAbsoluteCenterRatio_ * 100.0, 0, 'f', 2)
@@ -913,14 +945,14 @@ void LaserCorrectionController::processObservation(
       status_.contourFallback = false;
       status_.edgeBreakFallback = true;
       ++reusedDetectionCount_;
-      status_.reason = CRAWLING_TEXT(
-          "实时焊道暂时无效，短时保持巡航并优先回中；持续失去有效观测时停止");
+       status_.reason = CRAWLING_TEXT(
+           "实时焊道暂时无效，保持匀速并左右搜索；等待原始轮廓恢复");
       if (!detectionDegradedLogged_) {
         detectionDegradedLogged_ = true;
         emit logMessage(
-            CRAWLING_TEXT("连续运行降级：新原始图仍在到达，但主缺口已连续 %1 ms "
-                          "未通过检测；安全范围内短时保持巡航，禁止写入陈旧点云，"
-                          "丢弃旧拟合并重新确认真实双边缘")
+             CRAWLING_TEXT("连续运行降级：新原始图仍在到达，但主缺口已连续 %1 ms "
+                           "未通过检测；保持匀速并持续左右搜索，禁止写入陈旧点云，"
+                           "重新确认真实双边缘")
                 .arg(heldDetectionAgeMs));
       }
       publishStatus();
@@ -955,6 +987,8 @@ void LaserCorrectionController::processObservation(
         CRAWLING_TEXT("实时缺口检测恢复：退出上一帧预测模式，重新使用当前原始图闭环"));
     detectionDegradedLogged_ = false;
   }
+  boundaryCandidateRecoveryActive_ = false;
+  boundaryCandidateRecoveryUntilMs_ = -1;
   status_.gapCenterRatio = detection.normalizedCenter;
   status_.gapAbsoluteCenterRatio = detection.absoluteCenterRatio;
   status_.gapLateralM = kCameraLateralToVehicleSign *
@@ -2986,6 +3020,8 @@ void LaserCorrectionController::resetSession() {
   boundaryContainmentActive_ = false;
   boundaryObservationReliable_ = false;
   boundaryStopLatched_ = false;
+  boundaryCandidateRecoveryActive_ = false;
+  boundaryCandidateRecoveryUntilMs_ = -1;
   boundaryObservationMs_ = -1;
   boundaryLineStartRatio_ = 0.0;
   boundaryLineEndRatio_ = 1.0;
@@ -3181,8 +3217,26 @@ bool LaserCorrectionController::stopIfScanBoundaryUnsafe(qint64 now) {
   if (!status_.active) return false;
   const qint64 age = std::max<qint64>(0, now -
       (boundaryObservationMs_ >= 0 ? boundaryObservationMs_ : enabledAtMs_));
+  // A detector rejection is not equivalent to a camera outage. While fresh
+  // source frames are still arriving and the controller is explicitly holding
+  // the last confirmed seam, keep the chassis in recovery. Camera input loss
+  // is handled independently by stopIfImageTimedOut().
+  const bool freshSourceFrame = lastImageMs_ >= enabledAtMs_ &&
+      now - lastImageMs_ <= settings_.imageTimeoutMs;
+  const qint64 validDetectionAge = lastValidDetectionMs_ >= enabledAtMs_
+      ? std::max<qint64>(0, now - lastValidDetectionMs_) : -1;
   const double margin = laserBoundaryMargin(now);
   const double measuredMargin = boundaryMeasuredMarginRatio_;
+  // Recovery is allowed while the last measured envelope is still inside the
+  // scan. A small predicted margin only increases inward steering pressure;
+  // it does not cancel the live-source recovery window.
+  const bool boundaryRecoveryAllowed = measuredMargin > 0.0;
+  const bool boundedDetectionHold = detectionHeld_ &&
+      boundaryCandidateRecoveryActive_ &&
+      boundaryCandidateRecoveryUntilMs_ >= now && freshSourceFrame &&
+      boundaryRecoveryAllowed &&
+      validDetectionAge >= 0 && validDetectionAge <=
+          settings_.detectionRecoveryTimeoutMs;
   const int returnDirection = boundaryReturnDirection(now);
   const double measuredAngularRadps =
       (leftSpeedMps_ - rightSpeedMps_) / settings_.trackWidthM;
@@ -3195,9 +3249,9 @@ bool LaserCorrectionController::stopIfScanBoundaryUnsafe(qint64 now) {
     boundaryRecoveryStartedMs_ = -1;
     boundaryRecoveryDirection_ = 0;
   }
-  if (moving && measuredMargin <= 0.0) {
+  if (moving && boundaryObservationReliable_ && measuredMargin <= 0.0) {
     cause = QStringLiteral("seam_outside_scan");
-  } else if (moving && age > kMaximumUnmeasuredSeamMs) {
+  } else if (moving && !freshSourceFrame && !boundedDetectionHold) {
     cause = QStringLiteral("measured_seam_timeout");
   } else if (moving && boundaryContainmentActive_) {
     if (boundaryRecoveryStartedMs_ < 0 ||
@@ -3207,16 +3261,18 @@ bool LaserCorrectionController::stopIfScanBoundaryUnsafe(qint64 now) {
       boundaryRecoveryDirection_ = returnDirection;
     }
     const qint64 recoveryAge = now - boundaryRecoveryStartedMs_;
-    if (age > kBoundaryObservationGraceMs) {
+    if (age > kBoundaryObservationGraceMs && !boundedDetectionHold &&
+        !freshSourceFrame) {
       cause = QStringLiteral("unreliable_seam_near_boundary");
-    } else if (recoveryAge >= kBoundaryResponseGraceMs &&
+    } else if (boundaryObservationReliable_ &&
+               recoveryAge >= kBoundaryResponseGraceMs &&
                measuredMargin <= kScanStopMarginRatio &&
                measuredAngularRadps * returnDirection <
                    -kSteeringDeadbandRadps) {
       // Give a commanded reversal time to reach the wheels. Stop only if the
       // seam is nearly out of view and the measured wheels still turn out.
       cause = QStringLiteral("outward_wheel_response");
-    } else if (recoveryAge >= 1500 &&
+    } else if (boundaryObservationReliable_ && recoveryAge >= 1500 &&
                // Prediction is an early-warning envelope only. It may raise
                // the inward-turn priority, but it cannot prove that the weld
                // has left the usable scan. Final parking requires the current
@@ -3278,8 +3334,12 @@ void LaserCorrectionController::applyCommand(double targetLinearMps,
   if (stopIfScanBoundaryUnsafe(now)) return;
   const double boundaryMargin = laserBoundaryMargin(now);
   const int returnDirection = boundaryReturnDirection(now);
-  const bool containment = phaseMoves() && boundaryObservationMs_ >= 0 &&
-      now - boundaryObservationMs_ <= kBoundaryObservationGraceMs &&
+  const bool containmentObservationFresh =
+      boundaryObservationMs_ >= 0 &&
+      (now - boundaryObservationMs_ <= kBoundaryObservationGraceMs ||
+       (boundaryCandidateRecoveryActive_ &&
+        boundaryCandidateRecoveryUntilMs_ >= now));
+  const bool containment = phaseMoves() && containmentObservationFresh &&
       boundaryContainmentActive_ && returnDirection != 0;
   if (containment) {
     const double wheelLimit =
@@ -3309,6 +3369,27 @@ void LaserCorrectionController::applyCommand(double targetLinearMps,
     }
   } else if (boundaryMargin > kScanContainmentReleaseRatio) {
     boundaryProtectionLogged_ = false;
+  }
+  // A short detector dropout should not freeze the chassis or immediately
+  // reverse its last correction. Keep the configured forward speed and add a
+  // small, slow alternating search turn after the hold has lasted long enough
+  // to be meaningful. Fresh detections clear detectionHeld_ and remove this
+  // exploratory term on the next control cycle.
+  const bool freshSourceFrame = lastImageMs_ >= enabledAtMs_ &&
+      now - lastImageMs_ <= settings_.imageTimeoutMs;
+  if (phaseMoves() && !containment && detectionHeld_ && freshSourceFrame &&
+      lastValidDetectionMs_ >= enabledAtMs_) {
+    const qint64 heldAgeMs = std::max<qint64>(0, now -
+        lastValidDetectionMs_);
+    if (heldAgeMs >= kDetectionSearchDelayMs) {
+      const qint64 searchAgeMs = heldAgeMs - kDetectionSearchDelayMs;
+      const int searchDirection =
+          ((searchAgeMs / kDetectionSearchHalfCycleMs) % 2 == 0) ? 1 : -1;
+      const double searchWeight = clamp(
+          (heldAgeMs - kDetectionSearchDelayMs) / 350.0, 0.0, 1.0);
+      targetAngularRadps += searchDirection *
+          kDetectionSearchAngularRadps * searchWeight;
+    }
   }
   currentLinearMps_ = rate(
       currentLinearMps_, targetLinearMps,
