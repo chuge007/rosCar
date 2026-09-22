@@ -3,6 +3,7 @@
 #include "main_window.h"
 #include "synchronized_drive_controller.h"
 #include "device_controller.h"
+#include "usb_camera_controller.h"
 #include "app_logger.h"
 #include "laser_correction_controller.h"
 #include "laser_trajectory_renderer.h"
@@ -51,6 +52,16 @@ int main(int argc, char* argv[]) {
   deviceThread.start();
   crawling::AppLogger::write(QStringLiteral("SYSTEM.THREAD"),
                              QStringLiteral("event=thread_start module=DEVICE.CONTROL result=OK"));
+
+  QThread usbCameraThread;
+  auto* usbCamera = new crawling::UsbCameraController();
+  usbCamera->moveToThread(&usbCameraThread);
+  QObject::connect(&usbCameraThread, &QThread::finished, usbCamera,
+                   &QObject::deleteLater);
+  usbCameraThread.start();
+  crawling::AppLogger::write(
+      QStringLiteral("SYSTEM.THREAD"),
+      QStringLiteral("event=thread_start module=USB_CAMERA result=OK"));
 
   // Perception and feedback must not wait for UI painting or synchronous
   // diagnostic file writes. All inputs and UI publications cross queues.
@@ -131,7 +142,7 @@ int main(int argc, char* argv[]) {
                                    message);
       });
 
-  crawling::MainWindow window(controller, devices, correction);
+  crawling::MainWindow window(controller, devices, usbCamera, correction);
   window.show();
   const int result = application.exec();
 
@@ -159,6 +170,12 @@ int main(int argc, char* argv[]) {
   deviceThread.wait();
   crawling::AppLogger::write(QStringLiteral("SYSTEM.THREAD"),
                              QStringLiteral("event=thread_stop module=DEVICE.CONTROL result=OK interfaces=released"));
+  QMetaObject::invokeMethod(usbCamera, "shutdown", Qt::BlockingQueuedConnection);
+  usbCameraThread.quit();
+  usbCameraThread.wait();
+  crawling::AppLogger::write(
+      QStringLiteral("SYSTEM.THREAD"),
+      QStringLiteral("event=thread_stop module=USB_CAMERA result=OK interfaces=released"));
   crawling::AppLogger::write(QStringLiteral("SYSTEM"),
                              QStringLiteral("event=application_exit result=OK code=%1").arg(result));
   return result;

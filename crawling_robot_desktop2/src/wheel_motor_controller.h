@@ -26,7 +26,7 @@ struct WheelMotorConfig {
   int leftDirectionSign = 1;
   int rightDirectionSign = 1;
   double wheelRadiusM = 0.040;
-  double motorOutputToWheelRatio = 100.0;
+  double motorOutputToWheelRatio = 36.0;
   double maximumWheelSpeedMps = 0.30;
   // The installed left drive tops out near 4,350 dps while the right drive
   // reaches about 14,300 dps. Keep paired motion below the slower drive's
@@ -118,12 +118,10 @@ class WheelMotorController final {
   MwdMotorFeedback rightFeedback_;
   bool leftFeedbackUpdated_ = false;
   bool rightFeedbackUpdated_ = false;
-  bool haveLeftEncoder_ = false;
-  bool haveRightEncoder_ = false;
-  std::uint16_t lastLeftEncoder_ = 0;
-  std::uint16_t lastRightEncoder_ = 0;
-  qint64 leftEncoderPosition_ = 0;
-  qint64 rightEncoderPosition_ = 0;
+  std::int32_t leftEncoderValue_ = 0;
+  std::int32_t rightEncoderValue_ = 0;
+  std::int64_t leftAngleHundredthDegree_ = 0;
+  std::int64_t rightAngleHundredthDegree_ = 0;
 };
 
 }  // namespace crawling

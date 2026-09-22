@@ -36,6 +36,8 @@ void PointCloudView::setProfileMode(bool active) {
   profileMode_ = true;
   if (!active) {
     scanPoints_.clear();
+    scanDisplayInitialized_ = false;
+    displayRangeInitialized_ = false;
     scanDetection_ = LaserGapDetection{};
     scanReceivedAtMs_ = 0;
     profileUpdatePending_ = false;
@@ -47,7 +49,30 @@ void PointCloudView::setProfileObservation(
     const QVector<QVector3D>& points, const LaserGapDetection& detection,
     quint32 sourceFrameNumber, qint64 receivedAtEpochMs) {
   profileMode_ = true;
-  scanPoints_ = points; // Preserve every SDK slot, including invalid points.
+  // Smooth only the human-facing trace. Detection has already consumed the
+  // SDK points and keeps its original indices; the preview uses a temporal
+  // blend so single-frame height jitter does not make the trace flicker.
+  if (!scanDisplayInitialized_ || scanPoints_.size() != points.size()) {
+    scanPoints_ = points;
+    scanDisplayInitialized_ = true;
+  } else {
+    constexpr float kDisplayAlpha = 0.35f;
+    for (int i = 0; i < points.size(); ++i) {
+      const QVector3D& current = points[i];
+      QVector3D& displayed = scanPoints_[i];
+      if (!std::isfinite(current.x()) || !std::isfinite(current.z()) || current.z() <= 0) {
+        displayed = current;
+        continue;
+      }
+      if (!std::isfinite(displayed.x()) || !std::isfinite(displayed.z()) || displayed.z() <= 0) {
+        displayed = current;
+        continue;
+      }
+      displayed.setX(current.x());
+      displayed.setY(current.y());
+      displayed.setZ(displayed.z() + kDisplayAlpha * (current.z() - displayed.z()));
+    }
+  }
   scanDetection_ = detection;
   scanFrameNumber_ = sourceFrameNumber;
   scanReceivedAtMs_ = receivedAtEpochMs;
@@ -76,6 +101,20 @@ void PointCloudView::paintProfile(QPainter& painter, const QRect& area) {
     painter.drawText(area, Qt::AlignCenter, CRAWLING_TEXT("\xE7\xAD\x89\xE5\xBE\x85\xE7\x9B\xB8\xE6\x9C\xBA\x20\x53\x44\x4B\x20\xE5\x8E\x9F\xE5\xA7\x8B\xE8\xBD\xAE\xE5\xBB\x93\xE7\x82\xB9"));
     return;
   }
+  const double measuredMinZ = minZ;
+  const double measuredMaxZ = maxZ;
+  if (!displayRangeInitialized_) {
+    displayMinZ_ = measuredMinZ;
+    displayMaxZ_ = measuredMaxZ;
+    displayRangeInitialized_ = true;
+  } else {
+    constexpr double kRangeAlpha = 0.20;
+    displayMinZ_ += kRangeAlpha * (measuredMinZ - displayMinZ_);
+    displayMaxZ_ += kRangeAlpha * (measuredMaxZ - displayMaxZ_);
+  }
+  minZ = displayMinZ_;
+  maxZ = displayMaxZ_;
+  if (maxZ <= minZ) maxZ = minZ + 1e-6;
   const double zPadding = std::max(1e-6, (maxZ-minZ)*.08);
   minZ -= zPadding; maxZ += zPadding;
   const QRect plot = area.adjusted(0, 28, 0, -23);

@@ -31,6 +31,10 @@ class PointCloudView final : public QWidget {
 
   bool profileMode_ = true;
   QVector<QVector3D> scanPoints_;
+  bool scanDisplayInitialized_ = false;
+  bool displayRangeInitialized_ = false;
+  double displayMinZ_ = 0.0;
+  double displayMaxZ_ = 1.0;
   LaserGapDetection scanDetection_;
   quint32 scanFrameNumber_ = 0;
   qint64 scanReceivedAtMs_ = 0;

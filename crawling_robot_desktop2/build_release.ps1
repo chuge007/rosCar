@@ -5,7 +5,7 @@ $buildRoot = Join-Path $projectRoot 'build'
 $vcVars = 'C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build\vcvars64.bat'
 $qmake = 'D:\qt\5.12.4\msvc2017_64\bin\qmake.exe'
 $deploy = 'D:\qt\5.12.4\msvc2017_64\bin\windeployqt.exe'
-$laserRuntime = Join-Path (Split-Path -Parent $projectRoot) 'modules\mv3dlp_laser_profile\windows_x64\bin'
+$laserRuntime = 'D:\dev\deskCrawlingRobot\modules\mv3dlp_laser_profile\windows_x64\bin'
 # OpenCV's vc16 DLL needs the newer unified VC runtime, including
 # vcruntime140_1.dll. Do not overwrite it with the old VS2017 private CRT.
 $vcRuntime = Join-Path $env:WINDIR 'System32'

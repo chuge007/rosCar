@@ -262,6 +262,7 @@ void DeviceController::scanCamera() {
                      QStringLiteral("event=scan_complete result=FAILED error=%1").arg(message));
   }
 }
+
 void DeviceController::connectCamera(const QString& serialNumber) {
   const QString serial = serialNumber.section(" | ", 0, 0);
   AppLogger::write(QStringLiteral("CAMERA.CONNECTION"),

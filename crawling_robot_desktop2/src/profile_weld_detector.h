@@ -36,6 +36,21 @@ class ProfileWeldDetector final {
       valid.push_back(i);
     }
     if (valid.size() < 24 || differences.size() < 12) return result;
+    // Suppress isolated SDK height spikes before estimating the parent plane
+    // and raised contour. Keep the original scan indices so all detector
+    // coordinates remain compatible with the control and preview layers.
+    std::vector<double> filteredZ(n, std::numeric_limits<double>::quiet_NaN());
+    for (std::size_t position = 0; position < valid.size(); ++position) {
+      std::vector<double> neighborhood;
+      neighborhood.reserve(5);
+      const int first = std::max<int>(0, static_cast<int>(position) - 2);
+      const int last = std::min<int>(static_cast<int>(valid.size()) - 1,
+                                     static_cast<int>(position) + 2);
+      for (int neighbor = first; neighbor <= last; ++neighbor)
+        neighborhood.push_back(points[valid[neighbor]].z());
+      filteredZ[valid[position]] = median(neighborhood);
+    }
+    const auto zAt = [&filteredZ](int index) { return filteredZ[index]; };
     const double step = median(differences);
     for (double& d : differences) d = std::abs(d - step);
     // Units cancel: never assume the exported CSV and SDK share a height unit.
@@ -45,8 +60,8 @@ class ProfileWeldDetector final {
     for (int k = 0; k < edgeCount; ++k) {
       const auto& l = points[valid[k]];
       const auto& r = points[valid[valid.size() - 1 - k]];
-      leftX.push_back(l.x()); leftZ.push_back(l.z());
-      rightX.push_back(r.x()); rightZ.push_back(r.z());
+      leftX.push_back(l.x()); leftZ.push_back(zAt(valid[k]));
+      rightX.push_back(r.x()); rightZ.push_back(zAt(valid[valid.size() - 1 - k]));
     }
     const double lx = median(leftX), rx = median(rightX);
     if (rx <= lx) return result;
@@ -58,7 +73,7 @@ class ProfileWeldDetector final {
       std::vector<double> errors;
       for (int k = 0; k < edgeCount; ++k) {
         for (int i : {valid[k],valid[valid.size()-1-k]})
-          errors.push_back(points[i].z()-offset-slope*points[i].x());
+          errors.push_back(zAt(i)-offset-slope*points[i].x());
       }
       const double bias = median(errors);
       for (double& e : errors) e = std::abs(e-bias);
@@ -67,7 +82,7 @@ class ProfileWeldDetector final {
       double sx = 0, sz = 0, sxx = 0, sxz = 0, count = 0;
       for (int i : valid) {
         const double x = points[i].x() - lx;
-        const double z = points[i].z();
+        const double z = zAt(i);
         if (std::abs(z - offset - slope * points[i].x()) > parentNoise * 3) continue;
         sx += x; sz += z; sxx += x*x; sxz += x*z; ++count;
       }
@@ -79,7 +94,7 @@ class ProfileWeldDetector final {
     std::vector<double> deviations;
     for (int k = 0; k < edgeCount; ++k) {
       for (int i : {valid[k],valid[valid.size()-1-k]})
-        deviations.push_back(std::abs(points[i].z()-offset-slope*points[i].x()));
+        deviations.push_back(std::abs(zAt(i)-offset-slope*points[i].x()));
     }
     noise = std::max(noise,1.4826*median(deviations));
     result.profileNoise = noise;
@@ -87,7 +102,7 @@ class ProfileWeldDetector final {
     result.profileBaselineOffset = offset;
     const double grow = noise * 3, seed = noise * 5;
     std::vector<double> residual(n, std::numeric_limits<double>::quiet_NaN());
-    for (int i : valid) residual[i] = points[i].z() - offset - slope*points[i].x();
+    for (int i : valid) residual[i] = zAt(i) - offset - slope*points[i].x();
     const int minWidth = std::max(6, int(std::ceil(n*config.minimumGapRatio)));
     const int maxHole = std::max(2, std::min(32, n/64));
     const int shoulder = std::max(4, n/200);

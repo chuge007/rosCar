@@ -11,7 +11,7 @@ namespace crawling {
 
 struct DriveSettings {
   static constexpr int kMinimumFeedbackTimeoutMs = 800;
-  static constexpr int kCurrentSettingsSchemaVersion = 4;
+  static constexpr int kCurrentSettingsSchemaVersion = 5;
 
   // Legacy shared-port fields are retained for loading older settings files.
   QString serialPort;
@@ -22,6 +22,11 @@ struct DriveSettings {
   int imuBaudRate = 115200;
   int imuOutputDivider = 10;
   QString laserSerialNumber;
+  int usbCameraDeviceIndex = -1;
+  int usbCameraFps = 30;
+  bool usbCameraAutoConnect = true;
+  bool usbCameraFlipHorizontal = false;
+  bool usbCameraFlipVertical = false;
   bool autoConnectOnStartup = true;
   int manualJogPercent = 30;
 
@@ -29,6 +34,12 @@ struct DriveSettings {
   int clampSerialBaudRate = 115200;
   int clampCanBitrate = 500000;
   int clampNodeId = 0;
+  int clampXMotorId = 1;
+  int clampYMotorId = 2;
+  int clampZMotorId = 3;
+  int clampXMotorSign = 1;
+  int clampYMotorSign = 1;
+  int clampZMotorSign = 1;
 
   int leftMotorId = 1;
   int rightMotorId = 2;

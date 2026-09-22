@@ -7,7 +7,6 @@ namespace crawling {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-constexpr double kEncoderCountsPerRevolution = 65536.0;
 constexpr int kFeedbackReplyWaitMs = 20;
 constexpr int kInterByteWaitMs = 2;
 constexpr int kPositionReplyWaitMs = 20;
@@ -85,20 +84,10 @@ bool WheelMotorController::initialize(const WheelMotorConfig& config,
   rightFeedback_ = {};
   leftFeedbackUpdated_ = false;
   rightFeedbackUpdated_ = false;
-  haveLeftEncoder_ = false;
-  haveRightEncoder_ = false;
-  leftEncoderPosition_ = 0;
-  rightEncoderPosition_ = 0;
-  if (!sendCommand(true, MwdRs485Protocol::kClearError, config_.leftMotorId) ||
-      !sendCommand(false, MwdRs485Protocol::kClearError, config_.rightMotorId) ||
-      !sendCommand(true, MwdRs485Protocol::kMotorRun, config_.leftMotorId) ||
-      !sendCommand(false, MwdRs485Protocol::kMotorRun, config_.rightMotorId)) {
-    if (leftSerialPort_ != nullptr) leftSerialPort_->close();
-    if (rightSerialPort_ != nullptr) rightSerialPort_->close();
-    setError(errorMessage, QStringLiteral("Failed to initialize MWD RS485 motors on %1 and %2")
-                               .arg(config_.leftSerialPort, config_.rightSerialPort));
-    return false;
-  }
+  leftEncoderValue_ = 0;
+  rightEncoderValue_ = 0;
+  leftAngleHundredthDegree_ = 0;
+  rightAngleHundredthDegree_ = 0;
   initialized_ = true;
   leftRunning_ = true;
   rightRunning_ = true;
@@ -134,10 +123,10 @@ void WheelMotorController::shutdown() {
   rightReceiveBuffer_.clear();
   leftFeedbackUpdated_ = false;
   rightFeedbackUpdated_ = false;
-  haveLeftEncoder_ = false;
-  haveRightEncoder_ = false;
-  leftEncoderPosition_ = 0;
-  rightEncoderPosition_ = 0;
+  leftEncoderValue_ = 0;
+  rightEncoderValue_ = 0;
+  leftAngleHundredthDegree_ = 0;
+  rightAngleHundredthDegree_ = 0;
 }
 
 bool WheelMotorController::setWheelSpeeds(double leftMps, double rightMps) {
@@ -166,7 +155,7 @@ bool WheelMotorController::sendSpeed(bool leftMotor, std::uint8_t motorId,
   const QByteArray speedFrame = MwdRs485Protocol::speedCommand(motorId, speedDps);
   const bool sent = !speedFrame.isEmpty() &&
                     sendCommand(leftMotor, MwdRs485Protocol::kSpeedClosedLoop, motorId,
-                                speedFrame.mid(5, 4));
+                                speedFrame.mid(4, 7));
   if (sent) {
     *running = true;
   }
@@ -202,10 +191,19 @@ bool WheelMotorController::reset() {
   if (!initialized_) {
     return false;
   }
-  const bool leftSent = sendCommand(true, MwdRs485Protocol::kClearError, config_.leftMotorId);
-  const bool rightSent = sendCommand(false, MwdRs485Protocol::kClearError, config_.rightMotorId);
-  const bool stopped = stop();
-  return leftSent && rightSent && stopped;
+  const bool leftSent =
+      sendCommand(true, MwdRs485Protocol::kSystemReset, config_.leftMotorId);
+  const bool rightSent =
+      sendCommand(false, MwdRs485Protocol::kSystemReset, config_.rightMotorId);
+  if (leftSent) {
+    leftRunning_ = false;
+    lastLeftCommandDps_ = 0;
+  }
+  if (rightSent) {
+    rightRunning_ = false;
+    lastRightCommandDps_ = 0;
+  }
+  return leftSent && rightSent;
 }
 
 bool WheelMotorController::pollFeedback(WheelMotorFeedback* feedback,
@@ -221,36 +219,45 @@ bool WheelMotorController::pollFeedback(WheelMotorFeedback* feedback,
                                           const MwdMotorFeedback& parsed) {
     MwdMotorFeedback& stored = leftMotor ? leftFeedback_ : rightFeedback_;
     bool& updated = leftMotor ? leftFeedbackUpdated_ : rightFeedbackUpdated_;
-    bool& haveEncoder = leftMotor ? haveLeftEncoder_ : haveRightEncoder_;
-    std::uint16_t& lastEncoder = leftMotor ? lastLeftEncoder_ : lastRightEncoder_;
-    qint64& encoderPosition = leftMotor ? leftEncoderPosition_ : rightEncoderPosition_;
     stored = parsed;
     updated = true;
-    if (haveEncoder) {
-      encoderPosition += static_cast<std::int16_t>(
-          static_cast<std::uint16_t>(parsed.encoder - lastEncoder));
-    }
-    lastEncoder = parsed.encoder;
-    haveEncoder = true;
   };
   const auto consumeFrames = [this, &updateMotorFeedback](bool fromLeftPort) {
     MwdRs485Frame frame;
     QByteArray& receiveBuffer = receiveBufferFor(fromLeftPort);
     while (MwdRs485Protocol::takeFrame(&receiveBuffer, &frame)) {
-      const auto parsed = MwdRs485Protocol::parseMotorFeedback(frame);
-      if (!parsed.has_value()) {
+      const bool leftFrame = sharedPort_
+                                 ? frame.motorId == config_.leftMotorId
+                                 : fromLeftPort &&
+                                       frame.motorId == config_.leftMotorId;
+      const bool rightFrame = sharedPort_
+                                  ? frame.motorId == config_.rightMotorId
+                                  : !fromLeftPort &&
+                                        frame.motorId == config_.rightMotorId;
+      if (!leftFrame && !rightFrame) {
         continue;
       }
-      if (sharedPort_) {
-        if (parsed->motorId == config_.leftMotorId) {
-          updateMotorFeedback(true, *parsed);
-        } else if (parsed->motorId == config_.rightMotorId) {
-          updateMotorFeedback(false, *parsed);
+
+      if (const auto parsed = MwdRs485Protocol::parseMotorFeedback(frame);
+          parsed.has_value()) {
+        updateMotorFeedback(leftFrame, *parsed);
+      }
+      if (const auto encoder =
+              MwdRs485Protocol::parseMultiTurnEncoderPosition(frame);
+          encoder.has_value()) {
+        if (leftFrame) {
+          leftEncoderValue_ = encoder.value();
+        } else {
+          rightEncoderValue_ = encoder.value();
         }
-      } else if (fromLeftPort && parsed->motorId == config_.leftMotorId) {
-        updateMotorFeedback(true, *parsed);
-      } else if (!fromLeftPort && parsed->motorId == config_.rightMotorId) {
-        updateMotorFeedback(false, *parsed);
+      }
+      if (const auto angle = MwdRs485Protocol::parseMultiTurnAngle(frame);
+          angle.has_value()) {
+        if (leftFrame) {
+          leftAngleHundredthDegree_ = angle.value();
+        } else {
+          rightAngleHundredthDegree_ = angle.value();
+        }
       }
     }
   };
@@ -260,10 +267,7 @@ bool WheelMotorController::pollFeedback(WheelMotorFeedback* feedback,
     QByteArray& receiveBuffer = receiveBufferFor(leftMotor);
     receiveBuffer.append(port->readAll());
     consumeFrames(leftMotor);
-    const bool requestedMotorUpdated = leftMotor ? leftFeedbackUpdated_
-                                                 : rightFeedbackUpdated_;
-    if (!waitForReply || requestedMotorUpdated ||
-        !port->waitForReadyRead(kFeedbackReplyWaitMs)) {
+    if (!waitForReply || !port->waitForReadyRead(kFeedbackReplyWaitMs)) {
       return;
     }
     do {
@@ -291,18 +295,40 @@ bool WheelMotorController::pollFeedback(WheelMotorFeedback* feedback,
     }
   }
 
-  const double positionScale = 2.0 * kPi * config_.wheelRadiusM /
-                               kEncoderCountsPerRevolution /
+  const auto requestPosition = [this, &collectResponse](bool leftMotor,
+                                                          std::uint8_t motorId) {
+    if (!sendCommand(leftMotor, MwdRs485Protocol::kReadMultiTurnAngle,
+                     motorId)) {
+      return false;
+    }
+    collectResponse(leftMotor, true);
+    if (!sendCommand(leftMotor, MwdRs485Protocol::kReadMultiTurnEncoder,
+                     motorId)) {
+      return false;
+    }
+    collectResponse(leftMotor, true);
+    return true;
+  };
+  if (leftFeedbackUpdated_) {
+    requestPosition(true, config_.leftMotorId);
+  }
+  if (rightFeedbackUpdated_) {
+    requestPosition(false, config_.rightMotorId);
+  }
+
+  const double positionScale = config_.wheelRadiusM * kPi / 18000.0 /
                                config_.motorOutputToWheelRatio;
   const double speedScale = config_.wheelRadiusM * kPi / 180.0 /
                              config_.motorOutputToWheelRatio;
   feedback->leftUpdated = leftFeedbackUpdated_;
   feedback->rightUpdated = rightFeedbackUpdated_;
   feedback->valid = leftFeedbackUpdated_ && rightFeedbackUpdated_;
-  feedback->leftEncoder = leftFeedback_.encoder;
-  feedback->rightEncoder = rightFeedback_.encoder;
-  feedback->leftPositionM = leftEncoderPosition_ * positionScale * config_.leftDirectionSign;
-  feedback->rightPositionM = rightEncoderPosition_ * positionScale * config_.rightDirectionSign;
+  feedback->leftEncoder = leftEncoderValue_;
+  feedback->rightEncoder = rightEncoderValue_;
+  feedback->leftPositionM = leftAngleHundredthDegree_ * positionScale *
+                            config_.leftDirectionSign;
+  feedback->rightPositionM = rightAngleHundredthDegree_ * positionScale *
+                             config_.rightDirectionSign;
   feedback->leftMotorSpeedDps = leftFeedback_.speedDps * config_.leftDirectionSign;
   feedback->rightMotorSpeedDps = rightFeedback_.speedDps * config_.rightDirectionSign;
   feedback->leftMotorControlValue = leftFeedback_.controlValue;
@@ -393,7 +419,7 @@ bool WheelMotorController::holdCurrentPosition(
     if (hold.isEmpty() ||
         !sendCommand(leftMotor,
                      MwdRs485Protocol::kMultiTurnPositionClosedLoop,
-                     motorId, hold.mid(5, 12))) {
+                     motorId, hold.mid(4, 7))) {
       return false;
     }
     const auto holdConfirmed = [&receiveBuffer, motorId] {
