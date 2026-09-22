@@ -1,0 +1,38 @@
+# Qt and local build outputs
+build/
+debug/
+release/
+Mv3dLpLog/
+tmp/
+.qtcreator/
+.qmake.stash
+*.user
+*.autosave
+Makefile
+Makefile.*
+
+# Generated indexes, logs, and temporary artifacts
+.gitnexus/
+**/__pycache__/
+*.py[cod]
+*.log
+*.dmp
+analysis_new_data_summary.txt
+manual_extract.txt
+motorlib.7z
+tmp_*.txt
+tmp_*.png
+
+# Compiled and intermediate files
+*.obj
+*.o
+*.a
+*.so
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.idb
+*.ipdb
