@@ -1,0 +1,10 @@
+CSV analysis 2026-09-20 09:42:34:
+- File size 2,646,610 bytes, 75,776 rows, exactly 3 floating columns x,y,z, no header; y=0 throughout.
+- x resets at row 2036, 4072,... 75332: 37 complete profiles of 2036 points; final 444 rows are all (0,0,0) padding. Each profile x ~ -17,899..18,186 um.
+- Baseline z ~5,000..6,000 um. Clear raised weld/step is repeatable in every profile: z > 9,000 from x ~8,811 to 16,149 (higher threshold >8,000 gives x 8,847..16,149; >6,500 gives 8,910..16,802). Plateau around z 9,800..10,202. Physical center of elevated run ~12,400..12,800 um depending weighted threshold. Sharp rise begins x ~8,900; fall near x ~16,800-17,500. Other low/negative z speckles are invalid/noise and should not become weld candidates.
+- Frames are unique but near identical: same weld interval in all 37; temporal duplicate/repetition is expected scan profiles, not a missing weld.
+RAW analysis 2026-09-20 09:42:39:
+- Size 2,242,756 bytes. Header bytes at offset 0x70 decode little-endian width=2048, height=1086. Camera string MV-DP2120-01, version V1.5.0 240401, serial 00DA4990755. Header contains repeated 80-byte metadata records, not plain pixels.
+- Payload is not safely inferable as a single 8-bit 2048x1086 raster: 2048*1086=2,224,128 leaves 18,628 bytes; data near 0x221100 is uint32 little-endian values (e.g. 0x0007DBEB) and tail has trailer/lookup data. Need SDK RAW parser/format docs before using it for detection.
+- RAW timestamp is 09:42:39.791 vs CSV 09:42:34.305, delta 5.486 s: they cannot be fused as same frame. Match by frame number/timestamp if available.
+Implications: CSV profile should be grouped every 2036 points, ignore zero padding; weld center is in physical x units around +12.4 mm, not image center. Detector must accept wide raised plateau/step (~7.3 mm width) rather than looking only for a narrow dark gap, and reject invalid z outliers. RAW should only feed perception after SDK decoding preserves frame dimensions/valid flags.

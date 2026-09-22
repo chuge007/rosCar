@@ -1,0 +1,32 @@
+# Local IDE and generated build state
+.gitnexus/
+.qtcreator/
+.qmake.stash
+*.pro.user
+Makefile
+Makefile.*
+
+# Build/output directories
+build/
+debug/
+release/
+tmp/
+tmp_*
+**/__pycache__/
+
+# Generated binaries and intermediate files
+*.exe
+*.dll
+*.obj
+*.o
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+*.log
+
+# Local caches and editor metadata
+.vs/
+.vscode/
+*.autosave
