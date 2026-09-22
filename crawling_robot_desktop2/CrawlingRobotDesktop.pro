@@ -24,6 +24,8 @@ SOURCES += \
     src/wheel_motor_controller.cpp \
     src/rim302_protocol.cpp \
     src/device_controller.cpp \
+    src/usb_camera_controller.cpp \
+    src/clamp_motor_controller.cpp \
     src/hardware_discovery.cpp \
     src/device_window.cpp \
     src/app_logger.cpp \
@@ -46,6 +48,8 @@ HEADERS += \
     src/wheel_motor_controller.h \
     src/rim302_protocol.h \
     src/device_controller.h \
+    src/usb_camera_controller.h \
+    src/clamp_motor_controller.h \
     src/hardware_discovery.h \
     src/device_window.h \
     src/app_logger.h \

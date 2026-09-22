@@ -365,6 +365,25 @@ void DriveCoreTests::driveSettingsMigratesLegacyGearRatioOnce() {
   const DriveSettings adaptive = DriveSettings::load(schema2);
   QCOMPARE(adaptive.motorOutputToWheelRatio, 36.0);
   QCOMPARE(adaptive.synchronizer.maximumCorrectionMps, 0.300);
+
+  QSettings legacyBaud(directory.filePath(QStringLiteral("legacy_baud.ini")),
+                       QSettings::IniFormat);
+  legacyBaud.setValue(QStringLiteral("drive/serialBaudRate"), 230400);
+  legacyBaud.setValue(QStringLiteral("drive/leftMotorBaudRate"), 230400);
+  legacyBaud.setValue(QStringLiteral("drive/rightMotorBaudRate"), 921600);
+  legacyBaud.sync();
+  const DriveSettings migratedBaud = DriveSettings::load(legacyBaud);
+  QCOMPARE(migratedBaud.leftMotorBaudRate, 115200);
+  QCOMPARE(migratedBaud.rightMotorBaudRate, 115200);
+
+  QSettings v38Baud(directory.filePath(QStringLiteral("v38_baud.ini")),
+                     QSettings::IniFormat);
+  v38Baud.setValue(QStringLiteral("drive/leftMotorBaudRate"), 2500000);
+  v38Baud.setValue(QStringLiteral("drive/rightMotorBaudRate"), 500000);
+  v38Baud.sync();
+  const DriveSettings preservedBaud = DriveSettings::load(v38Baud);
+  QCOMPARE(preservedBaud.leftMotorBaudRate, 2500000);
+  QCOMPARE(preservedBaud.rightMotorBaudRate, 500000);
 }
 
 void DriveCoreTests::pivotTurnCommandsOppositeWheelDirections() {
@@ -469,7 +488,7 @@ void DriveCoreTests::feedbackSynchronizerPreservesRequestedCurveRatio() {
 
 void DriveCoreTests::feedbackSynchronizerSurvivesMotorCommandCeiling() {
   constexpr double pi = 3.14159265358979323846;
-  const double motorCommandCeilingMps = 4300.0 * 0.040 * pi / 180.0 / 100.0;
+  const double motorCommandCeilingMps = 4300.0 * 0.040 * pi / 180.0 / 36.0;
   WheelTargets requested;
   requested.leftMps = 0.60;
   requested.rightMps = 0.60;
@@ -2792,32 +2811,35 @@ void DriveCoreTests::protocolAcceptsStopFeedbackFrames() {
 
 void DriveCoreTests::mwdSpeedCommandUsesLittleEndianHundredthDps() {
   const QByteArray frame = MwdRs485Protocol::speedCommand(2, -12.34);
-  QCOMPARE(frame.size(), 10);
+  QCOMPARE(frame.size(), 13);
   QCOMPARE(static_cast<std::uint8_t>(frame.at(0)), static_cast<std::uint8_t>(0x3E));
-  QCOMPARE(static_cast<std::uint8_t>(frame.at(1)), static_cast<std::uint8_t>(0xA2));
-  QCOMPARE(static_cast<std::uint8_t>(frame.at(2)), static_cast<std::uint8_t>(2));
-  QCOMPARE(static_cast<std::uint8_t>(frame.at(3)), static_cast<std::uint8_t>(4));
-  QCOMPARE(static_cast<std::uint8_t>(frame.at(4)), static_cast<std::uint8_t>(0xE6));
-  QCOMPARE(static_cast<std::uint8_t>(frame.at(5)), static_cast<std::uint8_t>(0x2E));
-  QCOMPARE(static_cast<std::uint8_t>(frame.at(6)), static_cast<std::uint8_t>(0xFB));
-  QCOMPARE(static_cast<std::uint8_t>(frame.at(7)), static_cast<std::uint8_t>(0xFF));
-  QCOMPARE(static_cast<std::uint8_t>(frame.at(8)), static_cast<std::uint8_t>(0xFF));
-  QCOMPARE(static_cast<std::uint8_t>(frame.at(9)), static_cast<std::uint8_t>(0x27));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(1)), static_cast<std::uint8_t>(2));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(2)), static_cast<std::uint8_t>(8));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(3)), static_cast<std::uint8_t>(0xA2));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(4)), static_cast<std::uint8_t>(0));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(5)), static_cast<std::uint8_t>(0));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(6)), static_cast<std::uint8_t>(0));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(7)), static_cast<std::uint8_t>(0x2E));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(8)), static_cast<std::uint8_t>(0xFB));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(9)), static_cast<std::uint8_t>(0xFF));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(10)), static_cast<std::uint8_t>(0xFF));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(11)), static_cast<std::uint8_t>(0xF9));
+  QCOMPARE(static_cast<std::uint8_t>(frame.at(12)), static_cast<std::uint8_t>(0xCE));
 }
 
 void DriveCoreTests::mwdPositionHoldCommandsMatchProtocol() {
   const QByteArray query = MwdRs485Protocol::multiTurnAngleQuery(2);
-  QCOMPARE(query.toHex(' ').toUpper(), QByteArray("3E 92 02 00 D2"));
+  QCOMPARE(query.toHex(' ').toUpper(),
+           QByteArray("3E 02 08 92 00 00 00 00 00 00 00 83 B3"));
 
   const QByteArray hold = MwdRs485Protocol::multiTurnPositionCommand(
       1, 36000, 360.0);
   QCOMPARE(hold.toHex(' ').toUpper(),
-           QByteArray("3E A4 01 0C EF A0 8C 00 00 00 00 00 00 "
-                      "A0 8C 00 00 58"));
+           QByteArray("3E 01 08 A4 00 68 01 A0 8C 00 00 26 41"));
 
   QByteArray responseBuffer = MwdRs485Protocol::command(
       MwdRs485Protocol::kReadMultiTurnAngle, 2,
-      QByteArray::fromHex("60 73 FF FF FF FF FF FF"));
+      QByteArray::fromHex("00 00 00 60 73 FF FF"));
   MwdRs485Frame response;
   QVERIFY(MwdRs485Protocol::takeFrame(&responseBuffer, &response));
   const auto angle = MwdRs485Protocol::parseMultiTurnAngle(response);
@@ -2827,7 +2849,7 @@ void DriveCoreTests::mwdPositionHoldCommandsMatchProtocol() {
   MwdRs485Frame holdResponse;
   holdResponse.command = MwdRs485Protocol::kMultiTurnPositionClosedLoop;
   holdResponse.motorId = 1;
-  holdResponse.data = QByteArray::fromHex("1E 34 12 00 00 78 56");
+  holdResponse.data = QByteArray::fromHex("A4 1E 34 12 00 00 78 56");
   const auto holdFeedback = MwdRs485Protocol::parseMotorFeedback(holdResponse);
   QVERIFY(holdFeedback.has_value());
   QCOMPARE(holdFeedback->motorId, static_cast<std::uint8_t>(1));
@@ -2836,62 +2858,67 @@ void DriveCoreTests::mwdPositionHoldCommandsMatchProtocol() {
 void DriveCoreTests::mwdBrakeCommandsMatchProtocol() {
   const QByteArray stopped = MwdRs485Protocol::command(
       MwdRs485Protocol::kMotorStop, 1);
-  QCOMPARE(stopped.toHex(' ').toUpper(), QByteArray("3E 81 01 00 C0"));
+  QCOMPARE(stopped.toHex(' ').toUpper(),
+           QByteArray("3E 01 08 81 00 00 00 00 00 00 00 32 A5"));
 
-  const QByteArray applied = MwdRs485Protocol::brakeCommand(1, true);
-  QCOMPARE(applied.toHex(' ').toUpper(), QByteArray("3E 8C 01 01 CC 00 00"));
-
-  const QByteArray released = MwdRs485Protocol::brakeCommand(2, false);
-  QCOMPARE(released.toHex(' ').toUpper(), QByteArray("3E 8C 02 01 CD 01 01"));
-
-  const QByteArray query = MwdRs485Protocol::brakeStatusQuery(2);
-  QCOMPARE(query.toHex(' ').toUpper(), QByteArray("3E 8C 02 01 CD 10 10"));
-
-  QByteArray responseBuffer = applied;
-  MwdRs485Frame response;
-  QVERIFY(MwdRs485Protocol::takeFrame(&responseBuffer, &response));
-  const auto brakeApplied = MwdRs485Protocol::parseBrakeApplied(response);
-  QVERIFY(brakeApplied.has_value());
-  QVERIFY(brakeApplied.value());
+  const QByteArray reset = MwdRs485Protocol::command(
+      MwdRs485Protocol::kSystemReset, 1);
+  QCOMPARE(reset.toHex(' ').toUpper(),
+           QByteArray("3E 01 08 76 00 00 00 00 00 00 00 7C 07"));
 }
 
 void DriveCoreTests::mwdFramesValidateChecksumsAndLengths() {
   const QByteArray first = MwdRs485Protocol::command(
       MwdRs485Protocol::kMotorStop, 1);
   const QByteArray second = MwdRs485Protocol::command(
-      MwdRs485Protocol::kMotorRun, 2);
+      MwdRs485Protocol::kMotorOff, 2);
   QByteArray buffer = first + second;
   MwdRs485Frame frame;
   QVERIFY(MwdRs485Protocol::takeFrame(&buffer, &frame));
   QCOMPARE(frame.command, MwdRs485Protocol::kMotorStop);
   QCOMPARE(frame.motorId, static_cast<std::uint8_t>(1));
   QVERIFY(MwdRs485Protocol::takeFrame(&buffer, &frame));
-  QCOMPARE(frame.command, MwdRs485Protocol::kMotorRun);
+  QCOMPARE(frame.command, MwdRs485Protocol::kMotorOff);
   QCOMPARE(frame.motorId, static_cast<std::uint8_t>(2));
   QVERIFY(buffer.isEmpty());
 
   QByteArray corrupt = first;
-  corrupt[4] = static_cast<char>(static_cast<std::uint8_t>(corrupt.at(4)) + 1);
+  corrupt[11] = static_cast<char>(
+      static_cast<std::uint8_t>(corrupt.at(11)) + 1);
   QVERIFY(!MwdRs485Protocol::takeFrame(&corrupt, &frame));
   QVERIFY(corrupt.isEmpty());
 
   QByteArray corruptData = MwdRs485Protocol::speedCommand(1, 1.0);
-  corruptData[9] = static_cast<char>(static_cast<std::uint8_t>(corruptData.at(9)) + 1);
+  corruptData[7] = static_cast<char>(
+      static_cast<std::uint8_t>(corruptData.at(7)) + 1);
   QVERIFY(!MwdRs485Protocol::takeFrame(&corruptData, &frame));
   QVERIFY(corruptData.isEmpty());
+
+  QByteArray truncated = first.left(first.size() - 1);
+  QVERIFY(!MwdRs485Protocol::takeFrame(&truncated, &frame));
+  QCOMPARE(truncated.size(), first.size() - 1);
 }
 
 void DriveCoreTests::mwdStatusFeedbackParsesSignedValues() {
   MwdRs485Frame frame;
   frame.command = MwdRs485Protocol::kReadStatus2;
   frame.motorId = 7;
-  frame.data = QByteArray::fromHex("D6 34 12 9C FF 78 56");
+  frame.data = QByteArray::fromHex("9C D6 34 12 9C FF 78 56");
   const auto feedback = MwdRs485Protocol::parseMotorFeedback(frame);
   QVERIFY(feedback.has_value());
   QCOMPARE(feedback->temperatureC, -42);
   QCOMPARE(feedback->controlValue, static_cast<std::int16_t>(0x1234));
   QCOMPARE(feedback->speedDps, -100.0);
-  QCOMPARE(feedback->encoder, static_cast<std::uint16_t>(0x5678));
+  QCOMPARE(feedback->outputAngleDeg, static_cast<std::int16_t>(0x5678));
+
+  MwdRs485Frame encoderFrame;
+  encoderFrame.command = MwdRs485Protocol::kReadMultiTurnEncoder;
+  encoderFrame.motorId = 7;
+  encoderFrame.data = QByteArray::fromHex("60 00 00 00 78 56 34 12");
+  const auto encoder =
+      MwdRs485Protocol::parseMultiTurnEncoderPosition(encoderFrame);
+  QVERIFY(encoder.has_value());
+  QCOMPARE(encoder.value(), static_cast<std::int32_t>(0x12345678));
 }
 
 }  // namespace crawling

@@ -23,6 +23,11 @@ constexpr double kMinimumPracticalLinearAccelerationMps2 = 0.050;
 constexpr double kMinimumPracticalAngularAccelerationRadps2 = 0.10;
 constexpr double kInstalledMotorOutputToWheelRatio = 36.0;
 
+bool isSupportedMwdRs485BaudRate(int baudRate) {
+  return baudRate == 115200 || baudRate == 500000 ||
+      baudRate == 1000000 || baudRate == 1500000 || baudRate == 2500000;
+}
+
 }  // namespace
 
 QString DriveSettings::persistentFilePath() {
@@ -46,6 +51,12 @@ QString DriveSettings::validationError() const {
   }
   if (leftMotorBaudRate <= 0 || rightMotorBaudRate <= 0) {
     return QStringLiteral("Motor RS485 baud rates must be positive.");
+  }
+  if (!isSupportedMwdRs485BaudRate(leftMotorBaudRate) ||
+      !isSupportedMwdRs485BaudRate(rightMotorBaudRate)) {
+    return QStringLiteral(
+        "MWD V3.8 motor RS485 baud rates must be 115200, 500000, "
+        "1000000, 1500000, or 2500000.");
   }
   if ((leftMotorSign != -1 && leftMotorSign != 1) ||
       (rightMotorSign != -1 && rightMotorSign != 1)) {
@@ -92,6 +103,11 @@ void DriveSettings::save(QSettings& settings) const {
   settings.setValue(CRAWLING_TEXT("imuBaudRate"), imuBaudRate);
   settings.setValue(CRAWLING_TEXT("imuOutputDivider"), imuOutputDivider);
   settings.setValue(CRAWLING_TEXT("laserSerialNumber"), laserSerialNumber);
+  settings.setValue(CRAWLING_TEXT("usbCameraDeviceIndex"), usbCameraDeviceIndex);
+  settings.setValue(CRAWLING_TEXT("usbCameraFps"), usbCameraFps);
+  settings.setValue(CRAWLING_TEXT("usbCameraAutoConnect"), usbCameraAutoConnect);
+  settings.setValue(CRAWLING_TEXT("usbCameraFlipHorizontal"), usbCameraFlipHorizontal);
+  settings.setValue(CRAWLING_TEXT("usbCameraFlipVertical"), usbCameraFlipVertical);
   settings.setValue(CRAWLING_TEXT("autoConnectOnStartup"),
                     autoConnectOnStartup);
   settings.setValue(CRAWLING_TEXT("manualJogPercent"), manualJogPercent);
@@ -99,6 +115,12 @@ void DriveSettings::save(QSettings& settings) const {
   settings.setValue(CRAWLING_TEXT("clampSerialBaudRate"), clampSerialBaudRate);
   settings.setValue(CRAWLING_TEXT("clampCanBitrate"), clampCanBitrate);
   settings.setValue(CRAWLING_TEXT("clampNodeId"), clampNodeId);
+  settings.setValue(CRAWLING_TEXT("clampXMotorId"), clampXMotorId);
+  settings.setValue(CRAWLING_TEXT("clampYMotorId"), clampYMotorId);
+  settings.setValue(CRAWLING_TEXT("clampZMotorId"), clampZMotorId);
+  settings.setValue(CRAWLING_TEXT("clampXMotorSign"), clampXMotorSign);
+  settings.setValue(CRAWLING_TEXT("clampYMotorSign"), clampYMotorSign);
+  settings.setValue(CRAWLING_TEXT("clampZMotorSign"), clampZMotorSign);
   settings.setValue(CRAWLING_TEXT("leftMotorId"), leftMotorId);
   settings.setValue(CRAWLING_TEXT("rightMotorId"), rightMotorId);
   settings.setValue(CRAWLING_TEXT("leftMotorSerialPort"), leftMotorSerialPort);
@@ -144,6 +166,11 @@ DriveSettings DriveSettings::load(QSettings& settings) {
                      value.imuOutputDivider).toInt(),
       1, 200);
   value.laserSerialNumber = settings.value(CRAWLING_TEXT("laserSerialNumber"), value.laserSerialNumber).toString();
+  value.usbCameraDeviceIndex = settings.value(CRAWLING_TEXT("usbCameraDeviceIndex"), value.usbCameraDeviceIndex).toInt();
+  value.usbCameraFps = std::clamp(settings.value(CRAWLING_TEXT("usbCameraFps"), value.usbCameraFps).toInt(), 1, 120);
+  value.usbCameraAutoConnect = settings.value(CRAWLING_TEXT("usbCameraAutoConnect"), value.usbCameraAutoConnect).toBool();
+  value.usbCameraFlipHorizontal = settings.value(CRAWLING_TEXT("usbCameraFlipHorizontal"), value.usbCameraFlipHorizontal).toBool();
+  value.usbCameraFlipVertical = settings.value(CRAWLING_TEXT("usbCameraFlipVertical"), value.usbCameraFlipVertical).toBool();
   value.autoConnectOnStartup =
       settings.value(
           CRAWLING_TEXT("autoConnectOnStartup"),
@@ -158,6 +185,12 @@ DriveSettings DriveSettings::load(QSettings& settings) {
   value.clampSerialBaudRate = settings.value(CRAWLING_TEXT("clampSerialBaudRate"), value.clampSerialBaudRate).toInt();
   value.clampCanBitrate = settings.value(CRAWLING_TEXT("clampCanBitrate"), value.clampCanBitrate).toInt();
   value.clampNodeId = settings.value(CRAWLING_TEXT("clampNodeId"), value.clampNodeId).toInt();
+  value.clampXMotorId = settings.value(CRAWLING_TEXT("clampXMotorId"), value.clampXMotorId).toInt();
+  value.clampYMotorId = settings.value(CRAWLING_TEXT("clampYMotorId"), value.clampYMotorId).toInt();
+  value.clampZMotorId = settings.value(CRAWLING_TEXT("clampZMotorId"), value.clampZMotorId).toInt();
+  value.clampXMotorSign = settings.value(CRAWLING_TEXT("clampXMotorSign"), value.clampXMotorSign).toInt() < 0 ? -1 : 1;
+  value.clampYMotorSign = settings.value(CRAWLING_TEXT("clampYMotorSign"), value.clampYMotorSign).toInt() < 0 ? -1 : 1;
+  value.clampZMotorSign = settings.value(CRAWLING_TEXT("clampZMotorSign"), value.clampZMotorSign).toInt() < 0 ? -1 : 1;
   value.leftMotorId = settings.value(CRAWLING_TEXT("leftMotorId"), value.leftMotorId).toInt();
   value.rightMotorId = settings.value(CRAWLING_TEXT("rightMotorId"), value.rightMotorId).toInt();
   value.leftMotorSerialPort = settings.value(CRAWLING_TEXT("leftMotorSerialPort"), QString()).toString();
@@ -231,6 +264,12 @@ DriveSettings DriveSettings::load(QSettings& settings) {
   }
   if (value.rightMotorBaudRate <= 0) {
     value.rightMotorBaudRate = value.serialBaudRate;
+  }
+  if (!isSupportedMwdRs485BaudRate(value.leftMotorBaudRate)) {
+    value.leftMotorBaudRate = defaults.leftMotorBaudRate;
+  }
+  if (!isSupportedMwdRs485BaudRate(value.rightMotorBaudRate)) {
+    value.rightMotorBaudRate = defaults.rightMotorBaudRate;
   }
 
   // A 10 mm track width with 40 mm wheels, or old UI-unit acceleration values,

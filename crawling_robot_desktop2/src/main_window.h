@@ -19,6 +19,7 @@ class QComboBox;
 class QCheckBox;
 class QDoubleSpinBox;
 class QGroupBox;
+class QImage;
 class QKeyEvent;
 class QLabel;
 class QLineEdit;
@@ -34,12 +35,15 @@ namespace crawling {
 class SynchronizedDriveController;
 class DeviceController;
 class PointCloudView;
+class UsbCameraController;
+class ClampMotorController;
 
 class MainWindow final : public QMainWindow {
   Q_OBJECT
 
  public:
-  explicit MainWindow(SynchronizedDriveController* controller, DeviceController* devices, LaserCorrectionController* correction,
+  explicit MainWindow(SynchronizedDriveController* controller, DeviceController* devices,
+                      UsbCameraController* usbCamera, LaserCorrectionController* correction,
                       QWidget* parent = nullptr);
   void shutdownControl();
 
@@ -65,6 +69,7 @@ class MainWindow final : public QMainWindow {
   void disconnectAllDevices();
   void connectConfiguredImu();
   void connectConfiguredCamera();
+  void connectConfiguredUsbCamera();
   void scanConfiguredCamera();
   void saveSettings();
   void applyAllParameters();
@@ -85,6 +90,9 @@ class MainWindow final : public QMainWindow {
   void updateCameraConnection(bool connected, const QString& message);
   void updateCameraFrame(quint32 frameNumber, quint32 width, quint32 height,
                          quint64 pointCount);
+  void updateUsbCameraDevices(const QStringList& devices);
+  void updateUsbCameraConnection(bool connected, const QString& message);
+  void updateUsbCameraFrame(const QImage& image);
   void updatePointCloudReady();
   void setPointCloudPlane(int plane);
   void startAutoCorrection();
@@ -112,6 +120,8 @@ class MainWindow final : public QMainWindow {
 
   SynchronizedDriveController* controller_ = nullptr;
   DeviceController* devices_ = nullptr;
+  UsbCameraController* usbCamera_ = nullptr;
+  ClampMotorController* clampMotors_ = nullptr;
   LaserCorrectionController* correction_ = nullptr;
   DriveSettings settings_;
   QTimer* inputTimer_ = nullptr;
@@ -138,10 +148,21 @@ class MainWindow final : public QMainWindow {
   QComboBox* imuDividerBox_ = nullptr;
   QLineEdit* laserSerialBox_ = nullptr;
   QComboBox* cameraDeviceBox_ = nullptr;
+  QComboBox* usbCameraDeviceBox_ = nullptr;
+  QSpinBox* usbCameraFpsBox_ = nullptr;
+  QCheckBox* usbCameraAutoConnectBox_ = nullptr;
+  QCheckBox* usbCameraFlipHorizontalBox_ = nullptr;
+  QCheckBox* usbCameraFlipVerticalBox_ = nullptr;
   QComboBox* clampSerialPortBox_ = nullptr;
   QComboBox* clampSerialBaudBox_ = nullptr;
   QComboBox* clampCanBitrateBox_ = nullptr;
   QSpinBox* clampNodeIdBox_ = nullptr;
+  QSpinBox* clampXMotorIdBox_ = nullptr;
+  QSpinBox* clampYMotorIdBox_ = nullptr;
+  QSpinBox* clampZMotorIdBox_ = nullptr;
+  QComboBox* clampXMotorSignBox_ = nullptr;
+  QComboBox* clampYMotorSignBox_ = nullptr;
+  QComboBox* clampZMotorSignBox_ = nullptr;
   QSpinBox* leftMotorIdBox_ = nullptr;
   QSpinBox* rightMotorIdBox_ = nullptr;
   QComboBox* leftSignBox_ = nullptr;
@@ -192,9 +213,12 @@ class MainWindow final : public QMainWindow {
   QCheckBox* autoConnectCheckBox_ = nullptr;
   QPushButton* imuConnectButton_ = nullptr;
   QPushButton* cameraConnectButton_ = nullptr;
+  QPushButton* usbCameraConnectButton_ = nullptr;
   QLabel* imuConfigStateLabel_ = nullptr;
   QLabel* cameraConfigStateLabel_ = nullptr;
   QLabel* cameraFrameConfigLabel_ = nullptr;
+  QLabel* usbCameraConfigStateLabel_ = nullptr;
+  QLabel* usbCameraPreview_ = nullptr;
   QLabel* clampConnectionLabel_ = nullptr;
   QPlainTextEdit* logOutput_ = nullptr;
   QPushButton* screenshotButton_ = nullptr;

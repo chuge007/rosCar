@@ -4,6 +4,8 @@
 #include "synchronized_drive_controller.h"
 #include "device_controller.h"
 #include "point_cloud_view.h"
+#include "usb_camera_controller.h"
+#include "clamp_motor_controller.h"
 
 #include <algorithm>
 #include <cmath>
@@ -113,14 +115,19 @@ void setComboToText(QComboBox* combo, const QString& value) {
 
 }  // namespace
 
-MainWindow::MainWindow(SynchronizedDriveController* controller, DeviceController* devices, LaserCorrectionController* correction, QWidget* parent)
-    : QMainWindow(parent), controller_(controller), devices_(devices), correction_(correction) {
+MainWindow::MainWindow(SynchronizedDriveController* controller, DeviceController* devices,
+                       UsbCameraController* usbCamera,
+                       LaserCorrectionController* correction, QWidget* parent)
+    : QMainWindow(parent), controller_(controller), devices_(devices),
+      usbCamera_(usbCamera), correction_(correction) {
+  clampMotors_ = new ClampMotorController(this);
   QSettings persistent(DriveSettings::persistentFilePath(), QSettings::IniFormat);
   settings_ = DriveSettings::load(persistent);
   settings_.save(persistent);
   persistent.sync();
   buildInterface();
   settingsToUi(settings_);
+  clampMotors_->setSettings(settings_);
   const QString savedPlane = persistent.value(CRAWLING_TEXT("pointCloud/plane"), CRAWLING_TEXT("xz")).toString().toLower();
   const int savedPlaneIndex = pointCloudPlaneBox_->findData(savedPlane);
   const int initialPlaneIndex = savedPlaneIndex >= 0 ? savedPlaneIndex
@@ -344,11 +351,12 @@ void MainWindow::connectAllConfiguredDevices() {
 
 void MainWindow::disconnectAllDevices() {
   AppLogger::write(QStringLiteral("UI.OPERATION"),
-                   QStringLiteral("event=disconnect_all_request targets=DRIVE.MOTOR,IMU,CAMERA"));
+                   QStringLiteral("event=disconnect_all_request targets=DRIVE.MOTOR,IMU,CAMERA,USB_CAMERA"));
   disconnectAdapter();
   QMetaObject::invokeMethod(devices_, "disconnectImu", Qt::QueuedConnection);
   QMetaObject::invokeMethod(devices_, "disconnectCamera", Qt::QueuedConnection);
-  appendLog(CRAWLING_TEXT("已请求断开电机、IMU 和激光相机"));
+  QMetaObject::invokeMethod(usbCamera_, "disconnectCamera", Qt::QueuedConnection);
+  appendLog(CRAWLING_TEXT("已请求断开电机、IMU、激光相机和 USB 摄像头"));
 }
 
 void MainWindow::connectConfiguredDevices() {
@@ -359,13 +367,14 @@ void MainWindow::connectConfiguredDevices() {
 
   AppLogger::write(
       QStringLiteral("UI.OPERATION"),
-      QStringLiteral("event=connect_all_request mode=%1 targets=DRIVE.MOTOR,IMU,CAMERA "
-                     "left_port=%2 right_port=%3 imu_port=%4 camera_serial=%5")
+      QStringLiteral("event=connect_all_request mode=%1 targets=DRIVE.MOTOR,IMU,CAMERA,USB_CAMERA "
+                     "left_port=%2 right_port=%3 imu_port=%4 camera_serial=%5 usb_camera=%6")
           .arg(QStringLiteral("saved_configuration"))
           .arg(settings_.leftMotorSerialPort)
           .arg(settings_.rightMotorSerialPort)
           .arg(settings_.imuSerialPort)
-          .arg(settings_.laserSerialNumber));
+          .arg(settings_.laserSerialNumber)
+          .arg(settings_.usbCameraDeviceIndex));
 
   const QString driveError = settings_.validationError();
   bool driveReady = true;
@@ -397,6 +406,7 @@ void MainWindow::connectConfiguredDevices() {
   }
   connectConfiguredImu();
   connectConfiguredCamera();
+  connectConfiguredUsbCamera();
 }
 
 void MainWindow::connectConfiguredImu() {
@@ -438,6 +448,27 @@ void MainWindow::connectConfiguredCamera() {
   }
   QMetaObject::invokeMethod(devices_, "connectCamera", Qt::QueuedConnection,
                             Q_ARG(QString, serial));
+}
+
+void MainWindow::connectConfiguredUsbCamera() {
+  settings_ = settingsFromUi();
+  QSettings persistent(DriveSettings::persistentFilePath(), QSettings::IniFormat);
+  settings_.save(persistent);
+  persistent.sync();
+  if (!settings_.usbCameraAutoConnect) {
+    appendLog(CRAWLING_TEXT("USB 摄像头连接已跳过：未勾选参与连接全部接口"));
+    return;
+  }
+  if (settings_.usbCameraDeviceIndex < 0) {
+    appendLog(CRAWLING_TEXT("USB 摄像头连接已跳过：未配置设备"));
+    return;
+  }
+  QMetaObject::invokeMethod(
+      usbCamera_, "connectCamera", Qt::QueuedConnection,
+      Q_ARG(int, settings_.usbCameraDeviceIndex),
+      Q_ARG(int, settings_.usbCameraFps),
+      Q_ARG(bool, settings_.usbCameraFlipHorizontal),
+      Q_ARG(bool, settings_.usbCameraFlipVertical));
 }
 
 void MainWindow::applyAllParameters() {
@@ -723,7 +754,7 @@ void MainWindow::buildInterface() {
   header->addWidget(connectionLabel_);
   autoConnectCheckBox_ = new QCheckBox(CRAWLING_TEXT("启动时自动连接"), central);
   autoConnectCheckBox_->setToolTip(
-      CRAWLING_TEXT("仅按上次保存的电机、IMU 和激光相机参数连接；"
+      CRAWLING_TEXT("仅按上次保存的电机、IMU、激光相机和 USB 摄像头参数连接；"
                     "空配置或连接失败的设备会跳过，不会自动选择接口。"));
   header->addWidget(autoConnectCheckBox_);
   auto* connectAllButton =
@@ -858,6 +889,23 @@ void MainWindow::buildInterface() {
   correctionStatusLabel_->setMinimumHeight(44);
   correctionStatusLabel_->setWordWrap(true);
   manualLayout->addWidget(correctionStatusLabel_);
+  auto* clampHeading = new QLabel(CRAWLING_TEXT("夹子电机手动微调"), manualGroup);
+  clampHeading->setObjectName(CRAWLING_TEXT("controlSectionTitle"));
+  manualLayout->addWidget(clampHeading);
+  auto* clampGrid = new QGridLayout();
+  const auto addAxisButton = [this, clampGrid, manualGroup](int row, const QString& axis,
+                                                               auto plusSlot, auto minusSlot) {
+    clampGrid->addWidget(new QLabel(axis, manualGroup), row, 0);
+    auto* plus = makeTouchButton(axis + CRAWLING_TEXT(" +"), manualGroup);
+    auto* minus = makeTouchButton(axis + CRAWLING_TEXT(" -"), manualGroup);
+    clampGrid->addWidget(plus, row, 1); clampGrid->addWidget(minus, row, 2);
+    connect(plus, &QPushButton::clicked, clampMotors_, plusSlot);
+    connect(minus, &QPushButton::clicked, clampMotors_, minusSlot);
+  };
+  addAxisButton(0, CRAWLING_TEXT("X"), &ClampMotorController::moveXPositive, &ClampMotorController::moveXNegative);
+  addAxisButton(1, CRAWLING_TEXT("Y"), &ClampMotorController::moveYPositive, &ClampMotorController::moveYNegative);
+  addAxisButton(2, CRAWLING_TEXT("Z"), &ClampMotorController::moveZPositive, &ClampMotorController::moveZNegative);
+  manualLayout->addLayout(clampGrid);
   connect(autoStartButton_, &QPushButton::clicked, this, &MainWindow::startAutoCorrection);
   connect(autoStopButton_, &QPushButton::clicked, this, &MainWindow::stopAutoCorrection);
   manualLayout->addStretch(1);
@@ -957,6 +1005,17 @@ void MainWindow::buildInterface() {
   statusLayout->setColumnStretch(0, 1);
   statusLayout->setColumnStretch(1, 1);
   rightColumn->addWidget(statusGroup);
+
+  auto* usbPreviewGroup = new QGroupBox(CRAWLING_TEXT("USB 摄像头画面"), controlPage);
+  auto* usbPreviewLayout = new QVBoxLayout(usbPreviewGroup);
+  usbCameraPreview_ = new QLabel(CRAWLING_TEXT("USB 摄像头未连接"), usbPreviewGroup);
+  usbCameraPreview_->setAlignment(Qt::AlignCenter);
+  usbCameraPreview_->setMinimumHeight(200);
+  usbCameraPreview_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+  usbCameraPreview_->setStyleSheet(
+      CRAWLING_TEXT("background: #111820; color: #aab6c2; border: 1px solid #cbd3da;"));
+  usbPreviewLayout->addWidget(usbCameraPreview_);
+  rightColumn->addWidget(usbPreviewGroup, 1);
   rightColumn->addStretch(1);
   controlLayout->addLayout(rightColumn, 2);
   controlScroll->setWidget(controlPage);
@@ -976,7 +1035,7 @@ void MainWindow::buildInterface() {
   leftMotorBaudBox_ = new QComboBox(adapterGroup);
   rightMotorPortBox_ = new QComboBox(adapterGroup);
   rightMotorBaudBox_ = new QComboBox(adapterGroup);
-  for (int baud : {115200, 230400, 460800, 921600}) {
+  for (int baud : {115200, 500000, 1000000, 1500000, 2500000}) {
     leftMotorBaudBox_->addItem(QString::number(baud), baud);
     rightMotorBaudBox_->addItem(QString::number(baud), baud);
   }
@@ -1063,6 +1122,57 @@ void MainWindow::buildInterface() {
           });
   settingsLayout->addWidget(cameraGroup, 2, 1);
 
+  auto* usbCameraGroup = new QGroupBox(CRAWLING_TEXT("USB 摄像头"), settingsPage);
+  auto* usbCameraForm = new QFormLayout(usbCameraGroup);
+  usbCameraDeviceBox_ = new QComboBox(usbCameraGroup);
+  for (int index = 0; index < 10; ++index) {
+    usbCameraDeviceBox_->addItem(CRAWLING_TEXT("设备 %1").arg(index), index);
+  }
+  usbCameraDeviceBox_->setCurrentIndex(-1);
+  usbCameraFpsBox_ = new QSpinBox(usbCameraGroup);
+  usbCameraFpsBox_->setRange(1, 120);
+  usbCameraFpsBox_->setValue(30);
+  usbCameraAutoConnectBox_ = new QCheckBox(CRAWLING_TEXT("参与连接全部接口和启动时自动连接"), usbCameraGroup);
+  usbCameraFlipHorizontalBox_ = new QCheckBox(CRAWLING_TEXT("画面水平翻转"), usbCameraGroup);
+  usbCameraFlipVerticalBox_ = new QCheckBox(CRAWLING_TEXT("画面竖直翻转"), usbCameraGroup);
+  auto* usbCameraScanButton = new QPushButton(CRAWLING_TEXT("扫描 USB 摄像头"), usbCameraGroup);
+  usbCameraConnectButton_ = new QPushButton(CRAWLING_TEXT("打开 USB 摄像头"), usbCameraGroup);
+  auto* usbCameraDisconnectButton = new QPushButton(CRAWLING_TEXT("关闭 USB 摄像头"), usbCameraGroup);
+  usbCameraConfigStateLabel_ = new QLabel(CRAWLING_TEXT("未连接"), usbCameraGroup);
+  usbCameraConfigStateLabel_->setWordWrap(true);
+  usbCameraForm->addRow(CRAWLING_TEXT("设备"), usbCameraDeviceBox_);
+  usbCameraForm->addRow(CRAWLING_TEXT("帧率 (fps)"), usbCameraFpsBox_);
+  usbCameraForm->addRow(QString(), usbCameraAutoConnectBox_);
+  usbCameraForm->addRow(QString(), usbCameraFlipHorizontalBox_);
+  usbCameraForm->addRow(QString(), usbCameraFlipVerticalBox_);
+  usbCameraForm->addRow(QString(), usbCameraScanButton);
+  usbCameraForm->addRow(QString(), usbCameraConnectButton_);
+  usbCameraForm->addRow(QString(), usbCameraDisconnectButton);
+  usbCameraForm->addRow(CRAWLING_TEXT("连接状态"), usbCameraConfigStateLabel_);
+  connect(usbCameraScanButton, &QPushButton::clicked, this, [this] {
+    QMetaObject::invokeMethod(usbCamera_, "scanDevices", Qt::QueuedConnection);
+  });
+  connect(usbCameraConnectButton_, &QPushButton::clicked, this, [this] {
+    if (usbCameraDeviceBox_->currentIndex() < 0) {
+      appendLog(CRAWLING_TEXT("请先选择 USB 摄像头设备"));
+      return;
+    }
+    settings_ = settingsFromUi();
+    QSettings persistent(DriveSettings::persistentFilePath(), QSettings::IniFormat);
+    settings_.save(persistent);
+    persistent.sync();
+    const int deviceIndex = usbCameraDeviceBox_->currentData().toInt();
+    QMetaObject::invokeMethod(usbCamera_, "connectCamera", Qt::QueuedConnection,
+                              Q_ARG(int, deviceIndex),
+                              Q_ARG(int, usbCameraFpsBox_->value()),
+                              Q_ARG(bool, usbCameraFlipHorizontalBox_->isChecked()),
+                              Q_ARG(bool, usbCameraFlipVerticalBox_->isChecked()));
+  });
+  connect(usbCameraDisconnectButton, &QPushButton::clicked, this, [this] {
+    QMetaObject::invokeMethod(usbCamera_, "disconnectCamera", Qt::QueuedConnection);
+  });
+  settingsLayout->addWidget(usbCameraGroup, 3, 0, 1, 3);
+
   auto* clampGroup = new QGroupBox(CRAWLING_TEXT("\xE5\xA4\xB9""\xE5\xAD\x90""\xE7\x94\xB5""\xE6\x9C\xBA"" CANopen"), settingsPage);
   auto* clampForm = new QFormLayout(clampGroup);
   clampSerialPortBox_ = new QComboBox(clampGroup);
@@ -1076,11 +1186,29 @@ void MainWindow::buildInterface() {
   }
   clampNodeIdBox_ = new QSpinBox(clampGroup);
   clampNodeIdBox_->setRange(0, 127);
+  clampXMotorIdBox_ = new QSpinBox(clampGroup); clampXMotorIdBox_->setRange(1, 127);
+  clampYMotorIdBox_ = new QSpinBox(clampGroup); clampYMotorIdBox_->setRange(1, 127);
+  clampZMotorIdBox_ = new QSpinBox(clampGroup); clampZMotorIdBox_->setRange(1, 127);
+  clampXMotorSignBox_ = new QComboBox(clampGroup);
+  clampYMotorSignBox_ = new QComboBox(clampGroup);
+  clampZMotorSignBox_ = new QComboBox(clampGroup);
+  for (auto* box : {clampXMotorSignBox_, clampYMotorSignBox_, clampZMotorSignBox_}) {
+    box->addItem(CRAWLING_TEXT("+1 正向"), 1);
+    box->addItem(CRAWLING_TEXT("-1 反向"), -1);
+  }
   clampConnectionLabel_ = new QLabel(CRAWLING_TEXT("\xE6\x9C\xAA""\xE6\xA3\x80""\xE6\xB5\x8B"""), clampGroup);
   clampForm->addRow(CRAWLING_TEXT("SLCAN \xE4\xB8\xB2""\xE5\x8F\xA3"""), clampSerialPortBox_);
   clampForm->addRow(CRAWLING_TEXT("\xE9\x80\x82""\xE9\x85\x8D""\xE5\x99\xA8""\xE6\xB3\xA2""\xE7\x89\xB9""\xE7\x8E\x87"""), clampSerialBaudBox_);
   clampForm->addRow(CRAWLING_TEXT("CAN \xE6\xB3\xA2""\xE7\x89\xB9""\xE7\x8E\x87"""), clampCanBitrateBox_);
   clampForm->addRow(CRAWLING_TEXT("CANopen \xE8\x8A\x82""\xE7\x82\xB9"" ID"), clampNodeIdBox_);
+  auto addClampAxis = [clampGroup, clampForm](const QString& label, QSpinBox* id, QComboBox* sign) {
+    auto* w = new QWidget(clampGroup); auto* l = new QHBoxLayout(w);
+    l->setContentsMargins(0, 0, 0, 0); l->addWidget(id); l->addWidget(sign);
+    clampForm->addRow(label, w);
+  };
+  addClampAxis(CRAWLING_TEXT("X 电机 ID / 方向"), clampXMotorIdBox_, clampXMotorSignBox_);
+  addClampAxis(CRAWLING_TEXT("Y 电机 ID / 方向"), clampYMotorIdBox_, clampYMotorSignBox_);
+  addClampAxis(CRAWLING_TEXT("Z 电机 ID / 方向"), clampZMotorIdBox_, clampZMotorSignBox_);
   clampForm->addRow(CRAWLING_TEXT("\xE6\xA3\x80""\xE6\xB5\x8B""\xE7\x8A\xB6""\xE6\x80\x81"""), clampConnectionLabel_);
   settingsLayout->addWidget(clampGroup, 2, 2);
 
@@ -1226,7 +1354,7 @@ void MainWindow::buildInterface() {
     correctionLayout->addWidget(correctionControls.at(column), 1, column);
     correctionLayout->setColumnStretch(column, 1);
   }
-  settingsLayout->addWidget(correctionGroup, 3, 0, 1, 3);
+  settingsLayout->addWidget(correctionGroup, 4, 0, 1, 3);
 
   auto* applyArea = new QWidget(settingsPage);
   auto* applyLayout = new QVBoxLayout(applyArea);
@@ -1240,7 +1368,7 @@ void MainWindow::buildInterface() {
   parameterStatusLabel_->setWordWrap(true);
   applyLayout->addWidget(applyAllButton_);
   applyLayout->addWidget(parameterStatusLabel_);
-  settingsLayout->addWidget(applyArea, 4, 0, 1, 3);
+  settingsLayout->addWidget(applyArea, 5, 0, 1, 3);
   connect(applyAllButton_, &QPushButton::clicked, this, &MainWindow::applyAllParameters);
   const auto markParametersDirty = [this] {
     if (parameterStatusLabel_) {
@@ -1256,17 +1384,18 @@ void MainWindow::buildInterface() {
     connect(box, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, markParametersDirty);
   }
   for (QSpinBox* box : {leftMotorIdBox_, rightMotorIdBox_, commandTimeoutBox_, feedbackTimeoutBox_,
-                        armingTimeoutBox_, clampNodeIdBox_}) {
+                        armingTimeoutBox_, clampNodeIdBox_, usbCameraFpsBox_}) {
     connect(box, QOverload<int>::of(&QSpinBox::valueChanged), this, markParametersDirty);
   }
   for (QComboBox* box : {leftMotorPortBox_, leftMotorBaudBox_,
                          rightMotorPortBox_, rightMotorBaudBox_, imuPortBox_, imuBaudBox_,
-                         imuDividerBox_,
+                         imuDividerBox_, usbCameraDeviceBox_,
                          clampSerialPortBox_, clampSerialBaudBox_, clampCanBitrateBox_,
                          leftSignBox_, rightSignBox_}) {
     connect(box, QOverload<int>::of(&QComboBox::currentIndexChanged), this, markParametersDirty);
   }
   connect(laserSerialBox_, &QLineEdit::textChanged, this, markParametersDirty);
+  connect(usbCameraAutoConnectBox_, &QCheckBox::toggled, this, markParametersDirty);
   connect(autoConnectCheckBox_, &QCheckBox::toggled, this, markParametersDirty);
   connect(autoConnectCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
     settings_.autoConnectOnStartup = checked;
@@ -1276,7 +1405,7 @@ void MainWindow::buildInterface() {
     persistent.endGroup();
     persistent.sync();
   });
-  settingsLayout->setRowStretch(5, 1);
+  settingsLayout->setRowStretch(6, 1);
   settingsScroll->setWidget(settingsPage);
   tabs->addTab(settingsScroll, CRAWLING_TEXT("\xE9\x85\x8D""\xE7\xBD\xAE"""));
   root->addWidget(tabs, 1);
@@ -1343,6 +1472,14 @@ void MainWindow::bindController() {
           &MainWindow::updateCameraConnection, Qt::QueuedConnection);
   connect(devices_, &DeviceController::cameraFrameChanged, this,
           &MainWindow::updateCameraFrame, Qt::QueuedConnection);
+  connect(usbCamera_, &UsbCameraController::devicesChanged, this,
+          &MainWindow::updateUsbCameraDevices, Qt::QueuedConnection);
+  connect(usbCamera_, &UsbCameraController::connectionChanged, this,
+          &MainWindow::updateUsbCameraConnection, Qt::QueuedConnection);
+  connect(usbCamera_, &UsbCameraController::frameChanged, this,
+          &MainWindow::updateUsbCameraFrame, Qt::QueuedConnection);
+  connect(usbCamera_, &UsbCameraController::logMessage, this,
+          &MainWindow::appendLog, Qt::QueuedConnection);
   connect(controller_, &SynchronizedDriveController::stateChanged, this,
           &MainWindow::updateState, Qt::QueuedConnection);
   connect(controller_, &SynchronizedDriveController::connectionChanged, this,
@@ -1469,6 +1606,46 @@ void MainWindow::updateCameraFrame(quint32 frameNumber, quint32 width,
   cameraFrameConfigLabel_->setText(
       CRAWLING_TEXT("帧 #%1，%2 x %3，数据点 %4")
           .arg(frameNumber).arg(width).arg(height).arg(pointCount));
+}
+
+void MainWindow::updateUsbCameraDevices(const QStringList& devices) {
+  if (!usbCameraDeviceBox_) return;
+  const int configured = usbCameraDeviceBox_->currentIndex() >= 0
+                             ? usbCameraDeviceBox_->currentData().toInt()
+                             : settings_.usbCameraDeviceIndex;
+  const QSignalBlocker blocker(usbCameraDeviceBox_);
+  usbCameraDeviceBox_->clear();
+  for (const QString& device : devices) {
+    bool okay = false;
+    const int index = device.section(CRAWLING_TEXT(" | "), 0, 0).toInt(&okay);
+    if (okay) usbCameraDeviceBox_->addItem(device, index);
+  }
+  const int selected = usbCameraDeviceBox_->findData(configured);
+  usbCameraDeviceBox_->setCurrentIndex(selected >= 0 ? selected
+                                                     : (usbCameraDeviceBox_->count() > 0 ? 0 : -1));
+}
+
+void MainWindow::updateUsbCameraConnection(bool connected, const QString& message) {
+  if (usbCameraConfigStateLabel_) {
+    usbCameraConfigStateLabel_->setText(message.isEmpty()
+                                            ? (connected ? CRAWLING_TEXT("已连接")
+                                                         : CRAWLING_TEXT("未连接"))
+                                            : message);
+  }
+  if (usbCameraConnectButton_) usbCameraConnectButton_->setEnabled(!connected);
+  if (!connected && usbCameraPreview_) {
+    usbCameraPreview_->setPixmap(QPixmap());
+    usbCameraPreview_->setText(CRAWLING_TEXT("USB 摄像头未连接"));
+  }
+}
+
+void MainWindow::updateUsbCameraFrame(const QImage& image) {
+  if (!usbCameraPreview_ || image.isNull()) return;
+  usbCameraPreview_->setMinimumSize(image.size());
+  usbCameraPreview_->setMaximumSize(image.size());
+  usbCameraPreview_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+  usbCameraPreview_->setText(QString());
+  usbCameraPreview_->setPixmap(QPixmap::fromImage(image));
 }
 
 void MainWindow::updatePointCloudReady() {
@@ -1641,12 +1818,25 @@ DriveSettings MainWindow::settingsFromUi() const {
   value.imuBaudRate = imuBaudBox_->currentData().toInt();
   value.imuOutputDivider = imuDividerBox_->currentData().toInt();
   value.laserSerialNumber = laserSerialBox_->text().trimmed();
+  value.usbCameraDeviceIndex = usbCameraDeviceBox_->currentIndex() >= 0
+                                   ? usbCameraDeviceBox_->currentData().toInt()
+                                   : -1;
+  value.usbCameraFps = usbCameraFpsBox_->value();
+  value.usbCameraAutoConnect = usbCameraAutoConnectBox_->isChecked();
+  value.usbCameraFlipHorizontal = usbCameraFlipHorizontalBox_->isChecked();
+  value.usbCameraFlipVertical = usbCameraFlipVerticalBox_->isChecked();
   value.autoConnectOnStartup = autoConnectCheckBox_->isChecked();
   value.manualJogPercent = speedSlider_->value();
   value.clampSerialPort = clampSerialPortBox_->currentData().toString();
   value.clampSerialBaudRate = clampSerialBaudBox_->currentData().toInt();
   value.clampCanBitrate = clampCanBitrateBox_->currentData().toInt();
   value.clampNodeId = clampNodeIdBox_->value();
+  value.clampXMotorId = clampXMotorIdBox_->value();
+  value.clampYMotorId = clampYMotorIdBox_->value();
+  value.clampZMotorId = clampZMotorIdBox_->value();
+  value.clampXMotorSign = clampXMotorSignBox_->currentData().toInt();
+  value.clampYMotorSign = clampYMotorSignBox_->currentData().toInt();
+  value.clampZMotorSign = clampZMotorSignBox_->currentData().toInt();
   value.leftMotorId = leftMotorIdBox_->value();
   value.rightMotorId = rightMotorIdBox_->value();
   value.leftMotorSign = leftSignBox_->currentData().toInt();
@@ -1667,6 +1857,7 @@ DriveSettings MainWindow::settingsFromUi() const {
   value.synchronizer.integralGain = synchronizationIBox_->value();
   value.synchronizer.maximumCorrectionMps = maxCorrectionBox_->value() / kMillimetersPerMeter;
   value.synchronizer.minimumControlledSpeedMps = minSyncSpeedBox_->value() / kMillimetersPerMeter;
+  if (clampMotors_) clampMotors_->setSettings(value);
   return value;
 }
 
@@ -1679,12 +1870,24 @@ void MainWindow::settingsToUi(const DriveSettings& settings) {
   setComboToValue(imuBaudBox_, settings.imuBaudRate);
   setComboToValue(imuDividerBox_, settings.imuOutputDivider);
   laserSerialBox_->setText(settings.laserSerialNumber);
+  setComboToValue(usbCameraDeviceBox_, settings.usbCameraDeviceIndex);
+  if (settings.usbCameraDeviceIndex < 0) usbCameraDeviceBox_->setCurrentIndex(-1);
+  usbCameraFpsBox_->setValue(settings.usbCameraFps);
+  usbCameraAutoConnectBox_->setChecked(settings.usbCameraAutoConnect);
+  usbCameraFlipHorizontalBox_->setChecked(settings.usbCameraFlipHorizontal);
+  usbCameraFlipVerticalBox_->setChecked(settings.usbCameraFlipVertical);
   autoConnectCheckBox_->setChecked(settings.autoConnectOnStartup);
   speedSlider_->setValue(settings.manualJogPercent);
   setComboToText(clampSerialPortBox_, settings.clampSerialPort);
   setComboToValue(clampSerialBaudBox_, settings.clampSerialBaudRate);
   setComboToValue(clampCanBitrateBox_, settings.clampCanBitrate);
   clampNodeIdBox_->setValue(settings.clampNodeId);
+  clampXMotorIdBox_->setValue(settings.clampXMotorId);
+  clampYMotorIdBox_->setValue(settings.clampYMotorId);
+  clampZMotorIdBox_->setValue(settings.clampZMotorId);
+  setComboToValue(clampXMotorSignBox_, settings.clampXMotorSign);
+  setComboToValue(clampYMotorSignBox_, settings.clampYMotorSign);
+  setComboToValue(clampZMotorSignBox_, settings.clampZMotorSign);
   leftMotorIdBox_->setValue(settings.leftMotorId);
   rightMotorIdBox_->setValue(settings.rightMotorId);
   setComboToValue(leftSignBox_, settings.leftMotorSign);
@@ -1842,3 +2045,4 @@ QDoubleSpinBox* MainWindow::makeDoubleSpin(double minimum, double maximum,
 }
 
 }  // namespace crawling
+

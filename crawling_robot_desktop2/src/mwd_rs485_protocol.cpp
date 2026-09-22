@@ -9,6 +9,10 @@
 namespace crawling {
 namespace {
 
+constexpr int kFrameLength = 13;
+constexpr int kFrameWithoutCrcLength = 11;
+constexpr int kDataLength = 8;
+
 std::int16_t readInt16LittleEndian(const QByteArray& data, int offset) {
   const auto low = static_cast<std::uint8_t>(data.at(offset));
   const auto high = static_cast<std::uint8_t>(data.at(offset + 1));
@@ -16,26 +20,48 @@ std::int16_t readInt16LittleEndian(const QByteArray& data, int offset) {
                                    (static_cast<std::uint16_t>(high) << 8U));
 }
 
+std::int32_t readInt32LittleEndian(const QByteArray& data, int offset) {
+  std::uint32_t raw = 0;
+  for (int index = 0; index < 4; ++index) {
+    raw |= static_cast<std::uint32_t>(
+               static_cast<std::uint8_t>(data.at(offset + index)))
+           << (index * 8);
+  }
+  return static_cast<std::int32_t>(raw);
+}
+
+void appendUInt32LittleEndian(QByteArray* data, std::uint32_t value) {
+  for (int index = 0; index < 4; ++index) {
+    data->append(static_cast<char>((value >> (index * 8)) & 0xFFU));
+  }
+}
+
 }  // namespace
 
 QByteArray MwdRs485Protocol::command(std::uint8_t command,
                                      std::uint8_t motorId,
                                      const QByteArray& data) {
-  if (motorId < 1 || motorId > 32 || data.size() > 100) {
+  if (motorId < 1 || motorId > 32 || data.size() > (kDataLength - 1)) {
     return {};
   }
 
   QByteArray frame;
-  frame.reserve(5 + data.size() + (data.isEmpty() ? 0 : 1));
+  frame.reserve(kFrameLength);
   frame.append(static_cast<char>(kFrameHeader));
-  frame.append(static_cast<char>(command));
   frame.append(static_cast<char>(motorId));
-  frame.append(static_cast<char>(data.size()));
-  frame.append(static_cast<char>(checksum(frame)));
-  if (!data.isEmpty()) {
-    frame.append(data);
-    frame.append(static_cast<char>(checksum(data)));
+  frame.append(static_cast<char>(kDataLength));
+  frame.append(static_cast<char>(command));
+  frame.append(data);
+  while (frame.size() < kFrameWithoutCrcLength) {
+    frame.append('\0');
   }
+
+  // V3.8 specifies CRC16 with the low byte first but does not document the
+  // polynomial or initial value. Keep the selected Modbus-compatible
+  // parameters centralized here until a vendor reference frame is available.
+  const std::uint16_t crc = crc16(frame);
+  frame.append(static_cast<char>(crc & 0xFFU));
+  frame.append(static_cast<char>((crc >> 8U) & 0xFFU));
   return frame;
 }
 
@@ -46,11 +72,13 @@ QByteArray MwdRs485Protocol::speedCommand(std::uint8_t motorId,
       static_cast<double>(std::numeric_limits<std::int32_t>::min()),
       static_cast<double>(std::numeric_limits<std::int32_t>::max()));
   const auto raw = static_cast<std::uint32_t>(static_cast<std::int32_t>(scaled));
+
   QByteArray data;
-  data.reserve(4);
-  for (int index = 0; index < 4; ++index) {
-    data.append(static_cast<char>((raw >> (index * 8)) & 0xFFU));
-  }
+  data.reserve(7);
+  data.append('\0');
+  data.append('\0');
+  data.append('\0');
+  appendUInt32LittleEndian(&data, raw);
   return command(kSpeedClosedLoop, motorId, data);
 }
 
@@ -58,36 +86,31 @@ QByteArray MwdRs485Protocol::multiTurnAngleQuery(std::uint8_t motorId) {
   return command(kReadMultiTurnAngle, motorId);
 }
 
+QByteArray MwdRs485Protocol::multiTurnEncoderQuery(std::uint8_t motorId) {
+  return command(kReadMultiTurnEncoder, motorId);
+}
+
 QByteArray MwdRs485Protocol::multiTurnPositionCommand(
     std::uint8_t motorId, std::int64_t angleHundredthDegree,
     double maximumSpeedDps) {
+  const auto boundedAngle = std::clamp(
+      angleHundredthDegree,
+      static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::min()),
+      static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::max()));
+  const double boundedSpeed = std::clamp(
+      std::round(std::isfinite(maximumSpeedDps) ? maximumSpeedDps : 0.0),
+      0.0, static_cast<double>(std::numeric_limits<std::uint16_t>::max()));
+  const auto rawAngle =
+      static_cast<std::uint32_t>(static_cast<std::int32_t>(boundedAngle));
+  const auto rawSpeed = static_cast<std::uint16_t>(boundedSpeed);
+
   QByteArray data;
-  data.reserve(12);
-  const auto rawAngle = static_cast<std::uint64_t>(angleHundredthDegree);
-  for (int index = 0; index < 8; ++index) {
-    data.append(static_cast<char>((rawAngle >> (index * 8)) & 0xFFU));
-  }
-  const double scaledSpeed = std::clamp(
-      std::round(std::isfinite(maximumSpeedDps) ? maximumSpeedDps * 100.0
-                                                : 0.0),
-      0.0, static_cast<double>(std::numeric_limits<std::uint32_t>::max()));
-  const auto rawSpeed = static_cast<std::uint32_t>(scaledSpeed);
-  for (int index = 0; index < 4; ++index) {
-    data.append(static_cast<char>((rawSpeed >> (index * 8)) & 0xFFU));
-  }
+  data.reserve(7);
+  data.append('\0');
+  data.append(static_cast<char>(rawSpeed & 0xFFU));
+  data.append(static_cast<char>((rawSpeed >> 8U) & 0xFFU));
+  appendUInt32LittleEndian(&data, rawAngle);
   return command(kMultiTurnPositionClosedLoop, motorId, data);
-}
-
-QByteArray MwdRs485Protocol::brakeCommand(std::uint8_t motorId, bool apply) {
-  QByteArray data;
-  data.append(static_cast<char>(apply ? kBrakeApplied : kBrakeReleased));
-  return command(kBrakeControl, motorId, data);
-}
-
-QByteArray MwdRs485Protocol::brakeStatusQuery(std::uint8_t motorId) {
-  QByteArray data;
-  data.append(static_cast<char>(kBrakeRead));
-  return command(kBrakeControl, motorId, data);
 }
 
 bool MwdRs485Protocol::takeFrame(QByteArray* receiveBuffer,
@@ -105,103 +128,86 @@ bool MwdRs485Protocol::takeFrame(QByteArray* receiveBuffer,
     if (header > 0) {
       receiveBuffer->remove(0, header);
     }
-    if (receiveBuffer->size() < 5) {
+    if (receiveBuffer->size() < kFrameLength) {
       return false;
     }
 
-    const auto motorId = static_cast<std::uint8_t>(receiveBuffer->at(2));
-    const auto dataLength = static_cast<std::uint8_t>(receiveBuffer->at(3));
-    const int totalLength = 5 + dataLength + (dataLength == 0 ? 0 : 1);
-    if (motorId < 1 || motorId > 32 || dataLength > 100 ||
-        checksum(receiveBuffer->left(4)) !=
-            static_cast<std::uint8_t>(receiveBuffer->at(4))) {
-      receiveBuffer->remove(0, 1);
-      continue;
-    }
-    if (receiveBuffer->size() < totalLength) {
-      return false;
-    }
-
-    const QByteArray data = receiveBuffer->mid(5, dataLength);
-    if (dataLength > 0 &&
-        checksum(data) !=
-            static_cast<std::uint8_t>(receiveBuffer->at(totalLength - 1))) {
+    const auto motorId = static_cast<std::uint8_t>(receiveBuffer->at(1));
+    const auto dataLength = static_cast<std::uint8_t>(receiveBuffer->at(2));
+    const std::uint16_t receivedCrc =
+        static_cast<std::uint16_t>(
+            static_cast<std::uint8_t>(receiveBuffer->at(11))) |
+        (static_cast<std::uint16_t>(
+             static_cast<std::uint8_t>(receiveBuffer->at(12)))
+         << 8U);
+    if (motorId < 1 || motorId > 32 || dataLength != kDataLength ||
+        crc16(receiveBuffer->left(kFrameWithoutCrcLength)) != receivedCrc) {
       receiveBuffer->remove(0, 1);
       continue;
     }
 
-    frame->command = static_cast<std::uint8_t>(receiveBuffer->at(1));
+    frame->data = receiveBuffer->mid(3, kDataLength);
+    frame->command = static_cast<std::uint8_t>(frame->data.at(0));
     frame->motorId = motorId;
-    frame->data = data;
-    receiveBuffer->remove(0, totalLength);
+    receiveBuffer->remove(0, kFrameLength);
     return true;
   }
 }
 
 std::optional<MwdMotorFeedback> MwdRs485Protocol::parseMotorFeedback(
     const MwdRs485Frame& frame) {
-  if ((frame.command != kReadStatus2 && frame.command != kSpeedClosedLoop &&
+  if ((frame.command != kReadStatus2 &&
+       frame.command != kSpeedClosedLoop &&
        frame.command != kMultiTurnPositionClosedLoop) ||
-      frame.motorId < 1 || frame.motorId > 32 || frame.data.size() != 7) {
+      frame.motorId < 1 || frame.motorId > 32 ||
+      frame.data.size() != kDataLength ||
+      static_cast<std::uint8_t>(frame.data.at(0)) != frame.command) {
     return std::nullopt;
   }
 
   MwdMotorFeedback feedback;
   feedback.motorId = frame.motorId;
   feedback.temperatureC = static_cast<std::int8_t>(
-      static_cast<std::uint8_t>(frame.data.at(0)));
-  feedback.controlValue = readInt16LittleEndian(frame.data, 1);
-  feedback.speedDps = readInt16LittleEndian(frame.data, 3);
-  feedback.encoder = static_cast<std::uint16_t>(
-      readInt16LittleEndian(frame.data, 5));
+      static_cast<std::uint8_t>(frame.data.at(1)));
+  feedback.controlValue = readInt16LittleEndian(frame.data, 2);
+  feedback.speedDps = readInt16LittleEndian(frame.data, 4);
+  feedback.outputAngleDeg = readInt16LittleEndian(frame.data, 6);
   return feedback;
 }
 
 std::optional<std::int64_t> MwdRs485Protocol::parseMultiTurnAngle(
     const MwdRs485Frame& frame) {
   if (frame.command != kReadMultiTurnAngle || frame.motorId < 1 ||
-      frame.motorId > 32 || frame.data.size() != 8) {
+      frame.motorId > 32 || frame.data.size() != kDataLength ||
+      static_cast<std::uint8_t>(frame.data.at(0)) != frame.command) {
     return std::nullopt;
   }
-  std::uint64_t raw = 0;
-  for (int index = 0; index < 8; ++index) {
-    raw |= static_cast<std::uint64_t>(
-               static_cast<std::uint8_t>(frame.data.at(index)))
-           << (index * 8);
-  }
-  if (raw <= static_cast<std::uint64_t>(
-                 std::numeric_limits<std::int64_t>::max())) {
-    return static_cast<std::int64_t>(raw);
-  }
-  const std::uint64_t magnitude = (~raw) + 1U;
-  if (magnitude == (std::uint64_t{1} << 63U)) {
-    return std::numeric_limits<std::int64_t>::min();
-  }
-  return -static_cast<std::int64_t>(magnitude);
+  return static_cast<std::int64_t>(readInt32LittleEndian(frame.data, 4));
 }
 
-std::optional<bool> MwdRs485Protocol::parseBrakeApplied(
+std::optional<std::int32_t> MwdRs485Protocol::parseMultiTurnEncoderPosition(
     const MwdRs485Frame& frame) {
-  if (frame.command != kBrakeControl || frame.motorId < 1 ||
-      frame.motorId > 32 || frame.data.size() != 1) {
+  if (frame.command != kReadMultiTurnEncoder || frame.motorId < 1 ||
+      frame.motorId > 32 || frame.data.size() != kDataLength ||
+      static_cast<std::uint8_t>(frame.data.at(0)) != frame.command) {
     return std::nullopt;
   }
-  const auto state = static_cast<std::uint8_t>(frame.data.at(0));
-  if (state == kBrakeApplied) {
-    return true;
-  }
-  if (state == kBrakeReleased) {
-    return false;
-  }
-  return std::nullopt;
+  return readInt32LittleEndian(frame.data, 4);
 }
 
-std::uint8_t MwdRs485Protocol::checksum(const QByteArray& bytes) {
-  std::uint8_t sum = 0;
+std::uint16_t MwdRs485Protocol::crc16(const QByteArray& bytes) {
+  std::uint16_t crc = 0xFFFFU;
   for (const char byte : bytes) {
-    sum = static_cast<std::uint8_t>(sum + static_cast<std::uint8_t>(byte));
+    crc ^= static_cast<std::uint8_t>(byte);
+    for (int bit = 0; bit < 8; ++bit) {
+      if ((crc & 1U) != 0U) {
+        crc = static_cast<std::uint16_t>((crc >> 1U) ^ 0xA001U);
+      } else {
+        crc = static_cast<std::uint16_t>(crc >> 1U);
+      }
+    }
   }
-  return sum;
+  return crc;
 }
 
 }  // namespace crawling

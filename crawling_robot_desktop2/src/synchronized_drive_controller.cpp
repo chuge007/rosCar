@@ -8,7 +8,7 @@
 namespace crawling {
 namespace {
 
-// The correction loop is fed by the raw image at roughly 20 Hz. A 334 ms
+// The correction loop is fed by the raw image at roughly 20 Hz. A 100 ms
 // command period leaves the chassis moving several millimetres before a new
 // turn command reaches the motors, which is enough to overshoot a narrow weld.
 // Both wheels use independent RS485 ports, so 10 Hz leaves bus margin while

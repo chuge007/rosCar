@@ -19,7 +19,7 @@ namespace MwdMotorDetector
         public int TemperatureC { get; set; }
         public int ControlValue { get; set; }
         public int SpeedDps { get; set; }
-        public int Encoder { get; set; }
+        public int OutputAngleDeg { get; set; }
     }
 
     internal sealed class SerialPortItem
@@ -53,6 +53,8 @@ namespace MwdMotorDetector
     {
         private const byte FrameHeader = 0x3E;
         private const byte ReadStatus2 = 0x9C;
+        private const int FrameLength = 13;
+        private const byte DataLength = 8;
 
         public static List<MotorStatus> Scan(
             IList<string> ports,
@@ -180,38 +182,36 @@ namespace MwdMotorDetector
 
         private static byte[] BuildStatusQuery(int motorId)
         {
-            var query = new byte[] { FrameHeader, ReadStatus2, (byte)motorId, 0, 0 };
-            query[4] = LowByteSum(query, 0, 4);
+            var query = new byte[FrameLength];
+            query[0] = FrameHeader;
+            query[1] = (byte)motorId;
+            query[2] = DataLength;
+            query[3] = ReadStatus2;
+            ushort crc = Crc16(query, 0, FrameLength - 2);
+            query[11] = (byte)(crc & 0xFF);
+            query[12] = (byte)(crc >> 8);
             return query;
         }
 
         private static MotorStatus FindStatusResponse(List<byte> bytes, int expectedMotorId)
         {
-            for (int offset = 0; offset <= bytes.Count - 5; offset++)
+            for (int offset = 0; offset <= bytes.Count - FrameLength; offset++)
             {
                 if (bytes[offset] != FrameHeader)
                 {
                     continue;
                 }
 
-                int dataLength = bytes[offset + 3];
-                int frameLength = 5 + dataLength + (dataLength > 0 ? 1 : 0);
-                if (offset + frameLength > bytes.Count)
+                if (bytes[offset + 1] != expectedMotorId ||
+                    bytes[offset + 2] != DataLength ||
+                    bytes[offset + 3] != ReadStatus2)
                 {
                     continue;
                 }
-                if (LowByteSum(bytes, offset, 4) != bytes[offset + 4])
-                {
-                    continue;
-                }
-                if (dataLength > 0 &&
-                    LowByteSum(bytes, offset + 5, dataLength) !=
-                    bytes[offset + frameLength - 1])
-                {
-                    continue;
-                }
-                if (bytes[offset + 1] != ReadStatus2 ||
-                    bytes[offset + 2] != expectedMotorId || dataLength != 7)
+
+                ushort receivedCrc = (ushort)(bytes[offset + 11] |
+                    (bytes[offset + 12] << 8));
+                if (Crc16(bytes, offset, FrameLength - 2) != receivedCrc)
                 {
                     continue;
                 }
@@ -219,23 +219,29 @@ namespace MwdMotorDetector
                 return new MotorStatus
                 {
                     MotorId = expectedMotorId,
-                    TemperatureC = ToSigned8(bytes[offset + 5]),
-                    ControlValue = ToSigned16(bytes[offset + 6], bytes[offset + 7]),
-                    SpeedDps = ToSigned16(bytes[offset + 8], bytes[offset + 9]),
-                    Encoder = bytes[offset + 10] | (bytes[offset + 11] << 8)
+                    TemperatureC = ToSigned8(bytes[offset + 4]),
+                    ControlValue = ToSigned16(bytes[offset + 5], bytes[offset + 6]),
+                    SpeedDps = ToSigned16(bytes[offset + 7], bytes[offset + 8]),
+                    OutputAngleDeg = ToSigned16(bytes[offset + 9], bytes[offset + 10])
                 };
             }
             return null;
         }
 
-        private static byte LowByteSum(IList<byte> bytes, int offset, int count)
+        private static ushort Crc16(IList<byte> bytes, int offset, int count)
         {
-            int sum = 0;
+            ushort crc = 0xFFFF;
             for (int index = 0; index < count; index++)
             {
-                sum = (sum + bytes[offset + index]) & 0xFF;
+                crc ^= bytes[offset + index];
+                for (int bit = 0; bit < 8; bit++)
+                {
+                    crc = (ushort)(((crc & 1) != 0)
+                        ? ((crc >> 1) ^ 0xA001)
+                        : (crc >> 1));
+                }
             }
-            return (byte)sum;
+            return crc;
         }
 
         private static int ToSigned8(byte value)
@@ -253,19 +259,20 @@ namespace MwdMotorDetector
         {
             byte[] query = BuildStatusQuery(1);
             string queryHex = BitConverter.ToString(query);
-            if (queryHex != "3E-9C-01-00-DB")
+            if (queryHex != "3E-01-08-9C-00-00-00-00-00-00-00-F2-30")
             {
                 throw new InvalidOperationException("Query self-test failed: " + queryHex);
             }
 
             var response = new List<byte>
             {
-                0x3E, 0x9C, 0x01, 0x07, 0xE2,
-                0x19, 0x34, 0x12, 0x9C, 0xFF, 0x78, 0x56, 0xC8
+                0x3E, 0x01, 0x08, 0x9C, 0x19,
+                0x34, 0x12, 0x9C, 0xFF, 0x78, 0x56, 0x7A, 0xD8
             };
             MotorStatus parsed = FindStatusResponse(response, 1);
             if (parsed == null || parsed.SpeedDps != -100 ||
-                parsed.Encoder != 0x5678 || parsed.ControlValue != 0x1234)
+                parsed.OutputAngleDeg != 0x5678 ||
+                parsed.ControlValue != 0x1234)
             {
                 throw new InvalidOperationException("Response parser self-test failed.");
             }
@@ -363,8 +370,7 @@ namespace MwdMotorDetector
             baudBox.Items.Add("\u81ea\u52a8\u5faa\u73af (\u5168\u90e8)");
             baudBox.Items.AddRange(new object[]
             {
-                "9600", "19200", "38400", "57600", "115200", "230400",
-                "460800", "1000000", "2000000", "4000000"
+                "115200", "500000", "1000000", "1500000", "2500000"
             });
             baudBox.SelectedIndex = 0;
 
@@ -425,7 +431,7 @@ namespace MwdMotorDetector
             resultGrid.Columns.Add("MotorId", "\u7535\u673a ID");
             resultGrid.Columns.Add("Temperature", "\u6e29\u5ea6 (C)");
             resultGrid.Columns.Add("Speed", "\u8f6c\u901f (dps)");
-            resultGrid.Columns.Add("Encoder", "\u7f16\u7801\u5668");
+            resultGrid.Columns.Add("OutputAngle", "\u8f93\u51fa\u89d2\u5ea6 (deg)");
             resultGrid.Columns.Add("Control", "\u63a7\u5236\u91cf");
             root.Controls.Add(resultGrid, 0, 1);
 
@@ -595,8 +601,7 @@ namespace MwdMotorDetector
             IList<int> baudRates = baudBox.SelectedIndex == 0
                 ? (IList<int>)new List<int>
                 {
-                    9600, 19200, 38400, 57600, 115200, 230400,
-                    460800, 1000000, 2000000, 4000000
+                    115200, 500000, 1000000, 1500000, 2500000
                 }
                 : (IList<int>)new List<int>
                 {
@@ -678,7 +683,7 @@ namespace MwdMotorDetector
                         status.MotorId,
                         status.TemperatureC,
                         status.SpeedDps,
-                        status.Encoder,
+                        status.OutputAngleDeg,
                         status.ControlValue);
                 }
 

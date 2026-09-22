@@ -1,0 +1,59 @@
+#ifndef __MOTOR_CONTROL_H
+#define __MOTOR_CONTROL_H
+
+/*
+ * 电机控制静态库 MotorControl
+ * ------------------------------------------------------------------
+ * 内部封装:
+ *   - 2 路串口(UART)驱动与接收线程
+ *   - 电机指令协议组包 / 返回数据解析 / 临界区保护
+ * 对外只暴露 C 风格接口, 上层无需关心串口细节。
+ *
+ * 端口约定: port1 对应电机 addr=1, port2 对应电机 addr=2
+ */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* 传感器姿态数据回调, 由库内部接收线程触发。
+   可通过 Motor_RegisterSensorCallback 注册, 传 NULL 表示不接收。*/
+typedef void (*Motor_SensorCallback)(float roll, float pitch, float yaw);
+
+/* 初始化: 打开两路串口并启动接收线程。
+   返回 0 成功, -1 失败(任一串口打开失败)。重复调用只生效一次。*/
+int  Motor_Init(unsigned long port1, unsigned long baud1,
+                unsigned long port2, unsigned long baud2);
+
+/* 反初始化: 关闭串口与接收线程, 释放临界区。*/
+void Motor_Uninit(void);
+
+/* ------------------ 电机控制指令 ------------------ */
+void Motor_Start(char addr, int speed);                 /*启动电机 */
+void Motor_Stop(char addr);                             /* 停止电机 */
+void Motor_SetSpeed(char addr, unsigned int speed);     /* 设置单电机速度 */
+void Motor_GoStraight(unsigned int speed);              /*  双电机同步前进 */
+void Motor_SetPlace(unsigned int place, int speed = 40000);     /*  设定位置 */
+void Motor_SetZero(char addr);                          /*  设置零点 */
+
+/* ------------------ 查询指令(触发读取, 结果由库内部保存) ------------------ */
+void Motor_QueryPlace(char addr);                       /* 读电机编码器位置(mm) */
+void Motor_QueryAngle(void);                            /*  读当前角度 */
+void Motor_QueryEncoder(void);                          /*  读编码器(mm) */
+void Motor_QuerySensor(void);                           /*  请求传感器姿态数据 */
+
+/* ------------------ 数据读取(返回库内部最新解析结果) ------------------ */
+int  Motor_GetLeftPlace(void);      /* 电机1 位置(mm) */
+int  Motor_GetRightPlace(void);     /* 电机2 位置(mm) */
+int  Motor_GetAngle(void);          /* 当前角度 */
+int  Motor_GetEncoderPlace(void);   /* Modbus 编码器位置(mm) */
+
+/* ------------------ 其他 ------------------ */
+void Motor_RegisterSensorCallback(Motor_SensorCallback cb);  /* 注册传感器姿态回调, 可传 NULL */
+int  Motor_SendRaw(int port, const char *data, int len);     /* 原始帧发送(port: 1 或 2, 内部加锁) */
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* __MOTOR_CONTROL_H */
