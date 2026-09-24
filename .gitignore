@@ -1,13 +1,24 @@
+# Qt Creator and local project state
+.qtc_clangd/
+.qtcreator/
+*.pro.user
+*.qmake.stash
+
 # Build and generated output
+build/
 **/build/
-**/install/
-**/log/
-**/logs/
-**/build64/
-**/[Dd]ebug/
-**/[Rr]elease/
-**/__pycache__/
-*.py[cod]
+install/
+log/
+logs/
+build64/
+bin/
+debug/
+release/
+runtime/
+Makefile
+Makefile.*
+*.dll
+*.exe
 *.pdb
 *.ilk
 *.obj
@@ -15,8 +26,6 @@
 *.a
 *.so
 *.dylib
-*.dll
-*.exe
 *.lib
 *.exp
 *.idb
@@ -26,9 +35,13 @@
 *.suo
 *.user
 *.autosave
-*.qmake.stash
-Makefile
-Makefile.*
+
+# Runtime logs and local artifacts
+*.log
+*.dmp
+*.idx
+__pycache__/
+*.py[cod]
 
 # Local release bundles and temporary workspaces
 tmp/
@@ -41,21 +54,13 @@ target_board_release.zip
 **/dist/*.zip
 *.zip
 
-# Runtime logs and local artifacts
-*.log
-*.dmp
-
-# Local IDE/tool state
+# Local IDE and analysis state
 .gitnexus/
 .vs/
 .vscode/
 
-# Large reference documents and local inventories
+# Large reference documents and vendored SDK binaries
 *.pdf
 *.xlsx
-文档.txt
--
-
-# Keep source-level dependency notes, but ignore vendored SDK binaries
 modules/**/bin/
 modules/**/lib/*.lib

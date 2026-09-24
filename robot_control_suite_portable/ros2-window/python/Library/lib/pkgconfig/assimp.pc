@@ -1,9 +1,0 @@
-libdir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/lib
-includedir=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library/include
-
-Name: Assimp
-Description: Import various well-known 3D model formats in an uniform manner.
-Version: 5.3.0
-Libs: -L${libdir} -lassimp
-Libs.private:  
-Cflags: -I${includedir}

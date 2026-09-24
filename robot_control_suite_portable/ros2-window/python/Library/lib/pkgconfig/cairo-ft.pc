@@ -1,8 +1,0 @@
-prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
-includedir=${prefix}/include
-
-Name: cairo-ft
-Description: FreeType font backend for cairo graphics library
-Version: 1.18.0
-Requires: cairo, freetype2 >=  9.7.3
-Cflags: -I${includedir}

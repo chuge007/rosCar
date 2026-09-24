@@ -1,8 +1,0 @@
-bool drive_enabled
-bool command_fresh
-float64 target_linear_m_s
-float64 target_angular_rad_s
-float64 applied_linear_m_s
-float64 applied_angular_rad_s
-float64 left_wheel_m_s
-float64 right_wheel_m_s

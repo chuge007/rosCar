@@ -1,8 +1,0 @@
-prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
-includedir=${prefix}/include
-
-Name: cairo-tee
-Description: Tee surface backend for cairo graphics library
-Version: 1.18.0
-Requires: cairo
-Cflags: -I${includedir}

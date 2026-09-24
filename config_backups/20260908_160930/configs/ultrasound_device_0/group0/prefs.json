@@ -1,0 +1,89 @@
+{
+  "prefs": [
+    {
+      "name": "low_pass_filter_db",
+      "type": "double",
+      "value": 25.0
+    },
+    {
+      "name": "envelope_enable",
+      "type": "bool",
+      "value": true
+    },
+    {
+      "name": "gain_db",
+      "type": "double",
+      "value": 10.0
+    },
+    {
+      "name": "max_amplitude",
+      "type": "int",
+      "value": 4096
+    },
+    {
+      "name": "high_pass_filter_db",
+      "type": "double",
+      "value": 0.8
+    },
+    {
+      "name": "pulse_width_ns",
+      "type": "int",
+      "value": 50
+    },
+    {
+      "name": "group_type",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "scan_range_us",
+      "type": "double",
+      "value": 8.445945945945946
+    },
+    {
+      "name": "gc_enable",
+      "type": "bool",
+      "value": false
+    },
+    {
+      "name": "id",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "scan_start_us",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "video_filter_db",
+      "type": "int",
+      "value": 8000
+    },
+    {
+      "name": "enable",
+      "type": "bool",
+      "value": true
+    },
+    {
+      "name": "element",
+      "type": "int",
+      "value": 128
+    },
+    {
+      "name": "sample_qty",
+      "type": "int",
+      "value": 1024
+    },
+    {
+      "name": "zero_offset_us",
+      "type": "double",
+      "value": 1.35
+    },
+    {
+      "name": "pulse_type",
+      "type": "int",
+      "value": 0
+    }
+  ]
+}

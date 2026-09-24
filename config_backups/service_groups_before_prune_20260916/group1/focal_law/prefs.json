@@ -1,0 +1,109 @@
+{
+  "prefs": [
+    {
+      "name": "start_angle",
+      "type": "double",
+      "value": 35.0
+    },
+    {
+      "name": "rx_channel",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "wedge_angle",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "tx_channel",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "thickness",
+      "type": "double",
+      "value": 40.0
+    },
+    {
+      "name": "step",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "name": "aperture",
+      "type": "int",
+      "value": 16
+    },
+    {
+      "name": "angle",
+      "type": "double",
+      "value": 1.0
+    },
+    {
+      "name": "enable",
+      "type": "bool",
+      "value": true
+    },
+    {
+      "name": "start_element",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "end_element",
+      "type": "int",
+      "value": 64
+    },
+    {
+      "name": "pitch",
+      "type": "double",
+      "value": 0.6
+    },
+    {
+      "name": "wedge_x",
+      "type": "double",
+      "value": 85.6
+    },
+    {
+      "name": "focusing_type",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "focussing_position",
+      "type": "double",
+      "value": 20.0
+    },
+    {
+      "name": "wavespeed_piece",
+      "type": "double",
+      "value": 5920.0
+    },
+    {
+      "name": "wedge_z",
+      "type": "double",
+      "value": 20.0
+    },
+    {
+      "name": "wavespeed_delay",
+      "type": "double",
+      "value": 2330.0
+    },
+    {
+      "name": "end_angle",
+      "type": "double",
+      "value": 70.0
+    },
+    {
+      "name": "focal_law_type",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "name": "angle_linear",
+      "type": "double",
+      "value": 0.0
+    }
+  ]
+}

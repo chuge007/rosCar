@@ -1,9 +1,0 @@
-prefix=D:/ros2/pixi_ws/ros2-window/.pixi/envs/default/Library
-includedir=${prefix}/include
-libdir=${prefix}/lib
-
-Name: GNU FriBidi
-Description: Unicode Bidirectional Algorithm Library
-Version: 1.0.16
-Libs: -L${libdir} -lfribidi
-Cflags: -I${includedir}/fribidi

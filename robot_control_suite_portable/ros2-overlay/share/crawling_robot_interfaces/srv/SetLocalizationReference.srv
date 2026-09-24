@@ -1,5 +1,0 @@
-float64 contour_lateral_m
-float64 heading_reference_rad
----
-bool success
-string message
