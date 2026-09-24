@@ -64,3 +64,9 @@ target_board_release.zip
 *.xlsx
 modules/**/bin/
 modules/**/lib/*.lib
+
+# Local non-source artifacts kept outside the repository
+README.md
+docs/
+config_backups/
+protocol_pages_*.txt

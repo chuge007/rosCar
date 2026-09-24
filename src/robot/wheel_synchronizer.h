@@ -6,8 +6,8 @@ struct SynchronizerConfig {
   // Weight of a new response sample and its time-dependent contribution.
   double proportionalGain = 0.30;
   double integralGain = 0.08;
-  // Maximum amount by which the faster side may be throttled.
-  double maximumCorrectionMps = 0.300;
+  // Maximum amount by which the faster side may be throttled by default.
+  double maximumCorrectionMps = 0.040;
   double minimumControlledSpeedMps = 0.015;
 };
 

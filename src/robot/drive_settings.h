@@ -11,7 +11,7 @@ namespace crawling {
 
 struct DriveSettings {
   static constexpr int kMinimumFeedbackTimeoutMs = 800;
-  static constexpr int kCurrentSettingsSchemaVersion = 5;
+  static constexpr int kCurrentSettingsSchemaVersion = 6;
 
   // Legacy shared-port fields are retained for loading older settings files.
   QString serialPort;
@@ -47,20 +47,25 @@ struct DriveSettings {
   int leftMotorBaudRate = 115200;
   QString rightMotorSerialPort;
   int rightMotorBaudRate = 115200;
-  int leftMotorSign = 1;
-  int rightMotorSign = -1;
+  int leftMotorSign = -1;
+  int rightMotorSign = 1;
 
-  double wheelRadiusM = 0.040;
-  double trackWidthM = 0.300;
+  // Measured PA1664 chassis geometry.
+  double wheelRadiusM = 0.07953;
+  double trackWidthM = 0.1473;
   // Motor-shaft revolutions per one wheel revolution. The installed MWD
   // gearbox is 36:1 and the motor output shaft is coupled 1:1 to the wheel.
   double motorOutputToWheelRatio = 36.0;
 
-  double maximumWheelSpeedMps = 0.30;
-  double maximumLinearSpeedMps = 0.15;
-  double maximumAngularSpeedRadps = 1.00;
-  double maximumLinearAccelerationMps2 = 0.50;
-  double maximumAngularAccelerationRadps2 = 2.00;
+  // The paired motor ceiling is 4300 dps. With this wheel geometry it is
+  // about 166 mm/s, so leave a small margin in the default command limit.
+  double maximumWheelSpeedMps = 0.160;
+  double maximumLinearSpeedMps = 0.120;
+  double maximumAngularSpeedRadps = 0.8726646259971648; // 50 deg/s
+  // These correspond to a moderate ramp while remaining inside the motor
+  // protocol's 100..60000 dps/s acceleration range.
+  double maximumLinearAccelerationMps2 = 0.200;
+  double maximumAngularAccelerationRadps2 = 1.000;
   double minimumInnerWheelRatio = 0.50;
 
   int commandTimeoutMs = 300;

@@ -28,6 +28,30 @@ bool isSupportedMwdRs485BaudRate(int baudRate) {
       baudRate == 1000000 || baudRate == 1500000 || baudRate == 2500000;
 }
 
+bool approximately(double actual, double expected) {
+  return std::abs(actual - expected) <= 1e-9;
+}
+
+bool isLegacyDefaultMotionProfile(const DriveSettings& value) {
+  const bool measuredChassis =
+      approximately(value.wheelRadiusM, 0.07953) &&
+      approximately(value.trackWidthM, 0.1473) &&
+      approximately(value.motorOutputToWheelRatio, 36.0);
+  const bool deployedDefaults =
+      approximately(value.maximumWheelSpeedMps, 0.30) &&
+      approximately(value.maximumLinearSpeedMps, 0.30) &&
+      approximately(value.maximumAngularSpeedRadps, 0.8726646259971648) &&
+      approximately(value.maximumLinearAccelerationMps2, 0.50) &&
+      approximately(value.maximumAngularAccelerationRadps2, 0.17453292519943295) &&
+      approximately(value.minimumInnerWheelRatio, 0.50) &&
+      approximately(value.synchronizer.proportionalGain, 0.30) &&
+      approximately(value.synchronizer.integralGain, 0.08) &&
+      value.synchronizer.maximumCorrectionMps >= 0.294 &&
+      value.synchronizer.maximumCorrectionMps <= 0.300 &&
+      approximately(value.synchronizer.minimumControlledSpeedMps, 0.015);
+  return measuredChassis && deployedDefaults;
+}
+
 }  // namespace
 
 QString DriveSettings::persistentFilePath() {
@@ -250,6 +274,22 @@ DriveSettings DriveSettings::load(QSettings& settings) {
       (std::abs(value.motorOutputToWheelRatio - 100.0) <= 1e-9 ||
        std::abs(value.motorOutputToWheelRatio - 1.0) <= 1e-9)) {
     value.motorOutputToWheelRatio = kInstalledMotorOutputToWheelRatio;
+  }
+
+  // Schema 6 replaces the old generic motion profile with defaults derived
+  // from the measured PA1664 chassis and the MWD V3.8 motor limits. Only the
+  // known shipped profiles are migrated; user-tuned motion values remain.
+  if (settingsSchemaVersion < 6 &&
+      isLegacyDefaultMotionProfile(value)) {
+    value.maximumWheelSpeedMps = defaults.maximumWheelSpeedMps;
+    value.maximumLinearSpeedMps = defaults.maximumLinearSpeedMps;
+    value.maximumAngularSpeedRadps = defaults.maximumAngularSpeedRadps;
+    value.maximumLinearAccelerationMps2 =
+        defaults.maximumLinearAccelerationMps2;
+    value.maximumAngularAccelerationRadps2 =
+        defaults.maximumAngularAccelerationRadps2;
+    value.minimumInnerWheelRatio = defaults.minimumInnerWheelRatio;
+    value.synchronizer = defaults.synchronizer;
   }
 
   // Migrate the former shared motor bus configuration to both wheel ports.

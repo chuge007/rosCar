@@ -23,11 +23,11 @@ struct WheelMotorConfig {
   int rightBaudRate = 115200;
   std::uint8_t leftMotorId = 1;
   std::uint8_t rightMotorId = 2;
-  int leftDirectionSign = 1;
+  int leftDirectionSign = -1;
   int rightDirectionSign = 1;
-  double wheelRadiusM = 0.040;
+  double wheelRadiusM = 0.07953;
   double motorOutputToWheelRatio = 36.0;
-  double maximumWheelSpeedMps = 0.30;
+  double maximumWheelSpeedMps = 0.160;
   // The installed left drive tops out near 4,350 dps while the right drive
   // reaches about 14,300 dps. Keep paired motion below the slower drive's
   // verified range so a short manual jog is synchronized from its first frame.
