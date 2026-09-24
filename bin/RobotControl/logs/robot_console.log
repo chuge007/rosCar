@@ -1,0 +1,56 @@
+2026-09-23 10:18:23.024 #00000001 [Tda8] [INFO] [SYSTEM] event=application_start result=OK
+2026-09-23 10:18:23.036 #00000002 [Tda8] [INFO] [SYSTEM.THREAD] event=thread_start module=DRIVE.CONTROL result=OK
+2026-09-23 10:18:23.046 #00000003 [Tda8] [INFO] [SYSTEM.THREAD] event=thread_start module=DEVICE.CONTROL result=OK
+2026-09-23 10:18:23.055 #00000004 [Tda8] [INFO] [SYSTEM.THREAD] event=thread_start module=USB_CAMERA result=OK
+2026-09-23 10:18:23.066 #00000005 [Tda8] [INFO] [SYSTEM.THREAD] event=thread_start module=CORRECTION.CONTROL result=OK
+2026-09-23 10:18:23.075 #00000006 [Tda8] [INFO] [SYSTEM.THREAD] event=thread_start module=CORRECTION.IMAGE_WRITER result=OK
+2026-09-23 10:18:23.720 #00000007 [Tda8] [INFO] [UI.OPERATION] event=connect_all_request mode=saved_configuration targets=DRIVE.MOTOR,IMU,CAMERA,USB_CAMERA left_port=COM6 right_port=COM6 imu_port=COM6 camera_serial= usb_camera=1
+2026-09-23 10:18:23.729 #00000008 [Te14] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-23 10:18:23.736 #00000009 [Te14] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-23 10:18:23.745 #00000010 [Tda8] [WARN] [UI.OPERATION] event=connect_module_skipped module=CAMERA reason=missing_serial
+2026-09-23 10:18:23.840 #00000011 [Tda8] [INFO] [DRIVE.CONTROL] event=state_changed state=未连接 reason=底盘输出已禁用
+2026-09-23 10:18:23.849 #00000012 [Tda8] [INFO] [DRIVE.CONTROL] event=connect_start module=DRIVE.MOTOR left_port=COM6 left_baud=115200 left_id=1 left_sign=-1 right_port=COM6 right_baud=115200 right_id=2 right_sign=1 wheel_radius_m=0.079530 motor_to_wheel_ratio=36.0000
+2026-09-23 10:18:23.857 #00000013 [Tda8] [ERROR] [DRIVE.CONTROL] event=state_changed state=安全故障 reason=Cannot open MWD RS485 wheel port: 系统找不到指定的文件。
+2026-09-23 10:18:48.667 #00000014 [Tda8] [INFO] [DRIVE.CONTROL] event=state_changed state=未连接 reason=程序已关闭
+2026-09-23 10:18:48.682 #00000015 [Tda8] [INFO] [SYSTEM.THREAD] event=thread_stop module=CORRECTION.CONTROL result=OK
+2026-09-23 10:18:48.700 #00000016 [Tda8] [INFO] [SYSTEM.SHUTDOWN] event=module_shutdown_complete module=DRIVE.CONTROL result=OK
+2026-09-23 10:18:48.716 #00000017 [Tda8] [INFO] [SYSTEM.THREAD] event=thread_stop module=CORRECTION.IMAGE_WRITER result=OK interfaces=released
+2026-09-23 10:18:48.730 #00000018 [Tda8] [INFO] [SYSTEM.THREAD] event=thread_stop module=DRIVE.CONTROL result=OK interfaces=released
+2026-09-23 10:18:48.743 #00000019 [Tda8] [INFO] [SYSTEM.THREAD] event=thread_stop module=DEVICE.CONTROL result=OK interfaces=released
+2026-09-23 10:18:48.754 #00000020 [Tda8] [INFO] [SYSTEM.THREAD] event=thread_stop module=USB_CAMERA result=OK interfaces=released
+2026-09-23 10:18:48.771 #00000021 [Tda8] [INFO] [SYSTEM] event=application_exit result=OK code=0
+2026-09-23 10:21:21.185 #00000001 [T3db8] [INFO] [SYSTEM] event=application_start result=OK
+2026-09-23 10:21:21.195 #00000002 [T3db8] [INFO] [SYSTEM.THREAD] event=thread_start module=DRIVE.CONTROL result=OK
+2026-09-23 10:21:21.207 #00000003 [T3db8] [INFO] [SYSTEM.THREAD] event=thread_start module=DEVICE.CONTROL result=OK
+2026-09-23 10:21:21.219 #00000004 [T3db8] [INFO] [SYSTEM.THREAD] event=thread_start module=USB_CAMERA result=OK
+2026-09-23 10:21:21.235 #00000005 [T3db8] [INFO] [SYSTEM.THREAD] event=thread_start module=CORRECTION.CONTROL result=OK
+2026-09-23 10:21:21.254 #00000006 [T3db8] [INFO] [SYSTEM.THREAD] event=thread_start module=CORRECTION.IMAGE_WRITER result=OK
+2026-09-23 10:21:21.783 #00000007 [T3db8] [INFO] [UI.OPERATION] event=connect_all_request mode=saved_configuration targets=DRIVE.MOTOR,IMU,CAMERA,USB_CAMERA left_port=COM6 right_port=COM6 imu_port=COM6 camera_serial= usb_camera=1
+2026-09-23 10:21:21.794 #00000008 [T59c] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-23 10:21:21.802 #00000009 [T59c] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-23 10:21:21.811 #00000010 [T3db8] [WARN] [UI.OPERATION] event=connect_module_skipped module=CAMERA reason=missing_serial
+2026-09-23 10:21:21.963 #00000011 [T3db8] [INFO] [DRIVE.CONTROL] event=state_changed state=未连接 reason=底盘输出已禁用
+2026-09-23 10:21:21.973 #00000012 [T3db8] [INFO] [DRIVE.CONTROL] event=connect_start module=DRIVE.MOTOR left_port=COM6 left_baud=115200 left_id=1 left_sign=-1 right_port=COM6 right_baud=115200 right_id=2 right_sign=1 wheel_radius_m=0.079530 motor_to_wheel_ratio=36.0000
+2026-09-23 10:21:21.980 #00000013 [T3db8] [ERROR] [DRIVE.CONTROL] event=state_changed state=安全故障 reason=Cannot open MWD RS485 wheel port: 系统找不到指定的文件。
+2026-09-23 10:21:36.736 #00000014 [T3db8] [INFO] [UI.OPERATION] event=connect_all_request mode=saved_configuration targets=DRIVE.MOTOR,IMU,CAMERA,USB_CAMERA left_port=COM6 right_port=COM6 imu_port=COM6 camera_serial= usb_camera=1
+2026-09-23 10:21:36.745 #00000015 [T59c] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-23 10:21:36.751 #00000016 [T59c] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-23 10:21:36.757 #00000017 [T3db8] [WARN] [UI.OPERATION] event=connect_module_skipped module=CAMERA reason=missing_serial
+2026-09-23 10:21:36.763 #00000018 [T3db8] [INFO] [DRIVE.CONTROL] event=state_changed state=未连接 reason=底盘输出已禁用
+2026-09-23 10:21:36.770 #00000019 [T3db8] [INFO] [DRIVE.CONTROL] event=connect_start module=DRIVE.MOTOR left_port=COM6 left_baud=115200 left_id=1 left_sign=-1 right_port=COM6 right_baud=115200 right_id=2 right_sign=1 wheel_radius_m=0.079530 motor_to_wheel_ratio=36.0000
+2026-09-23 10:21:36.777 #00000020 [T3db8] [ERROR] [DRIVE.CONTROL] event=state_changed state=安全故障 reason=Cannot open MWD RS485 wheel port: 系统找不到指定的文件。
+2026-09-23 10:21:38.154 #00000021 [T3db8] [INFO] [UI.OPERATION] event=connect_all_request mode=saved_configuration targets=DRIVE.MOTOR,IMU,CAMERA,USB_CAMERA left_port=COM6 right_port=COM6 imu_port=COM6 camera_serial= usb_camera=1
+2026-09-23 10:21:38.162 #00000022 [T59c] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-23 10:21:38.171 #00000023 [T59c] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-23 10:21:38.177 #00000024 [T3db8] [WARN] [UI.OPERATION] event=connect_module_skipped module=CAMERA reason=missing_serial
+2026-09-23 10:21:38.184 #00000025 [T3db8] [INFO] [DRIVE.CONTROL] event=state_changed state=未连接 reason=底盘输出已禁用
+2026-09-23 10:21:38.190 #00000026 [T3db8] [INFO] [DRIVE.CONTROL] event=connect_start module=DRIVE.MOTOR left_port=COM6 left_baud=115200 left_id=1 left_sign=-1 right_port=COM6 right_baud=115200 right_id=2 right_sign=1 wheel_radius_m=0.079530 motor_to_wheel_ratio=36.0000
+2026-09-23 10:21:38.196 #00000027 [T3db8] [ERROR] [DRIVE.CONTROL] event=state_changed state=安全故障 reason=Cannot open MWD RS485 wheel port: 系统找不到指定的文件。
+2026-09-23 10:22:57.194 #00000028 [T3db8] [INFO] [DRIVE.CONTROL] event=state_changed state=未连接 reason=程序已关闭
+2026-09-23 10:22:57.204 #00000029 [T3db8] [INFO] [SYSTEM.THREAD] event=thread_stop module=CORRECTION.CONTROL result=OK
+2026-09-23 10:22:57.210 #00000030 [T3db8] [INFO] [SYSTEM.SHUTDOWN] event=module_shutdown_complete module=DRIVE.CONTROL result=OK
+2026-09-23 10:22:57.215 #00000031 [T3db8] [INFO] [SYSTEM.THREAD] event=thread_stop module=CORRECTION.IMAGE_WRITER result=OK interfaces=released
+2026-09-23 10:22:57.222 #00000032 [T3db8] [INFO] [SYSTEM.THREAD] event=thread_stop module=DRIVE.CONTROL result=OK interfaces=released
+2026-09-23 10:22:57.228 #00000033 [T3db8] [INFO] [SYSTEM.THREAD] event=thread_stop module=DEVICE.CONTROL result=OK interfaces=released
+2026-09-23 10:22:57.234 #00000034 [T3db8] [INFO] [SYSTEM.THREAD] event=thread_stop module=USB_CAMERA result=OK interfaces=released
+2026-09-23 10:22:57.241 #00000035 [T3db8] [INFO] [SYSTEM] event=application_exit result=OK code=0

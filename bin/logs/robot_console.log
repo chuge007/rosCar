@@ -1,0 +1,29 @@
+2026-09-24 09:12:14.900 #00000001 [T6074] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-24 09:12:14.904 #00000002 [T6074] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-24 09:12:49.796 #00000003 [T6074] [INFO] [CAMERA.DISCOVERY] event=scan_start
+2026-09-24 09:12:49.868 #00000004 [T6074] [INFO] [CAMERA.SDK] event=driver_initialize result=OK
+2026-09-24 09:12:50.549 #00000005 [T6074] [INFO] [CAMERA.DISCOVERY] event=scan_complete result=OK device_count=0
+2026-09-24 09:43:44.084 #00000001 [T5968] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-24 09:43:44.089 #00000002 [T5968] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-24 09:47:21.232 #00000001 [T3f8c] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-24 09:47:21.237 #00000002 [T3f8c] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-24 09:56:25.476 #00000001 [T7048] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-24 09:56:25.481 #00000002 [T7048] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-24 10:29:20.790 #00000001 [T3124] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-24 10:29:20.794 #00000002 [T3124] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-24 10:33:49.812 #00000003 [T69e0] [INFO] [USB_CAMERA.DISCOVERY] event=scan_complete result=OK device_count=2
+2026-09-24 10:33:50.809 #00000004 [T69e0] [INFO] [USB_CAMERA.DISCOVERY] event=scan_complete result=OK device_count=2
+2026-09-24 10:34:00.881 #00000005 [T69e0] [INFO] [USB_CAMERA.CONNECTION] event=connect_complete result=OK device=0 width=640 height=480 fps=18
+2026-09-24 10:34:37.919 #00000006 [T69e0] [INFO] [USB_CAMERA.CONNECTION] event=disconnect_complete result=OK
+2026-09-24 10:34:43.544 #00000001 [T68a8] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-24 10:34:43.548 #00000002 [T68a8] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-24 10:34:44.357 #00000003 [T61e0] [INFO] [USB_CAMERA.CONNECTION] event=connect_complete result=OK device=0 width=640 height=480 fps=18
+2026-09-24 11:56:56.915 #00000004 [T61e0] [INFO] [USB_CAMERA.CONNECTION] event=disconnect_complete result=OK
+2026-09-24 13:42:13.162 #00000001 [T3cd8] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-24 13:42:13.168 #00000002 [T3cd8] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-24 13:42:14.191 #00000003 [T1548] [INFO] [USB_CAMERA.CONNECTION] event=connect_complete result=OK device=0 width=640 height=480 fps=18
+2026-09-24 13:47:46.101 #00000004 [T1548] [INFO] [USB_CAMERA.CONNECTION] event=disconnect_complete result=OK
+2026-09-24 14:27:16.386 #00000001 [T7c8c] [INFO] [IMU.COMM] event=connect_start port=COM6 baud=115200 divider=10
+2026-09-24 14:27:16.392 #00000002 [T7c8c] [ERROR] [IMU.COMM] event=connect_failed port=COM6 baud=115200 error=系统找不到指定的文件。
+2026-09-24 14:27:17.210 #00000003 [T1eac] [INFO] [USB_CAMERA.CONNECTION] event=connect_complete result=OK device=0 width=640 height=480 fps=18
+2026-09-24 14:27:35.786 #00000004 [T1eac] [INFO] [USB_CAMERA.CONNECTION] event=disconnect_complete result=OK

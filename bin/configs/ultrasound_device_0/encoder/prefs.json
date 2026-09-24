@@ -1,0 +1,65 @@
+{
+  "prefs": [
+    {
+      "name": "id",
+      "type": "int",
+      "value": -2
+    },
+    {
+      "name": "encoder_sync_timeout",
+      "type": "int",
+      "value": 500
+    },
+    {
+      "name": "trigger_mode",
+      "type": "bool",
+      "value": false
+    },
+    {
+      "name": "encoder_gate_negative",
+      "type": "int",
+      "value": -1
+    },
+    {
+      "name": "encoder_gate_enable",
+      "type": "bool",
+      "value": false
+    },
+    {
+      "name": "encoder_sync",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "name": "encoder_gate_timeout",
+      "type": "int",
+      "value": 1000
+    },
+    {
+      "name": "encoder_gate_positive",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "name": "trigger_direction",
+      "type": "bool",
+      "value": false
+    },
+    {
+      "name": "trigger_encoder",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "encoder_polarity",
+      "type": "vec_int",
+      "value": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

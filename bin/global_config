@@ -1,0 +1,32 @@
+{
+    "device": {
+        "auto_start": false,
+        "type": "Fake"
+    },
+    "frame": {
+        "capacity": 32,
+        "interval": 33,
+        "sampling_enable": true,
+        "sampling_rate": 1
+    },
+    "log": {
+        "file_enable": true,
+        "level": "info",
+        "path": "logs/",
+        "prefix": "log"
+    },
+    "network": {
+        "broadcast_host": "255.255.255.255",
+        "broadcast_port": 9090,
+        "command_port": 8080,
+        "listen_host": "0.0.0.0",
+        "remote_host": "127.0.0.1",
+        "ultrasonic_port": 8081
+    },
+    "start": {
+        "mode": "server"
+    },
+    "thread_pool": {
+        "capacity": 10
+    }
+}

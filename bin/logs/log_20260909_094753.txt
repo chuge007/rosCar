@@ -1,0 +1,256 @@
+[I] [2026-09-09 09:47:53] [ramework::ScopedFramework] : ========> SDK & Framework Version:
+[I] [2026-09-09 09:47:53] [ramework::ScopedFramework] : 1.11.0-alpha+build01
+[I] [2026-09-09 09:47:53] [ramework::ScopedFramework] : [commit=ca9b211a, built=2026-06-24, by=win1230\penghong]
+[I] [2026-09-09 09:47:53] [              Impl::Print] : ========> Global Config: 
+[I] [2026-09-09 09:47:53] [              Impl::Print] :   start:
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     mode: combo
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     auto: false
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     delay: 3000
+[I] [2026-09-09 09:47:53] [              Impl::Print] :   frame:
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     capacity: 64
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     sampling_enable: false
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     sampling_rate: 20
+[I] [2026-09-09 09:47:53] [              Impl::Print] :   thread:
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     capacity: 10
+[I] [2026-09-09 09:47:53] [              Impl::Print] :   network:
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     listen_host: 127.0.0.1
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     command_port: 8080
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     ultrasonic_port: 8081
+[I] [2026-09-09 09:47:53] [              Impl::Print] :   device:
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     type: USB
+[I] [2026-09-09 09:47:53] [              Impl::Print] :   log:
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     file_enable: true
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     path: logs/
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     prefix: log
+[I] [2026-09-09 09:47:53] [              Impl::Print] :     level: info
+[I] [2026-09-09 09:47:53] [leRegistry::ResolveAndRun] : ========> Starting all modules...
+[I] [2026-09-09 09:47:53] [1d58e1cd829577f5d7e4c2c>>] : [module:basic             ] -> Configure
+[I] [2026-09-09 09:47:53] [1d58e1cd829577f5d7e4c2c>>] : [module:concurrency       ] -> Configure
+[I] [2026-09-09 09:47:53] [1d58e1cd829577f5d7e4c2c>>] : [module:scheduler         ] -> Configure
+[I] [2026-09-09 09:47:53] [1d58e1cd829577f5d7e4c2c>>] : [module:repository        ] -> Configure
+[I] [2026-09-09 09:47:53] [1d58e1cd829577f5d7e4c2c>>] : [module:ultrasound-device ] -> Configure
+[I] [2026-09-09 09:47:53] [1d58e1cd829577f5d7e4c2c>>] : [module:domain            ] -> Configure
+[I] [2026-09-09 09:47:53] [1d58e1cd829577f5d7e4c2c>>] : [module:service           ] -> Configure
+[I] [2026-09-09 09:47:53] [1d58e1cd829577f5d7e4c2c>>] : [module:bootstrap         ] -> Configure
+[I] [2026-09-09 09:47:53] [83501dab17a30a2c627e2fa>>] : [module:basic             ] -> Resolve  
+[I] [2026-09-09 09:47:53] [83501dab17a30a2c627e2fa>>] : [module:concurrency       ] -> Resolve  
+[I] [2026-09-09 09:47:53] [83501dab17a30a2c627e2fa>>] : [module:scheduler         ] -> Resolve  
+[I] [2026-09-09 09:47:53] [83501dab17a30a2c627e2fa>>] : [module:repository        ] -> Resolve  
+[I] [2026-09-09 09:47:53] [83501dab17a30a2c627e2fa>>] : [module:ultrasound-device ] -> Resolve  
+[I] [2026-09-09 09:47:53] [83501dab17a30a2c627e2fa>>] : [module:domain            ] -> Resolve  
+[I] [2026-09-09 09:47:53] [83501dab17a30a2c627e2fa>>] : [module:service           ] -> Resolve  
+[I] [2026-09-09 09:47:53] [83501dab17a30a2c627e2fa>>] : [module:bootstrap         ] -> Resolve  
+[I] [2026-09-09 09:47:53] [0c917b0a172190ba6118ca6>>] : [module:basic             ] -> Init     
+[I] [2026-09-09 09:47:53] [0c917b0a172190ba6118ca6>>] : [module:concurrency       ] -> Init     
+[I] [2026-09-09 09:47:53] [0c917b0a172190ba6118ca6>>] : [module:scheduler         ] -> Init     
+[I] [2026-09-09 09:47:53] [0c917b0a172190ba6118ca6>>] : [module:repository        ] -> Init     
+[I] [2026-09-09 09:47:53] [0c917b0a172190ba6118ca6>>] : [module:ultrasound-device ] -> Init     
+[I] [2026-09-09 09:47:53] [0c917b0a172190ba6118ca6>>] : [module:domain            ] -> Init     
+[I] [2026-09-09 09:47:53] [0c917b0a172190ba6118ca6>>] : [module:service           ] -> Init     
+[I] [2026-09-09 09:47:53] [0c917b0a172190ba6118ca6>>] : [module:bootstrap         ] -> Init     
+[I] [2026-09-09 09:47:53] [ed0ac762100b07706b51630>>] : [module:basic             ] -> Start    
+[I] [2026-09-09 09:47:53] [ed0ac762100b07706b51630>>] : [module:concurrency       ] -> Start    
+[I] [2026-09-09 09:47:53] [ed0ac762100b07706b51630>>] : [module:scheduler         ] -> Start    
+[I] [2026-09-09 09:47:53] [ed0ac762100b07706b51630>>] : [module:repository        ] -> Start    
+[I] [2026-09-09 09:47:53] [ed0ac762100b07706b51630>>] : [module:ultrasound-device ] -> Start    
+[I] [2026-09-09 09:47:53] [ed0ac762100b07706b51630>>] : [module:domain            ] -> Start    
+[I] [2026-09-09 09:47:53] [ed0ac762100b07706b51630>>] : [module:service           ] -> Start    
+[I] [2026-09-09 09:47:53] [ed0ac762100b07706b51630>>] : [module:bootstrap         ] -> Start    
+[I] [2026-09-09 09:47:53] [   FrameworkContext::Init] : ========> Combo mode is started.
+[I] [2026-09-09 09:47:53] [rivate::syncGroupTracking] : Group tracking synced: 2 groups loaded
+[I] [2026-09-09 09:47:53] [Private::addServerContext] : Added server context: ID=0, address=127.0.0.1
+[I] [2026-09-09 09:47:53] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:47:54] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 911
+[I] [2026-09-09 09:47:54] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:47:54] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 35
+[I] [2026-09-09 09:47:54] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[W] [2026-09-09 09:47:54] [startCapture::<lambda_2>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-09 09:47:55] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1122
+[I] [2026-09-09 09:47:55] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:47:55] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 37
+[I] [2026-09-09 09:47:55] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14792
+[I] [2026-09-09 09:47:55] [atchService::SyncToDevice] : invalid physical device id -1
+[I] [2026-09-09 09:47:55] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-09 09:47:55] [  <lambda_3>::operator ()] : Async,Device synced failed
+[I] [2026-09-09 09:47:55] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:47:56] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 937
+[I] [2026-09-09 09:47:56] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:47:56] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 35
+[I] [2026-09-09 09:47:56] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:47:57] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1094
+[I] [2026-09-09 09:47:57] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:47:58] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 34
+[I] [2026-09-09 09:47:58] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14792
+[I] [2026-09-09 09:47:58] [atchService::SyncToDevice] : invalid physical device id -1
+[I] [2026-09-09 09:47:58] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 1
+[I] [2026-09-09 09:47:58] [  <lambda_3>::operator ()] : Async,Device synced failed
+[I] [2026-09-09 09:47:58] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14792
+[I] [2026-09-09 09:47:58] [    DeviceStopCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:47:58] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-09 09:47:58] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14792
+[I] [2026-09-09 09:47:58] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-09 09:47:58] [        ICommand::Execute] : Executing command: kConfigUltrasoundDeviceList, thread id: 14792
+[I] [2026-09-09 09:47:58] [        ICommand::Execute] : Finished command: kConfigUltrasoundDeviceList, time consumed: 0
+[I] [2026-09-09 09:48:37] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14792
+[I] [2026-09-09 09:48:37] [    DeviceStopCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:48:37] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-09 09:48:37] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:38] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 939
+[I] [2026-09-09 09:48:38] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:38] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 33
+[I] [2026-09-09 09:48:38] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:39] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1173
+[I] [2026-09-09 09:48:39] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:39] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 42
+[I] [2026-09-09 09:48:39] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14792
+[I] [2026-09-09 09:48:39] [atchService::SyncToDevice] : invalid physical device id -1
+[I] [2026-09-09 09:48:39] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 1
+[I] [2026-09-09 09:48:39] [  <lambda_3>::operator ()] : Async,Device synced failed
+[I] [2026-09-09 09:48:39] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[W] [2026-09-09 09:48:40] [startCapture::<lambda_2>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-09 09:48:40] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 920
+[I] [2026-09-09 09:48:40] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:40] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 41
+[I] [2026-09-09 09:48:40] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:41] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1112
+[I] [2026-09-09 09:48:41] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:41] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 33
+[I] [2026-09-09 09:48:41] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14792
+[I] [2026-09-09 09:48:41] [atchService::SyncToDevice] : invalid physical device id -1
+[I] [2026-09-09 09:48:41] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 1
+[I] [2026-09-09 09:48:41] [  <lambda_3>::operator ()] : Async,Device synced failed
+[I] [2026-09-09 09:48:41] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14792
+[I] [2026-09-09 09:48:41] [    DeviceStopCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:48:41] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-09 09:48:41] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:42] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 931
+[I] [2026-09-09 09:48:42] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:42] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 34
+[I] [2026-09-09 09:48:42] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[W] [2026-09-09 09:48:43] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-09 09:48:43] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1131
+[I] [2026-09-09 09:48:43] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:43] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 36
+[I] [2026-09-09 09:48:43] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14792
+[I] [2026-09-09 09:48:43] [atchService::SyncToDevice] : invalid physical device id -1
+[I] [2026-09-09 09:48:43] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 1
+[I] [2026-09-09 09:48:43] [  <lambda_3>::operator ()] : Async,Device synced failed
+[I] [2026-09-09 09:48:43] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:44] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 899
+[I] [2026-09-09 09:48:44] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:44] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 33
+[I] [2026-09-09 09:48:44] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[W] [2026-09-09 09:48:45] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-09 09:48:46] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1095
+[I] [2026-09-09 09:48:46] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:46] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 34
+[I] [2026-09-09 09:48:46] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14792
+[I] [2026-09-09 09:48:46] [atchService::SyncToDevice] : invalid physical device id -1
+[I] [2026-09-09 09:48:46] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 1
+[I] [2026-09-09 09:48:46] [  <lambda_3>::operator ()] : Async,Device synced failed
+[I] [2026-09-09 09:48:46] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14792
+[I] [2026-09-09 09:48:46] [   DeviceStartCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:48:46] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-09 09:48:46] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14792
+[I] [2026-09-09 09:48:46] [   DeviceStartCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:48:46] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-09 09:48:47] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14792
+[I] [2026-09-09 09:48:47] [   DeviceStartCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:48:47] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-09 09:48:53] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14792
+[I] [2026-09-09 09:48:53] [    DeviceStopCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:48:53] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-09 09:48:53] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:53] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 888
+[I] [2026-09-09 09:48:53] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:54] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 35
+[I] [2026-09-09 09:48:54] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:55] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1093
+[I] [2026-09-09 09:48:55] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:55] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 39
+[I] [2026-09-09 09:48:55] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14792
+[I] [2026-09-09 09:48:55] [atchService::SyncToDevice] : invalid physical device id -1
+[I] [2026-09-09 09:48:55] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 3
+[I] [2026-09-09 09:48:55] [  <lambda_3>::operator ()] : Async,Device synced failed
+[I] [2026-09-09 09:48:55] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:56] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 923
+[I] [2026-09-09 09:48:56] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[W] [2026-09-09 09:48:56] [startCapture::<lambda_2>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-09 09:48:56] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 35
+[I] [2026-09-09 09:48:56] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:57] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1143
+[I] [2026-09-09 09:48:57] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:57] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 39
+[I] [2026-09-09 09:48:57] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14792
+[I] [2026-09-09 09:48:57] [atchService::SyncToDevice] : invalid physical device id -1
+[I] [2026-09-09 09:48:57] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 1
+[I] [2026-09-09 09:48:57] [  <lambda_3>::operator ()] : Async,Device synced failed
+[I] [2026-09-09 09:48:57] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14792
+[I] [2026-09-09 09:48:57] [    DeviceStopCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:48:57] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-09 09:48:57] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:58] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 895
+[I] [2026-09-09 09:48:58] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:58] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 40
+[I] [2026-09-09 09:48:58] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[W] [2026-09-09 09:48:59] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-09 09:48:59] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1141
+[I] [2026-09-09 09:48:59] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:48:59] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 34
+[I] [2026-09-09 09:48:59] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14792
+[I] [2026-09-09 09:48:59] [atchService::SyncToDevice] : invalid physical device id -1
+[I] [2026-09-09 09:48:59] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 1
+[I] [2026-09-09 09:48:59] [  <lambda_3>::operator ()] : Async,Device synced failed
+[I] [2026-09-09 09:48:59] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:49:00] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 957
+[I] [2026-09-09 09:49:00] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:49:00] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 34
+[I] [2026-09-09 09:49:00] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[W] [2026-09-09 09:49:01] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-09 09:49:01] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1094
+[I] [2026-09-09 09:49:01] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14792
+[I] [2026-09-09 09:49:01] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 34
+[I] [2026-09-09 09:49:01] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14792
+[I] [2026-09-09 09:49:01] [atchService::SyncToDevice] : invalid physical device id -1
+[I] [2026-09-09 09:49:01] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 1
+[I] [2026-09-09 09:49:01] [  <lambda_3>::operator ()] : Async,Device synced failed
+[I] [2026-09-09 09:49:01] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14792
+[I] [2026-09-09 09:49:01] [   DeviceStartCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:49:01] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-09 09:49:01] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14792
+[I] [2026-09-09 09:49:01] [   DeviceStartCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:49:01] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-09 09:49:02] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14792
+[I] [2026-09-09 09:49:02] [   DeviceStartCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:49:02] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-09 09:49:04] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14792
+[I] [2026-09-09 09:49:04] [    DeviceStopCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:49:04] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-09 09:49:04] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14792
+[I] [2026-09-09 09:49:04] [    DeviceStopCommand::Do] : invalid physical device id -1
+[I] [2026-09-09 09:49:04] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-09 09:49:04] [  ModuleRegistry::StopAll] : ========> Stopping all modules...
+[I] [2026-09-09 09:49:04] [029f8b51859fa3e823a122f>>] : [module:bootstrap         ] -> Stop    
+[I] [2026-09-09 09:49:04] [029f8b51859fa3e823a122f>>] : [module:service           ] -> Stop    
+[I] [2026-09-09 09:49:04] [029f8b51859fa3e823a122f>>] : [module:domain            ] -> Stop    
+[I] [2026-09-09 09:49:04] [029f8b51859fa3e823a122f>>] : [module:ultrasound-device ] -> Stop    
+[I] [2026-09-09 09:49:04] [029f8b51859fa3e823a122f>>] : [module:repository        ] -> Stop    
+[I] [2026-09-09 09:49:04] [029f8b51859fa3e823a122f>>] : [module:scheduler         ] -> Stop    
+[I] [2026-09-09 09:49:04] [029f8b51859fa3e823a122f>>] : [module:concurrency       ] -> Stop    
+[I] [2026-09-09 09:49:04] [029f8b51859fa3e823a122f>>] : [module:basic             ] -> Stop    
+[I] [2026-09-09 09:49:04] [9bb34ade1f2aa7a3921794b>>] : [module:bootstrap         ] -> Shutdown
+[I] [2026-09-09 09:49:04] [9bb34ade1f2aa7a3921794b>>] : [module:service           ] -> Shutdown
+[I] [2026-09-09 09:49:04] [9bb34ade1f2aa7a3921794b>>] : [module:domain            ] -> Shutdown
+[I] [2026-09-09 09:49:04] [9bb34ade1f2aa7a3921794b>>] : [module:ultrasound-device ] -> Shutdown
+[I] [2026-09-09 09:49:04] [9bb34ade1f2aa7a3921794b>>] : [module:repository        ] -> Shutdown
+[I] [2026-09-09 09:49:04] [9bb34ade1f2aa7a3921794b>>] : [module:scheduler         ] -> Shutdown
+[I] [2026-09-09 09:49:04] [9bb34ade1f2aa7a3921794b>>] : [module:concurrency       ] -> Shutdown
+[I] [2026-09-09 09:49:04] [9bb34ade1f2aa7a3921794b>>] : [module:basic             ] -> Shutdown
+[I] [2026-09-09 09:49:04] [ead75565045091cab106afa>>] : [module:bootstrap         ] -> Destroy 
+[I] [2026-09-09 09:49:04] [ead75565045091cab106afa>>] : [module:service           ] -> Destroy 
+[I] [2026-09-09 09:49:04] [ead75565045091cab106afa>>] : [module:domain            ] -> Destroy 
+[I] [2026-09-09 09:49:04] [ead75565045091cab106afa>>] : [module:ultrasound-device ] -> Destroy 
+[I] [2026-09-09 09:49:04] [ead75565045091cab106afa>>] : [module:repository        ] -> Destroy 
+[I] [2026-09-09 09:49:04] [ead75565045091cab106afa>>] : [module:scheduler         ] -> Destroy 
+[I] [2026-09-09 09:49:04] [ead75565045091cab106afa>>] : [module:concurrency       ] -> Destroy 
+[I] [2026-09-09 09:49:04] [ead75565045091cab106afa>>] : [module:basic             ] -> Destroy 

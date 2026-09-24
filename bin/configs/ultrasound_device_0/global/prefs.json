@@ -1,0 +1,19 @@
+{
+  "prefs": [
+    {
+      "name": "id",
+      "type": "int",
+      "value": -1
+    },
+    {
+      "name": "pa_voltage",
+      "type": "int",
+      "value": 50
+    },
+    {
+      "name": "frame_rate",
+      "type": "int",
+      "value": 8192
+    }
+  ]
+}

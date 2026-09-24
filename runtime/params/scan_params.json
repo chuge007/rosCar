@@ -1,0 +1,20 @@
+{
+    "Cscan_AMP": 0,
+    "Cscan_TOF": 4,
+    "EncoderIndex": 0,
+    "EncoderSwapped": false,
+    "End": 1,
+    "ScanEnd": 100,
+    "ScanStart": 0,
+    "Scanlength": 60,
+    "SoundEnd": 100,
+    "SoundStart": 0,
+    "currentPosition": 1,
+    "encoderDirection": 0,
+    "resolutionEcoder1": 12,
+    "resolutionEcoder2": 12,
+    "scanResolution": 1,
+    "timeResolution": 1,
+    "xNormal": 0,
+    "yNormal": 0
+}

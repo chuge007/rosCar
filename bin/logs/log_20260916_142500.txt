@@ -1,0 +1,712 @@
+[I] [2026-09-16 14:25:00] [ramework::ScopedFramework] : ========> SDK & Framework Version:
+[I] [2026-09-16 14:25:00] [ramework::ScopedFramework] : 1.11.0-alpha+build01
+[I] [2026-09-16 14:25:00] [ramework::ScopedFramework] : [commit=ca9b211a, built=2026-06-24, by=win1230\penghong]
+[I] [2026-09-16 14:25:00] [              Impl::Print] : ========> Global Config: 
+[I] [2026-09-16 14:25:00] [              Impl::Print] :   start:
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     mode: combo
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     auto: false
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     delay: 3000
+[I] [2026-09-16 14:25:00] [              Impl::Print] :   frame:
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     capacity: 64
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     sampling_enable: false
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     sampling_rate: 20
+[I] [2026-09-16 14:25:00] [              Impl::Print] :   thread:
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     capacity: 10
+[I] [2026-09-16 14:25:00] [              Impl::Print] :   network:
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     listen_host: 127.0.0.1
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     command_port: 8080
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     ultrasonic_port: 8081
+[I] [2026-09-16 14:25:00] [              Impl::Print] :   device:
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     type: USB
+[I] [2026-09-16 14:25:00] [              Impl::Print] :   log:
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     file_enable: true
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     path: logs/
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     prefix: log
+[I] [2026-09-16 14:25:00] [              Impl::Print] :     level: info
+[I] [2026-09-16 14:25:00] [leRegistry::ResolveAndRun] : ========> Starting all modules...
+[I] [2026-09-16 14:25:00] [1d58e1cd829577f5d7e4c2c>>] : [module:basic             ] -> Configure
+[I] [2026-09-16 14:25:00] [1d58e1cd829577f5d7e4c2c>>] : [module:concurrency       ] -> Configure
+[I] [2026-09-16 14:25:00] [1d58e1cd829577f5d7e4c2c>>] : [module:scheduler         ] -> Configure
+[I] [2026-09-16 14:25:00] [1d58e1cd829577f5d7e4c2c>>] : [module:repository        ] -> Configure
+[I] [2026-09-16 14:25:00] [1d58e1cd829577f5d7e4c2c>>] : [module:ultrasound-device ] -> Configure
+[I] [2026-09-16 14:25:00] [1d58e1cd829577f5d7e4c2c>>] : [module:domain            ] -> Configure
+[I] [2026-09-16 14:25:00] [1d58e1cd829577f5d7e4c2c>>] : [module:service           ] -> Configure
+[I] [2026-09-16 14:25:00] [1d58e1cd829577f5d7e4c2c>>] : [module:bootstrap         ] -> Configure
+[I] [2026-09-16 14:25:00] [83501dab17a30a2c627e2fa>>] : [module:basic             ] -> Resolve  
+[I] [2026-09-16 14:25:00] [83501dab17a30a2c627e2fa>>] : [module:concurrency       ] -> Resolve  
+[I] [2026-09-16 14:25:00] [83501dab17a30a2c627e2fa>>] : [module:scheduler         ] -> Resolve  
+[I] [2026-09-16 14:25:00] [83501dab17a30a2c627e2fa>>] : [module:repository        ] -> Resolve  
+[I] [2026-09-16 14:25:00] [83501dab17a30a2c627e2fa>>] : [module:ultrasound-device ] -> Resolve  
+[I] [2026-09-16 14:25:00] [83501dab17a30a2c627e2fa>>] : [module:domain            ] -> Resolve  
+[I] [2026-09-16 14:25:00] [83501dab17a30a2c627e2fa>>] : [module:service           ] -> Resolve  
+[I] [2026-09-16 14:25:00] [83501dab17a30a2c627e2fa>>] : [module:bootstrap         ] -> Resolve  
+[I] [2026-09-16 14:25:00] [0c917b0a172190ba6118ca6>>] : [module:basic             ] -> Init     
+[I] [2026-09-16 14:25:00] [0c917b0a172190ba6118ca6>>] : [module:concurrency       ] -> Init     
+[I] [2026-09-16 14:25:00] [0c917b0a172190ba6118ca6>>] : [module:scheduler         ] -> Init     
+[I] [2026-09-16 14:25:00] [0c917b0a172190ba6118ca6>>] : [module:repository        ] -> Init     
+[I] [2026-09-16 14:25:00] [0c917b0a172190ba6118ca6>>] : [module:ultrasound-device ] -> Init     
+[I] [2026-09-16 14:25:00] [0c917b0a172190ba6118ca6>>] : [module:domain            ] -> Init     
+[I] [2026-09-16 14:25:00] [0c917b0a172190ba6118ca6>>] : [module:service           ] -> Init     
+[I] [2026-09-16 14:25:00] [0c917b0a172190ba6118ca6>>] : [module:bootstrap         ] -> Init     
+[I] [2026-09-16 14:25:00] [ed0ac762100b07706b51630>>] : [module:basic             ] -> Start    
+[I] [2026-09-16 14:25:00] [ed0ac762100b07706b51630>>] : [module:concurrency       ] -> Start    
+[I] [2026-09-16 14:25:00] [ed0ac762100b07706b51630>>] : [module:scheduler         ] -> Start    
+[I] [2026-09-16 14:25:00] [ed0ac762100b07706b51630>>] : [module:repository        ] -> Start    
+[I] [2026-09-16 14:25:00] [ed0ac762100b07706b51630>>] : [module:ultrasound-device ] -> Start    
+[I] [2026-09-16 14:25:00] [ed0ac762100b07706b51630>>] : [module:domain            ] -> Start    
+[I] [2026-09-16 14:25:00] [ed0ac762100b07706b51630>>] : [module:service           ] -> Start    
+[I] [2026-09-16 14:25:00] [ed0ac762100b07706b51630>>] : [module:bootstrap         ] -> Start    
+[I] [2026-09-16 14:25:00] [   FrameworkContext::Init] : ========> Combo mode is started.
+[I] [2026-09-16 14:25:00] [rivate::syncGroupTracking] : Group tracking synced: 2 groups loaded
+[I] [2026-09-16 14:25:00] [Private::addServerContext] : Added server context: ID=0, address=127.0.0.1
+[I] [2026-09-16 14:25:01] [ad7df42c1d5>::operator ()] : Using UltrasoundDeviceStrategy for HW Version 221
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] : ========> Board Info:
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] :   HW Id: 0
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] :   HW Type: 1
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] :   HW Number: 9
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] :   HW Version: 221
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] :   HW Model: 6
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] :   Board Type: 4
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] :   Board Ver: 6
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] :   Board Model: 4
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] :   Board Extend: 0
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] :   Board SN: 00101d491c23185c
+[I] [2026-09-16 14:25:01] [te::TriggerBoardInfoEvent] : Device State: Started
+[I] [2026-09-16 14:25:01] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:02] [startCapture::<lambda_2>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:02] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1016
+[I] [2026-09-16 14:25:02] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:02] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 40
+[I] [2026-09-16 14:25:02] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:03] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1214
+[I] [2026-09-16 14:25:03] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:03] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 45
+[I] [2026-09-16 14:25:03] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:03] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:03] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:03] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:03] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:03] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:03] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:03] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:03] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:03] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 106
+[I] [2026-09-16 14:25:03] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:04] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1005
+[I] [2026-09-16 14:25:04] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:05] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 38
+[I] [2026-09-16 14:25:05] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:06] [startCapture::<lambda_2>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:06] [rivate::syncGroupTracking] : Group tracking synced: 2 groups loaded
+[I] [2026-09-16 14:25:06] [ivate::loadConfigFromFile] : Config loaded from: D:/car/PA1664Workbench/bin/default_config.json
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1186
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 38
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:06] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:06] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:06] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:06] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:06] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:06] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:06] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:06] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[W] [2026-09-16 14:25:06] [trasoundDeviceState::Stop] : Device State: Invalid operation
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Executing command: kConfigUltrasoundDeviceList, thread id: 14156
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Finished command: kConfigUltrasoundDeviceList, time consumed: 0
+[I] [2026-09-16 14:25:06] [  <lambda_1>::operator ()] : Ultrasound Device ID: 0
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[W] [2026-09-16 14:25:06] [trasoundDeviceState::Stop] : Device State: Invalid operation
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:06] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:07] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 974
+[I] [2026-09-16 14:25:07] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:07] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 37
+[I] [2026-09-16 14:25:07] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:08] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1233
+[I] [2026-09-16 14:25:08] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:08] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 35
+[I] [2026-09-16 14:25:08] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:08] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:08] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:08] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:08] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:08] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:08] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:08] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:08] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:08] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:08] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:08] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:09] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 953
+[I] [2026-09-16 14:25:09] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:09] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 45
+[I] [2026-09-16 14:25:09] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:10] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1194
+[I] [2026-09-16 14:25:10] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:10] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:10] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 37
+[I] [2026-09-16 14:25:10] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:10] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:10] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:10] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:10] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:10] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:10] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:10] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:10] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:10] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:10] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:11] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1010
+[I] [2026-09-16 14:25:11] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:11] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 44
+[I] [2026-09-16 14:25:11] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:12] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:13] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1207
+[I] [2026-09-16 14:25:13] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:13] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 71
+[I] [2026-09-16 14:25:13] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:13] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:13] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:13] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:13] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:13] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:13] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:13] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:13] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:13] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:13] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:14] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 965
+[I] [2026-09-16 14:25:14] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:14] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 40
+[I] [2026-09-16 14:25:14] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1227
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 41
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:15] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:15] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:15] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:15] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:15] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:15] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:15] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:15] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:25:15] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:25:15] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:25:15] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:25:15] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:25:15] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:25:15] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:25:15] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:25:18] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:25:18] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:25:18] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:25:18] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:18] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:25:18] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:25:18] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:25:18] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:18] [rivate::syncGroupTracking] : Group tracking synced: 2 groups loaded
+[I] [2026-09-16 14:25:18] [ivate::loadConfigFromFile] : Config loaded from: D:/car/PA1664Workbench/bin/default_config.json
+[I] [2026-09-16 14:25:18] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:19] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 998
+[I] [2026-09-16 14:25:19] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:19] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 39
+[I] [2026-09-16 14:25:19] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:20] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1210
+[I] [2026-09-16 14:25:20] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:21] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 38
+[I] [2026-09-16 14:25:21] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:21] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:21] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:21] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:21] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:21] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:21] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:21] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:21] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:21] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:21] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:21] [startCapture::<lambda_2>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:21] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 942
+[I] [2026-09-16 14:25:21] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:22] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 37
+[I] [2026-09-16 14:25:22] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:23] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1198
+[I] [2026-09-16 14:25:23] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:23] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 35
+[I] [2026-09-16 14:25:23] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:23] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:23] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:23] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:23] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:23] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:23] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:23] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:23] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:23] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:23] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:24] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 990
+[I] [2026-09-16 14:25:24] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:24] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 38
+[I] [2026-09-16 14:25:24] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:24] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:25] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1158
+[I] [2026-09-16 14:25:25] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:25] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 37
+[I] [2026-09-16 14:25:25] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:25] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:25] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:25] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:25] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:25] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:25] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:25] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:25] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:25] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:25] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:26] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 982
+[I] [2026-09-16 14:25:26] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:26] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 37
+[I] [2026-09-16 14:25:26] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:26] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:27] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1182
+[I] [2026-09-16 14:25:27] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:27] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 40
+[I] [2026-09-16 14:25:27] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:27] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:27] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:27] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:27] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:27] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:27] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:27] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:27] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:27] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:27] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[W] [2026-09-16 14:25:27] [trasoundDeviceState::Stop] : Device State: Invalid operation
+[I] [2026-09-16 14:25:27] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:27] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:28] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 999
+[I] [2026-09-16 14:25:28] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:28] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:28] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 41
+[I] [2026-09-16 14:25:28] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:29] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1152
+[I] [2026-09-16 14:25:29] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:29] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 38
+[I] [2026-09-16 14:25:29] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:29] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:29] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:29] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:29] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:29] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:29] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:29] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:29] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:29] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:29] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:30] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 945
+[I] [2026-09-16 14:25:30] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:30] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 35
+[I] [2026-09-16 14:25:30] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1153
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 38
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:32] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:32] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:32] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:32] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:32] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:32] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:32] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:32] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:25:32] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:25:32] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:25:32] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:25:32] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:25:32] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:25:32] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:25:32] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:25:34] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:25:34] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:25:34] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:25:34] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:34] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:25:34] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:25:34] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:25:34] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:34] [rivate::syncGroupTracking] : Group tracking synced: 2 groups loaded
+[I] [2026-09-16 14:25:34] [ivate::loadConfigFromFile] : Config loaded from: D:/car/PA1664Workbench/bin/default_config.json
+[I] [2026-09-16 14:25:34] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:35] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 980
+[I] [2026-09-16 14:25:35] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:35] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 36
+[I] [2026-09-16 14:25:35] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:36] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1203
+[I] [2026-09-16 14:25:36] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:36] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 39
+[I] [2026-09-16 14:25:36] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:36] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:36] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:36] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:36] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:36] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:36] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:37] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:37] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:37] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:37] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:37] [startCapture::<lambda_2>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:37] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 968
+[I] [2026-09-16 14:25:37] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:38] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 40
+[I] [2026-09-16 14:25:38] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:39] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1203
+[I] [2026-09-16 14:25:39] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:39] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 37
+[I] [2026-09-16 14:25:39] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:39] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:39] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:39] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:39] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:39] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:39] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:39] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:39] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:39] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:39] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:40] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 955
+[I] [2026-09-16 14:25:40] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:40] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 44
+[I] [2026-09-16 14:25:40] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:40] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:41] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1150
+[I] [2026-09-16 14:25:41] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:41] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 36
+[I] [2026-09-16 14:25:41] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:41] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:41] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:41] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:41] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:41] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:41] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:41] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:41] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:41] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:41] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:42] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1001
+[I] [2026-09-16 14:25:42] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:42] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 45
+[I] [2026-09-16 14:25:42] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:42] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:43] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1208
+[I] [2026-09-16 14:25:43] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:43] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 38
+[I] [2026-09-16 14:25:43] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:43] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:43] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:43] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:43] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:43] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:43] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:43] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:43] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:43] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:43] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[W] [2026-09-16 14:25:43] [trasoundDeviceState::Stop] : Device State: Invalid operation
+[I] [2026-09-16 14:25:43] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:43] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:44] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 953
+[I] [2026-09-16 14:25:44] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:44] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 39
+[I] [2026-09-16 14:25:44] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:44] [startCapture::<lambda_1>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:45] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1207
+[I] [2026-09-16 14:25:45] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:45] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 40
+[I] [2026-09-16 14:25:45] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:45] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:45] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:45] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:45] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:45] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:45] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:45] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:45] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:45] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:45] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:46] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 994
+[I] [2026-09-16 14:25:46] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:47] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 45
+[I] [2026-09-16 14:25:47] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1176
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 42
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:48] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:48] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:48] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:48] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:48] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:48] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:25:48] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:48] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:25:48] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:25:48] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:25:48] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:25:48] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:25:48] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:25:48] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:25:48] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:25:50] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:25:50] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:25:51] [        ICommand::Execute] : Executing command: kConfigDel, thread id: 14156
+[I] [2026-09-16 14:25:51] [        ICommand::Execute] : Finished command: kConfigDel, time consumed: 39
+[I] [2026-09-16 14:25:51] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:25:51] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:25:52] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:25:52] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:25:52] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:25:52] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:52] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:25:52] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:25:52] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:25:52] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:52] [rivate::syncGroupTracking] : Group tracking synced: 1 groups loaded
+[I] [2026-09-16 14:25:52] [ivate::loadConfigFromFile] : Config loaded from: D:/car/PA1664Workbench/bin/default_config.json
+[I] [2026-09-16 14:25:52] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:53] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 857
+[I] [2026-09-16 14:25:53] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:53] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 32
+[I] [2026-09-16 14:25:53] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:54] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1034
+[I] [2026-09-16 14:25:54] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:54] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 32
+[I] [2026-09-16 14:25:54] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:54] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:54] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:54] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:54] [    UltrasoundMapper::Map] : TCG data count 1024
+[I] [2026-09-16 14:25:54] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:54] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:54] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 104
+[I] [2026-09-16 14:25:54] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:55] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 874
+[I] [2026-09-16 14:25:55] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:55] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 30
+[I] [2026-09-16 14:25:55] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[W] [2026-09-16 14:25:55] [startCapture::<lambda_2>>] : Operation timeout after 500 milliseconds
+[I] [2026-09-16 14:25:56] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1037
+[I] [2026-09-16 14:25:56] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:56] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 31
+[I] [2026-09-16 14:25:56] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:56] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:56] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:56] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:56] [    UltrasoundMapper::Map] : TCG data count 1024
+[I] [2026-09-16 14:25:56] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:56] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:56] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:56] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[W] [2026-09-16 14:25:56] [trasoundDeviceState::Stop] : Device State: Invalid operation
+[I] [2026-09-16 14:25:56] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:25:56] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:57] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 833
+[I] [2026-09-16 14:25:57] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:57] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 36
+[I] [2026-09-16 14:25:57] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:58] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1032
+[I] [2026-09-16 14:25:58] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:25:58] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 31
+[I] [2026-09-16 14:25:58] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:25:58] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:25:58] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:25:58] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:25:58] [    UltrasoundMapper::Map] : TCG data count 1024
+[I] [2026-09-16 14:25:58] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:25:58] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:25:58] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:25:58] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:25:58] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:25:58] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:25:58] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:26:01] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:26:01] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:26:01] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:26:01] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:26:03] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:26:03] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:26:03] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:26:03] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:26:11] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:26:11] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:26:11] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:26:11] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:26:11] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:26:11] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 68
+[I] [2026-09-16 14:26:11] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:26:11] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:26:11] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:26:11] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:26:11] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:26:11] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:26:11] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:26:11] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:26:11] [    UltrasoundMapper::Map] : TCG data count 1024
+[I] [2026-09-16 14:26:11] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:26:11] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:26:11] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:26:14] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[W] [2026-09-16 14:26:14] [trasoundDeviceState::Stop] : Device State: Invalid operation
+[I] [2026-09-16 14:26:14] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:26:15] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:26:15] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:26:15] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:26:15] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:26:18] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:26:19] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1009
+[I] [2026-09-16 14:26:19] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:26:19] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 39
+[I] [2026-09-16 14:26:19] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:26:20] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 1218
+[I] [2026-09-16 14:26:20] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:26:21] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 45
+[I] [2026-09-16 14:26:21] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:26:21] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:26:21] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:26:21] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:26:21] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:26:21] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:26:21] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:26:21] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:26:21] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:26:21] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 405
+[I] [2026-09-16 14:26:21] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:26:21] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:26:21] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:26:21] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:26:22] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:26:22] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:26:22] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:26:22] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:26:22] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:26:22] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 76
+[I] [2026-09-16 14:26:22] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:26:22] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:26:22] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:26:22] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:26:22] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:26:22] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:26:22] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:26:22] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:26:22] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:26:22] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:26:22] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:26:22] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:26:22] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:26:22] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:26:25] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[W] [2026-09-16 14:26:25] [trasoundDeviceState::Stop] : Device State: Invalid operation
+[I] [2026-09-16 14:26:25] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:26:27] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:26:27] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:26:27] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:26:27] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:26:30] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:26:30] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:26:32] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:26:32] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:26:39] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:26:39] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:26:39] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:26:39] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:26:39] [        ICommand::Execute] : Executing command: kConfigSet, thread id: 14156
+[I] [2026-09-16 14:26:39] [        ICommand::Execute] : Finished command: kConfigSet, time consumed: 76
+[I] [2026-09-16 14:26:39] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:26:39] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:26:39] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:26:39] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:26:39] [        ICommand::Execute] : Executing command: kDeviceSet, thread id: 14156
+[I] [2026-09-16 14:26:39] [rasoundDeviceUsbImpl::Set] : Enter Hardware Set Function
+[I] [2026-09-16 14:26:39] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:26:39] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:26:39] [    UltrasoundMapper::Map] : [UltrasoundMapper] use default curve, curve count 1024
+[I] [2026-09-16 14:26:39] [    UltrasoundMapper::Map] : First Value 512 Middle Value 512 Last Value512
+[I] [2026-09-16 14:26:39] [    UltrasoundMapper::Map] : TCG data count 2048
+[I] [2026-09-16 14:26:39] [rasoundDeviceUsbImpl::Set] : Exit Hardware Set Function
+[I] [2026-09-16 14:26:39] [ltrasoundDeviceState::Set] : Device State: Updated
+[I] [2026-09-16 14:26:39] [        ICommand::Execute] : Finished command: kDeviceSet, time consumed: 2
+[I] [2026-09-16 14:26:42] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[W] [2026-09-16 14:26:42] [trasoundDeviceState::Stop] : Device State: Invalid operation
+[I] [2026-09-16 14:26:42] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:26:44] [        ICommand::Execute] : Executing command: kDeviceStart, thread id: 14156
+[I] [2026-09-16 14:26:44] [soundDeviceUsbImpl::Start] : Enter Hardware Start Function
+[I] [2026-09-16 14:26:44] [soundDeviceUsbImpl::Start] : Exit Hardware Start Function
+[I] [2026-09-16 14:26:44] [        ICommand::Execute] : Finished command: kDeviceStart, time consumed: 0
+[I] [2026-09-16 14:26:47] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:26:47] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:26:50] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:26:50] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:26:52] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:26:52] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:26:57] [        ICommand::Execute] : Executing command: kConfigLoad, thread id: 14156
+[I] [2026-09-16 14:26:57] [        ICommand::Execute] : Finished command: kConfigLoad, time consumed: 0
+[I] [2026-09-16 14:27:02] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:27:02] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:27:02] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:27:02] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:27:02] [        ICommand::Execute] : Executing command: kDeviceStop, thread id: 14156
+[I] [2026-09-16 14:27:02] [asoundDeviceUsbImpl::Stop] : Enter Hardware Stop Function
+[I] [2026-09-16 14:27:02] [asoundDeviceUsbImpl::Stop] : Exit Hardware Stop Function
+[I] [2026-09-16 14:27:02] [        ICommand::Execute] : Finished command: kDeviceStop, time consumed: 0
+[I] [2026-09-16 14:27:02] [  ModuleRegistry::StopAll] : ========> Stopping all modules...
+[I] [2026-09-16 14:27:02] [029f8b51859fa3e823a122f>>] : [module:bootstrap         ] -> Stop    
+[I] [2026-09-16 14:27:02] [029f8b51859fa3e823a122f>>] : [module:service           ] -> Stop    
+[I] [2026-09-16 14:27:02] [029f8b51859fa3e823a122f>>] : [module:domain            ] -> Stop    
+[I] [2026-09-16 14:27:02] [029f8b51859fa3e823a122f>>] : [module:ultrasound-device ] -> Stop    
+[I] [2026-09-16 14:27:02] [029f8b51859fa3e823a122f>>] : [module:repository        ] -> Stop    
+[I] [2026-09-16 14:27:02] [029f8b51859fa3e823a122f>>] : [module:scheduler         ] -> Stop    
+[I] [2026-09-16 14:27:02] [029f8b51859fa3e823a122f>>] : [module:concurrency       ] -> Stop    
+[I] [2026-09-16 14:27:02] [029f8b51859fa3e823a122f>>] : [module:basic             ] -> Stop    
+[I] [2026-09-16 14:27:02] [9bb34ade1f2aa7a3921794b>>] : [module:bootstrap         ] -> Shutdown
+[I] [2026-09-16 14:27:02] [9bb34ade1f2aa7a3921794b>>] : [module:service           ] -> Shutdown
+[I] [2026-09-16 14:27:02] [9bb34ade1f2aa7a3921794b>>] : [module:domain            ] -> Shutdown
+[I] [2026-09-16 14:27:02] [9bb34ade1f2aa7a3921794b>>] : [module:ultrasound-device ] -> Shutdown
+[I] [2026-09-16 14:27:02] [9bb34ade1f2aa7a3921794b>>] : [module:repository        ] -> Shutdown
+[I] [2026-09-16 14:27:02] [9bb34ade1f2aa7a3921794b>>] : [module:scheduler         ] -> Shutdown
+[I] [2026-09-16 14:27:02] [9bb34ade1f2aa7a3921794b>>] : [module:concurrency       ] -> Shutdown
+[I] [2026-09-16 14:27:02] [9bb34ade1f2aa7a3921794b>>] : [module:basic             ] -> Shutdown
+[I] [2026-09-16 14:27:02] [ead75565045091cab106afa>>] : [module:bootstrap         ] -> Destroy 
+[I] [2026-09-16 14:27:02] [ead75565045091cab106afa>>] : [module:service           ] -> Destroy 
+[I] [2026-09-16 14:27:02] [ead75565045091cab106afa>>] : [module:domain            ] -> Destroy 
+[I] [2026-09-16 14:27:02] [ead75565045091cab106afa>>] : [module:ultrasound-device ] -> Destroy 
+[I] [2026-09-16 14:27:02] [ead75565045091cab106afa>>] : [module:repository        ] -> Destroy 
+[I] [2026-09-16 14:27:02] [ead75565045091cab106afa>>] : [module:scheduler         ] -> Destroy 
+[I] [2026-09-16 14:27:02] [ead75565045091cab106afa>>] : [module:concurrency       ] -> Destroy 
+[I] [2026-09-16 14:27:02] [ead75565045091cab106afa>>] : [module:basic             ] -> Destroy 

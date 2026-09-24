@@ -1,0 +1,390 @@
+---PAGE 25---\n 
+ 
+2.10.1. 指令说明 
+将电机当前编码器位置作为多圈编码器零偏（初始位置）写入到 ROM 
+注意：写入后新的零点位置后需要发送 0x76（系统复位指令）重启系统后才会有效。因为零偏的改
+变，设置目标位置时应以新的零偏（初始位置）为参考。 
+2.10.2. 发送数据域定义 
+数据域 说明 数据 
+DATA[0] 命令字节 0x64 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] NULL 0x00 
+DATA[5] NULL 0x00 
+DATA[6] NULL 0x00 
+DATA[7] NULL 0x00 
+ 
+2.10.3. 回复数据域定义 
+电机在收到命令后回复主机，数据中encoderOffset 为设置的零偏值。 
+数据域 说明 数据 
+DATA[0] 命令字节 0x64 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] 编码器零偏低字节1 DATA[4] = (uint8_t)(encoderOffset) 
+DATA[5] 编码器零偏字节2 DATA[5] = (uint8_t)(encoderOffset>>8) 
+DATA[6] 编码器零偏字节3 DATA[6] = (uint8_t)(encoderOffset>>16) 
+DATA[7] 编码器零偏字节4 DATA[7] = (uint8_t)(encoderOffset>>24) 
+ 
+2.10.4. 通讯示例 
+示例 1： \n---PAGE 26---\n 
+ 
+发送指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x141 0x64 0x00 0x00 0x00 0x00 0x00 0x00 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x64 0x00 0x00 0x00 0x00 0x00 0x00 0x00 CRC16L CRC16H 
+说明：发送 0x64 指令后，电机会将当前多圈编码器值作为零偏（初始位置）写入ROM 中。 
+回复指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x241 0x64 0x00 0x00 0x00 0x10 0x27 0x00 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x64 0x00 0x00 0x00 0x10 0x27 0x00 0x00 CRC16L CRC16H 
+说明：Data[4]到 data[7]组成一个（Data[4]为最低位，Data[7]为最高位）32 位数据为 0x00002710，
+表示十进制为 10000。表示写入电机的多圈零偏值（初始位置）为 10000 个脉冲。 
+ 
+2.11. 读取单圈编码器命令（0x90） 
+2.11.1. 指令说明 
+主机发送该命令以读取编码器的当前位置，注意当前指令是作为单圈数据读取指令，针对直驱电机
+使用。 
+2.11.2. 发送数据域定义 
+数据域 说明 数据 
+DATA[0] 命令字节 0x90 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] NULL 0x00 \n---PAGE 27---\n 
+ 
+DATA[5] NULL 0x00 
+DATA[6] NULL 0x00 
+DATA[7] NULL 0x00 
+ 
+2.11.3. 回复数据域定义 
+电机在收到命令后回复主机，该帧数据中包含了以下参数。 
+1. 编码器位置 encoder，为编码器原始位置减去编码器零偏后的值。 
+2. 编码器原始位置 encoderRaw。 
+3. 编码器零偏 encoderOffset，该点作为电机角度的零点。 
+数据域 说明 数据 
+DATA[0] 命令字节 0x90 
+DATA[1] NULL 0x00 
+DATA[2] 编码器位置低字节 DATA[1] = (uint8_t)(encoder) 
+DATA[3] 编码器位置高字节 DATA[2] = (uint8_t)(encoder>>8) 
+DATA[4] 编码器原始位置低字节 DATA[3] = (uint8_t)(encoderRaw) 
+DATA[5] 编码器原始位置高字节 DATA[4] = (uint8_t)(encoderRaw>>8) 
+DATA[6] 编码器零偏低字节 DATA[5] = (uint8_t)(encoderOffset) 
+DATA[7] 编码器零偏高字节 DATA[6] = (uint8_t)(encoderOffset>>8) 
+ 
+2.11.4. 通讯示例 
+示例 1： 
+发送指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x141 0x90 0x00 0x00 0x00 0x00 0x00 0x00 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x90 0x00 0x00 0x00 0x00 0x00 0x00 0x00 CRC16L CRC16H 
+说明：发送 0x90 指令后，将返回电机单圈编码器值。 \n---PAGE 28---\n 
+ 
+回复指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x241 0x90 0x00 0x33 0x08 0xBE 0x2C 0x8B 0x24 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x90 0x00 0x33 0x08 0xBE 0x2C 0x8B 0x24 CRC16L CRC16H 
+说明：Data[2]到 data[3]组成一个 （Data[2]为最低位，Data[3]为最高位）16 位数据为 0x0833，表示十
+进制为 2099， 表示电机当前相对零偏的编码器位置是2099 个脉冲。Data[4]到 data[5]组成一个 （Data[4]
+为最低位，Data[5]为最高位）16 位数据为 0x2CBE，表示十进制为 11454，表示电机当前的编码器原
+始位置是 11454 个脉冲。Data[6]到 data[7]组成一个（Data[6]为最低位，Data[7]为最高位）16 位数据
+为 0x248B，表示十进制为 9355，表示电机的零偏位置是 9355 个脉冲。 
+2.12. 读取多圈角度命令（0x92） 
+2.12.1. 指令说明 
+主机发送该命令以读取当前电机的多圈绝对角度值。 
+2.12.2. 发送数据域定义 
+数据域 说明 数据 
+DATA[0] 命令字节 0x92 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] NULL 0x00 
+DATA[5] NULL 0x00 
+DATA[6] NULL 0x00 
+DATA[7] NULL 0x00 
+ 
+2.12.3. 回复数据域定义 
+电机在收到命令后回复主机，该帧数据中包含了以下参数。 
+1.电机输出轴角度motorAngle，(int32_t 类型，数值范围，有效数据4 个字节),单位0.01°/LSB。 \n---PAGE 29---\n 
+ 
+数据域 说明 数据 
+DATA[0] 命令字节 0x92 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] 角度低字节1 DATA[4] = (uint8_t)(motorAngle) 
+DATA[5] 角度字节2 DATA[5] = (uint8_t)(motorAngle>>8) 
+DATA[6] 角度字节3 DATA[6] = (uint8_t)(motorAngle>>16) 
+DATA[7] 角度字节4 DATA[7] = (uint8_t)(motorAngle>>24) 
+ 
+2.12.4. 通讯示例 
+示例 1： 
+发送指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x141 0x92 0x00 0x00 0x00 0x00 0x00 0x00 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x92 0x00 0x00 0x00 0x00 0x00 0x00 0x00 CRC16L CRC16H 
+说明：发送 0x92 指令后，将返回电机输出轴绝对角度。 
+回复指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x241 0x92 0x00 0x00 0x00 0xA0 0x8C 0x00 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x92 0x00 0x00 0x00 0xA0 0x8C 0x00 0x00 CRC16L CRC16H \n---PAGE 30---\n 
+ 
+说明：Data[4]到 data[7]组成一个（Data[4]为最低位，Data[7]为最高位）32 位数据为 0x00008CA0，
+表示十进制为 36000， 按照0.01°/LSB 单位缩小100 倍即36000*0.01=360°。 表示电机输出轴相对
+零点位置正向移动 360°。 
+ 
+2.13. 读取单圈角度命令（0x94） 
+2.13.1. 指令说明 
+主机发送该命令以读取当前电机的单圈角度。注意当前指令是作为单圈数据读取指令，针对直驱电
+机使用。 
+2.13.2. 发送数据域定义 
+数据域 说明 数据 
+DATA[0] 命令字节 0x94 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] NULL 0x00 
+DATA[5] NULL 0x00 
+DATA[6] NULL 0x00 
+DATA[7] NULL 0x00 
+ 
+2.13.3. 回复数据域定义 
+电机在收到命令后回复主机，该帧数据中包含了以下参数。 
+1. 电机单圈角度 circleAngle，为 int16_t 类型数据，以编码器零点为起始点，顺时针增加，再次到
+达零点时数值回 0，单位 0.01°/LSB，数值范围 0~35999。 
+数据域 说明 数据 
+DATA[0] 命令字节 0x94 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] NULL 0x00 
+DATA[5] NULL 0x00 \n---PAGE 31---\n 
+ 
+DATA[6] 单圈角度低字节 DATA[5] = (uint8_t)(circleAngle) 
+DATA[7] 单圈角度高字节 DATA[6] = (uint8_t)(circleAngle>>8) 
+ 
+2.13.4. 通讯示例 
+示例 1： 
+发送指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x141 0x94 0x00 0x00 0x00 0x00 0x00 0x00 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x94 0x00 0x00 0x00 0x00 0x00 0x00 0x00 CRC16L CRC16H 
+说明：发送 0x94 指令后，将返回电机单圈角度。 
+回复指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x241 0x94 0x00 0x00 0x00 0x00 0x00 0x10 0x27 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x94 0x00 0x00 0x00 0x00 0x00 0x10 0x27 CRC16L CRC16H 
+说明：Data[6]到 data[7]组成一个 （Data[6]为最低位，Data[7]为最高位）16 位数据为 0x2710，表示十
+进制为 10000，单位是 0.01°。表示电机当前在相对零点位置 100°位置。 
+ 
+2.14. 读取电机状态 1 和错误标志命令（0x9A） 
+2.14.1. 指令说明 
+该命令读取当前电机的温度、电压和错误状态标志 
+2.14.2. 发送数据域定义 
+数据域 说明 数据 
+DATA[0] 命令字节 0x9A \n---PAGE 32---\n 
+ 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] NULL 0x00 
+DATA[5] NULL 0x00 
+DATA[6] NULL 0x00 
+DATA[7] NULL 0x00 
+ 
+2.14.3. 回复数据域定义 
+电机在收到命令后回复主机，该帧数据包含了以下参数： 
+1.电机温度temperature（int8_t 类型，单位1℃/LSB）。 
+2.抱闸控制指令：表示抱闸控制指令状态，1 代表抱闸释放指令，0 代表抱闸锁死指令。 
+2.电压voltage（uint16_t 类型，单位0.1V/LSB）。 
+3.错误标志errorState（为uint16_t 类型，各个位代表不同的电机状态） 
+数据域 说明 数据 
+DATA[0] 命令字节 0x9A 
+DATA[1] 电机温度 DATA[1] = (uint8_t)(temperature) 
+DATA[2] NULL 0x00 
+DATA[3] 抱闸释放指令 DATA[3] = (uint8_t)(RlyCtrlRslt) 
+DATA[4] 电压低字节 DATA[4] = (uint8_t)(voltage) 
+DATA[5] 电压高字节 DATA[5] = (uint8_t)(voltage>>8) 
+DATA[6] 错误状态低字节1 DATA[6] = (uint8_t)(errorState) 
+DATA[7] 错误状态字节2 DATA[7] = (uint8_t)(errorState>>8) 
+备注： 
+1.系统异常状态值System_errorState 状态表1 如下： 
+System_errorState 值 状态说明 
+0x0002 电机堵转 
+0x0004 低压 
+0x0008 过压 \n---PAGE 33---\n 
+ 
+0x0010 相电流过流 
+0x0040 功率超限 
+0x0080 标定参数写入错误 
+0x0100 超速 
+0x1000 电机温度过温 
+0x2000 编码器校准错误 
+ 
+2.14.4. 通讯示例 
+示例 1： 
+发送指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x141 0x9A 0x00 0x00 0x00 0x00 0x00 0x00 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x9A 0x00 0x00 0x00 0x00 0x00 0x00 0x00 CRC16L CRC16H 
+说明：发送 0x9A 令后，将返回电机的温度、电压和错误状态标志。 
+回复指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x241 0x9A 0x32 0x00 0x01 0xE5 0x01 0x04 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x9A 0x32 0x00 0x01 0xE5 0x01 0x04 0x00 CRC16L CRC16H 
+说明：Data[1] = 0x32 十进制为 50，代表此刻电机温度为 50 度。Data[3]表示抱闸表示抱闸控制指令
+状态，1 代表抱闸释放指令，0 代表抱闸锁死指令。 所以0x01 表示当前抱闸释放指令已经执行。Data[4]
+和 Data[5]（Data[4]为低位，Data[5]为高位）组成 0x01E5，十进制为 485，按照 0.1V/LSB 的单位缩小
+10 倍，485*0.1=48.5V，代表当前电机供电电压为 48.5V。Data[6]和 Data[7]（Data[6]为低位，Data[7]
+为高位）组成 0x0004，对照System_errorState 表中的错误说明，表示低压错误。 \n---PAGE 34---\n 
+ 
+2.15. 读取电机状态 2 命令（0x9C） 
+2.15.1. 指令说明 
+该命令读取当前电机的温度、转速、编码器位置。 
+2.15.2. 发送数据域定义 
+数据域 说明 数据 
+DATA[0] 命令字节 0x9C 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] NULL 0x00 
+DATA[5] NULL 0x00 
+DATA[6] NULL 0x00 
+DATA[7] NULL 0x00 
+ 
+2.15.3. 回复数据域定义 
+电机在收到命令后回复主机，该帧数据中包含了以下参数。 
+1. 电机温度temperature（int8_t 类型，1℃/LSB）。 
+2. 电机的转矩电流值iq（int16_t 类型，0.01A/LSB）。 
+3. 电机输出轴转速speed（int16_t 类型，1dps/LSB）。 
+4. 电机输出轴角度（int16_t 类型，1degree/LSB,最大范围±32767degree）。 
+数据域 说明 数据 
+DATA[0] 命令字节 0x9C 
+DATA[1] 电机温度 DATA[1] = (uint8_t)(temperature) 
+DATA[2] 转矩电流低字节 DATA[2] = (uint8_t)(iq) 
+DATA[3] 转矩电流高字节 DATA[3] = (uint8_t)(iq>>8) 
+DATA[4] 电机速度低字节 DATA[4] = (uint8_t)(speed) 
+DATA[5] 电机速度高字节 DATA[5] = (uint8_t)(speed>>8) 
+DATA[6] 电机角度低字节 DATA[6] = (uint8_t)(degree) 
+DATA[7] 电机角度高字节 DATA[7] = (uint8_t)(degree>>8) \n---PAGE 35---\n 
+ 
+ 
+2.15.4. 通讯示例 
+示例 1： 
+发送指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x141 0x9C 0x00 0x00 0x00 0x00 0x00 0x00 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x9C 0x00 0x00 0x00 0x00 0x00 0x00 0x00 CRC16L CRC16H 
+说明：该命令读取当前电机的温度、转速、编码器位置。 
+回复指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x241 0x9C 0x32 0x64 0x00 0xF4 0x01 0x2D 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x9C 0x32 0x64 0x00 0xF4 0x01 0x2D 0x00 CRC16L CRC16H 
+说明：Data[1] = 0x32 十进制为 50，代表此刻电机温度为 50 度。Data[2]和 Data[3]合成数据 0x0064
+十进制为 100，按照 100 倍比例缩小即为 100*0.01=1A，那么代表当前电机实际电流为 1A。Data[4]
+和 Data[5]合成数据 0x01F4 十进制为 500,代表电机输出轴转速为 500dps。电机输出轴转速和电机转
+速之间存在减速比的关系，如果减速比为 6，那么电机转速比输出轴转速高 6 倍。Data[6]和 Data[7]
+合成数据 0x002D 十进制为 45，代表电机输出轴相对零点位置正向移动45 度。电机输出轴位置和电
+机编码器线数和减速比有关， 例如电机编码器线数为16384， 减速比为6， 那么电机输出轴的360 度
+对应 16384*6 = 98304 个脉冲。 
+2.16. 读取电机状态 3 命令（0x9D） 
+2.16.1. 指令说明 
+该命令读取当前电机的温度和相电流数据 
+2.16.2. 发送数据域定义 \n---PAGE 36---\n 
+ 
+数据域 说明 数据 
+DATA[0] 命令字节 0x9D 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] NULL 0x00 
+DATA[5] NULL 0x00 
+DATA[6] NULL 0x00 
+DATA[7] NULL 0x00 
+ 
+2.16.3. 回复数据域定义 
+电机在收到命令后回复主机，该帧数据包含了以下数据： 
+1. 电机温度temperature（int8_t 类型，1℃/LSB） 
+2. A 相电流数据，数据类型为int16_t 类型，对应实际相电流为0.01ALSB。 
+3. B 相电流数据，数据类型为int16_t 类型，对应实际相电流为0.01ALSB。 
+4. C 相电流数据，数据类型为int16_t 类型，对应实际相电流为0.01ALSB。 
+数据域 说明 数据 
+DATA[0] 命令字节 0x9D 
+DATA[1] 电机温度 DATA[1] = (uint8_t)(temperature) 
+DATA[2] A 相电流低字节 DATA[2] = (uint8_t)(iA) 
+DATA[3] A 相电流高字节 DATA[3] = (uint8_t)(iA>>8) 
+DATA[4] B 相电流低字节 DATA[4] = (uint8_t)(iB) 
+DATA[5] B 相电流高字节 DATA[5] = (uint8_t)(iB>>8) 
+DATA[6] C 相电流低字节 DATA[6] = (uint8_t)(iC) 
+DATA[7] C 相电流高字节 DATA[7] = (uint8_t)(iC>>8) 
+ 
+2.16.4. 通讯示例 
+示例 1： 
+发送指令： \n---PAGE 37---\n 
+ 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x141 0x9D 0x00 0x00 0x00 0x00 0x00 0x00 0x00 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x9D 0x00 0x00 0x00 0x00 0x00 0x00 0x00 CRC16L CRC16H 
+说明：该命令读取当前电机的温度和相电流数据。 
+回复指令： 
+CAN: 
+ID 号 Data[0] Data[1] Data[2] Data[3] Data[4] Data[5] Data[6] Data[7] 
+0x241 0x9D 0x32 0xC2 0x0B 0x10 0xFA 0xC0 0xF9 
+RS485： 
+帧头 ID 号 长度 D0 D1 D2 D3 D4 D5 D6 D7 CRC16L CRC16H 
+0x3E 0x01 0x08 0x9D 0x32 0xC2 0x0B 0x10 0xFA 0xC0 0xF9 CRC16L CRC16H 
+说明：Data[1] = 0x32 十进制为 50，代表此刻电机温度为 50 度。Data[2]和 Data[3]合成数据 0x0BC2
+十进制为 3010， 按照100 倍比例缩小即为 3010*0.01=30.1A， 那么代表当前电机A 相实际电流为 30.1A。
+Data[4]和 Data[5]合成数据 0xFA10 十进制为-1520，按照 100 倍比例缩小即为-1520*0.01=-15.2A，那
+么代表当前电机 B 相实际电流为-15.2A。Data[6]和 Data[7]合成数据 0xF9C0 十进制为-1600， 按照100
+倍比例缩小即为-1600*0.01=-16A，那么代表当前电机 C 相实际电流为-16A。 
+2.17. 电机关闭命令（0x80） 
+2.17.1. 指令说明 
+关闭电机输出，同时清除电机运行状态，不在任何闭环模式下。 
+2.17.2. 发送数据域定义 
+数据域 说明 数据 
+DATA[0] 命令字节 0x80 
+DATA[1] NULL 0x00 
+DATA[2] NULL 0x00 
+DATA[3] NULL 0x00 
+DATA[4] NULL 0x00 \n

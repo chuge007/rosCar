@@ -1,0 +1,309 @@
+{
+  "prefs": [
+    {
+      "name": "gate_B_start",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "tcg_point_7_depth",
+      "type": "double",
+      "value": -1.0
+    },
+    {
+      "name": "gate_C_threshold",
+      "type": "double",
+      "value": 50.0
+    },
+    {
+      "name": "wedge_width",
+      "type": "double",
+      "value": 23.0
+    },
+    {
+      "name": "tcg_point_3_depth",
+      "type": "double",
+      "value": -1.0
+    },
+    {
+      "name": "beam_mode",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "gate_I_enable",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "gate_C_enable",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "tcg_point_9_gain",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "probe_secondary_axis_element_count",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "name": "tcg_point_2_depth",
+      "type": "double",
+      "value": -1.0
+    },
+    {
+      "name": "tcg_point_4_gain",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "gate_B_enable",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "wedge_enable",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "name": "reverse_mount_enable",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "gate_I_measurement_mode",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "name": "tcg_point_8_gain",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "tcg_enable",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "gate_A_measurement_mode",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "gate_C_measurement_mode",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "gate_B_threshold",
+      "type": "double",
+      "value": 50.0
+    },
+    {
+      "name": "wedge_angle",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "roof_angle",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "gate_C_start",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "tcg_point_6_depth",
+      "type": "double",
+      "value": -1.0
+    },
+    {
+      "name": "gate_B_sync",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "wedge_height",
+      "type": "double",
+      "value": 20.0
+    },
+    {
+      "name": "gate_I_start",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "gate_B_end",
+      "type": "double",
+      "value": 20.0
+    },
+    {
+      "name": "tcg_point_8_depth",
+      "type": "double",
+      "value": -1.0
+    },
+    {
+      "name": "gcp",
+      "type": "double",
+      "value": 10.0
+    },
+    {
+      "name": "probe_frequency",
+      "type": "double",
+      "value": 5.0
+    },
+    {
+      "name": "gate_I_end",
+      "type": "double",
+      "value": 20.0
+    },
+    {
+      "name": "wedge_length",
+      "type": "double",
+      "value": 68.6
+    },
+    {
+      "name": "tcg_point_10_gain",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "gate_C_sync",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "gate_A_enable",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "name": "dual_crystal_enable",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "probe_secondary_axis_element_pitch",
+      "type": "double",
+      "value": 11.1
+    },
+    {
+      "name": "probe_main_axis_element_count",
+      "type": "int",
+      "value": 128
+    },
+    {
+      "name": "tcg_point_1_depth",
+      "type": "double",
+      "value": -1.0
+    },
+    {
+      "name": "tcg_point_1_gain",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "gate_A_sync",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "gate_A_threshold",
+      "type": "double",
+      "value": 50.0
+    },
+    {
+      "name": "tcg_point_10_depth",
+      "type": "double",
+      "value": -1.0
+    },
+    {
+      "name": "gate_B_measurement_mode",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "tcg_point_5_gain",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "tcg_point_5_depth",
+      "type": "double",
+      "value": -1.0
+    },
+    {
+      "name": "gate_I_threshold",
+      "type": "double",
+      "value": 50.0
+    },
+    {
+      "name": "gate_A_start",
+      "type": "double",
+      "value": 10.0
+    },
+    {
+      "name": "tcg_point_2_gain",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "gate_A_end",
+      "type": "double",
+      "value": 30.0
+    },
+    {
+      "name": "tcg_point_4_depth",
+      "type": "double",
+      "value": -1.0
+    },
+    {
+      "name": "rectifier_type",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "name": "gate_I_sync",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "tcg_point_3_gain",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "tcg_point_9_depth",
+      "type": "double",
+      "value": -1.0
+    },
+    {
+      "name": "gate_C_end",
+      "type": "double",
+      "value": 20.0
+    },
+    {
+      "name": "sync_I_collection",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "tcg_point_6_gain",
+      "type": "double",
+      "value": 0.0
+    },
+    {
+      "name": "tcg_point_7_gain",
+      "type": "double",
+      "value": 0.0
+    }
+  ]
+}

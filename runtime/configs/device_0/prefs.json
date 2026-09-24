@@ -1,0 +1,34 @@
+{
+  "prefs": [
+    {
+      "name": "serial_number",
+      "type": "string",
+      "value": "00101d491c23185c"
+    },
+    {
+      "name": "alias",
+      "type": "string",
+      "value": "device_0"
+    },
+    {
+      "name": "physical_id",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "device_id",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "name": "ultrasound_config",
+      "type": "string",
+      "value": "ultrasound_device_0"
+    },
+    {
+      "name": "timestamp",
+      "type": "string",
+      "value": "1788747124910"
+    }
+  ]
+}
