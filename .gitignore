@@ -70,3 +70,9 @@ README.md
 docs/
 config_backups/
 protocol_pages_*.txt
+
+# Local project/build entry files
+PA1664Workbench.pro
+opencv.pri
+build.cmd
+deploy-runtime.ps1
