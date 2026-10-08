@@ -2,9 +2,13 @@
 
 #include "drive_settings.h"
 #include "drive_types.h"
+#include "laser_correction_controller.h"
+#include "laser_trajectory_renderer.h"
 #include "rim302_protocol.h"
+#include "wheel_motor_controller.h"
 
 #include <QImage>
+#include <QList>
 #include <QPointer>
 #include <QVector>
 #include <QVector3D>
@@ -16,6 +20,7 @@ class QCamera;
 class QCheckBox;
 class QDialog;
 class QDoubleSpinBox;
+class QEvent;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -51,6 +56,7 @@ public slots:
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 private slots:
     void refreshPorts();
@@ -74,13 +80,22 @@ private slots:
     void updateLaserDevices(const QStringList &devices);
     void updateLaserConnection(bool connected, const QString &message);
     void updateLaserFrame(quint32 frame, quint32 width, quint32 height, quint64 points);
+    void updateCorrectionStatus(const crawling::LaserCorrectionStatus &status);
+    void startAutoCorrection();
+    void stopAutoCorrection();
     void updateUsbDevices(const QStringList &devices);
     void updateUsbConnection(bool connected, const QString &message);
     void appendLog(const QString &message);
 
+signals:
+    // 车体状态快照（12 项，顺序固定）：运行状态/状态说明/适配器/目标运动/实际运动/
+    // 左轮/右轮/反馈看门狗/双轮同步/IMU/激光/USB。供主窗口「状态」分区复用展示。
+    void vehicleStatusChanged(const QStringList &metrics);
+
 private:
     void buildUi();
     void loadSettings();
+    void emitVehicleStatus();
     crawling::DriveSettings settingsFromUi() const;
     void settingsToUi(const crawling::DriveSettings &settings);
     void setMotion(bool &flag, bool active);
@@ -91,6 +106,13 @@ private:
     void updateInformationDialog();
     QWidget *buildConfigurationPage();
     void persistAutoConnectSetting(bool enabled);
+    void showProfileTemplateDialog();
+    void loadProfileTemplates();
+    void persistProfileTemplates();
+    void applyProfileTemplates();
+    void loadProfileWeldTuning();
+    void persistProfileWeldTuning();
+    void applyProfileWeldTuning();
 
     crawling::SynchronizedDriveController *m_controller = nullptr;
     QThread *m_driveThread = nullptr;
@@ -98,6 +120,10 @@ private:
     QThread *m_sensorThread = nullptr;
     crawling::RobotUsbCameraController *m_usbCameraController = nullptr;
     QThread *m_usbCameraThread = nullptr;
+    crawling::LaserCorrectionController *m_correctionController = nullptr;
+    QThread *m_correctionThread = nullptr;
+    crawling::LaserTrajectoryWriter *m_trajectoryWriter = nullptr;
+    QThread *m_trajectoryThread = nullptr;
     QTimer *m_commandTimer = nullptr;
     crawling::DriveSettings m_settings;
     crawling::DriveState m_state = crawling::DriveState::Disconnected;
@@ -109,6 +135,8 @@ private:
     bool m_imuConnected = false;
     bool m_laserConnected = false;
     bool m_usbConnected = false;
+    bool m_autoCorrectionActive = false;
+    bool m_autoCorrectionStartPending = false;
 
     QLabel *m_stateLabel = nullptr;
     QLabel *m_connectionLabel = nullptr;
@@ -128,11 +156,24 @@ private:
     QLabel *m_imuStatus = nullptr;
     QLabel *m_laserStatus = nullptr;
     QLabel *m_usbStatus = nullptr;
+    QLabel *m_correctionStatus = nullptr;
+    QDoubleSpinBox *m_correctionSpeed = nullptr;
+    QDoubleSpinBox *m_correctionSegment = nullptr;
+    QDoubleSpinBox *m_correctionKp = nullptr;
+    QDoubleSpinBox *m_correctionKd = nullptr;
+    QPushButton *m_autoCorrectionStart = nullptr;
+    QPushButton *m_autoCorrectionStop = nullptr;
 
     QComboBox *m_leftPort = nullptr;
     QComboBox *m_rightPort = nullptr;
     QComboBox *m_leftBaud = nullptr;
     QComboBox *m_rightBaud = nullptr;
+    QComboBox *m_wheelCommunicationMode = nullptr;
+    QComboBox *m_wheelCanPort = nullptr;
+    QComboBox *m_wheelCanBaud = nullptr;
+    QComboBox *m_wheelCanBitrate = nullptr;
+    QList<QWidget *> m_wheelCanRows;
+    QList<QWidget *> m_wheelRs485Rows;
     QSpinBox *m_leftId = nullptr;
     QSpinBox *m_rightId = nullptr;
     QComboBox *m_leftSign = nullptr;
@@ -193,6 +234,7 @@ private:
     QPointer<QLabel> m_dialogRightWheel;
     QPointer<QLabel> m_dialogFeedback;
     QPointer<QLabel> m_dialogSync;
+    QPointer<QDialog> m_profileTemplateDialog;
     QStringList m_logLines;
     QString m_reasonText = QStringLiteral("等待连接");
     QString m_targetText = QStringLiteral("--");
@@ -207,4 +249,6 @@ private:
     QImage m_laserImage;
     QImage m_usbImage;
     QVector<QVector3D> m_laserPoints;
+    crawling::ProfileWeldTuning m_profileWeldTuning;
+    QVector<crawling::ProfileWeldTemplate> m_profileTemplates;
 };

@@ -2,6 +2,7 @@
 
 #include <QPainter>
 #include <QPainterPath>
+#include <QMouseEvent>
 #include <QtMath>
 #include <cstring>
 #include <limits>
@@ -38,6 +39,7 @@ AScanWidget::AScanWidget(QWidget *parent) : QWidget(parent)
     // paintEvent covers the full widget; suppress Qt's separate background
     // erase to avoid a second full-surface paint and visible flicker.
     setAttribute(Qt::WA_OpaquePaintEvent);
+    setMouseTracking(true);
 }
 
 void AScanWidget::setWaveform(const QVector<qint16> &samples, double scale,
@@ -49,6 +51,7 @@ void AScanWidget::setWaveform(const QVector<qint16> &samples, double scale,
     m_scale = qMax(1.0, scale);
     m_rangeStart = rangeStart;
     m_rangeEnd = rangeEnd;
+    updateSurfaceTracking();
 
     const QRectF pr = plotRect(this);
     qreal minY = pr.bottom();
@@ -68,6 +71,10 @@ void AScanWidget::setWaveform(const QVector<qint16> &samples, double scale,
         m_staticBackground = {};
         m_waveformDirtyRect = nextWaveformRect;
         update();
+    } else if (m_surfaceEnabled) {
+        // 表面点和跟踪闸门可能每帧横向移动，需要刷新整个绘图区；静态网格仍复用缓存。
+        m_waveformDirtyRect = nextWaveformRect;
+        update();
     } else {
         const QRect dirty = m_waveformDirtyRect.isNull()
                                 ? nextWaveformRect
@@ -83,6 +90,66 @@ void AScanWidget::setGates(const QVector<QVector<double>> &gates)
     update();
 }
 
+void AScanWidget::setActiveGate(int gateIndex)
+{
+    m_activeGate = gateIndex;
+    update();
+}
+
+void AScanWidget::beginGatePlacement(int gateIndex)
+{
+    if (gateIndex < 0 || gateIndex >= m_gates.size())
+        return;
+    m_activeGate = gateIndex;
+    m_placementGate = gateIndex;
+    m_placementMode = PlacementMode::Gate;
+    m_placementHasStart = false;
+    setCursor(Qt::CrossCursor);
+    emit interactionHint(QStringLiteral("请在 A 扫图上依次点击闸门左、右边界；右键可取消"));
+    update();
+}
+
+void AScanWidget::beginSurfaceWindowPlacement()
+{
+    m_placementMode = PlacementMode::SurfaceWindow;
+    m_placementGate = -1;
+    m_placementHasStart = false;
+    setCursor(Qt::CrossCursor);
+    emit interactionHint(QStringLiteral("请在 A 扫图上依次点击表面搜索区域的起点、终点；右键可取消"));
+    update();
+}
+
+void AScanWidget::cancelPlacement()
+{
+    m_placementMode = PlacementMode::None;
+    m_placementGate = -1;
+    m_placementHasStart = false;
+    unsetCursor();
+    update();
+}
+
+void AScanWidget::setSurfaceTracking(bool enabled, double windowStart, double windowEnd,
+                                     double thresholdPercent, bool holdMissing,
+                                     const QVector<bool> &trackedGates)
+{
+    const bool windowChanged = !qFuzzyCompare(m_surfaceWindowStart + 1.0, windowStart + 1.0)
+                               || !qFuzzyCompare(m_surfaceWindowEnd + 1.0, windowEnd + 1.0)
+                               || !qFuzzyCompare(m_surfaceThreshold + 1.0, thresholdPercent + 1.0);
+    m_surfaceEnabled = enabled;
+    m_surfaceWindowStart = qMin(windowStart, windowEnd);
+    m_surfaceWindowEnd = qMax(windowStart, windowEnd);
+    m_surfaceThreshold = qBound(0.0, thresholdPercent, 100.0);
+    m_surfaceHoldMissing = holdMissing;
+    m_surfaceTrackedGates = trackedGates;
+    if (!enabled || windowChanged) {
+        m_surfaceReferenceValid = false;
+        m_surfaceCurrentValid = false;
+        m_surfaceLastValid = false;
+    }
+    updateSurfaceTracking();
+    update();
+}
+
 void AScanWidget::setBipolar(bool bipolar)
 {
     if (m_bipolar == bipolar)
@@ -91,6 +158,97 @@ void AScanWidget::setBipolar(bool bipolar)
     m_staticBackground = {};
     m_waveformDirtyRect = {};
     update();
+}
+
+double AScanWidget::positionToRange(qreal x) const
+{
+    const QRectF pr = plotRect(this);
+    const double ratio = qBound(0.0, (x - pr.left()) / qMax<qreal>(1.0, pr.width()), 1.0);
+    return m_rangeStart + ratio * (m_rangeEnd - m_rangeStart);
+}
+
+qreal AScanWidget::rangeToPosition(double value) const
+{
+    const QRectF pr = plotRect(this);
+    const double span = qMax(0.001, m_rangeEnd - m_rangeStart);
+    return pr.left() + (value - m_rangeStart) / span * pr.width();
+}
+
+double AScanWidget::positionToThreshold(qreal y) const
+{
+    const QRectF pr = plotRect(this);
+    const qreal base = m_bipolar ? pr.center().y() : pr.bottom();
+    const qreal height = m_bipolar ? pr.height() / 2.0 : pr.height();
+    return qBound(0.0, (base - y) / qMax<qreal>(1.0, height) * 100.0, 100.0);
+}
+
+qreal AScanWidget::thresholdToPosition(double threshold) const
+{
+    const QRectF pr = plotRect(this);
+    return m_bipolar ? pr.center().y() - threshold / 100.0 * pr.height() / 2.0
+                     : pr.bottom() - threshold / 100.0 * pr.height();
+}
+
+QVector<double> AScanWidget::displayedGate(int index) const
+{
+    if (index < 0 || index >= m_gates.size())
+        return {};
+    QVector<double> gate = m_gates[index];
+    if (gate.size() >= 4 && m_surfaceEnabled && m_surfaceCurrentValid
+        && m_surfaceReferenceValid && index < m_surfaceTrackedGates.size()
+        && m_surfaceTrackedGates[index]) {
+        const double delta = m_surfaceCurrent - m_surfaceReference;
+        gate[1] += delta;
+        gate[2] += delta;
+    }
+    return gate;
+}
+
+void AScanWidget::updateSurfaceTracking()
+{
+    if (!m_surfaceEnabled || m_samples.isEmpty() || m_surfaceWindowEnd <= m_surfaceWindowStart) {
+        m_surfaceCurrentValid = false;
+        emit surfaceTrackingUpdated(false, m_surfaceReference, m_surfaceCurrent);
+        return;
+    }
+    const double span = qMax(0.001, m_rangeEnd - m_rangeStart);
+    const int count = m_samples.size();
+    const double clippedStart = qMax(m_surfaceWindowStart, m_rangeStart);
+    const double clippedEnd = qMin(m_surfaceWindowEnd, m_rangeEnd);
+    const int first = clippedEnd >= clippedStart
+        ? qBound(0, int((clippedStart - m_rangeStart) / span * (count - 1)), count - 1)
+        : 1;
+    const int last = clippedEnd >= clippedStart
+        ? qBound(0, int(qCeil((clippedEnd - m_rangeStart) / span * (count - 1))), count - 1)
+        : 0;
+    const double trigger = m_scale * m_surfaceThreshold / 100.0;
+    bool found = false;
+    double current = 0.0;
+    if (trigger > 0.0 && last >= first) {
+        for (int i = first; i <= last; ++i) {
+            if (qAbs(double(m_samples[i])) >= trigger) {
+                current = m_rangeStart + span * i / qMax(1, count - 1);
+                found = true;
+                break;
+            }
+        }
+    }
+    if (found) {
+        m_surfaceCurrent = current;
+        m_surfaceCurrentValid = true;
+        m_surfaceLast = current;
+        m_surfaceLastValid = true;
+        if (!m_surfaceReferenceValid) {
+            m_surfaceReference = current;
+            m_surfaceReferenceValid = true;
+        }
+    } else if (m_surfaceHoldMissing && m_surfaceLastValid) {
+        m_surfaceCurrent = m_surfaceLast;
+        m_surfaceCurrentValid = true;
+    } else {
+        m_surfaceCurrentValid = false;
+    }
+    emit surfaceTrackingUpdated(m_surfaceCurrentValid, m_surfaceReference, m_surfaceCurrent);
 }
 
 void AScanWidget::paintEvent(QPaintEvent *)
@@ -133,17 +291,71 @@ void AScanWidget::paintEvent(QPaintEvent *)
     const QColor gateColors[] = { QColor("#e53935"), QColor("#fb8c00"),
                                   QColor("#8e24aa"), QColor("#43a047") };
     const double span = qMax(0.001, m_rangeEnd - m_rangeStart);
+
+    if (m_surfaceEnabled) {
+        const qreal sx = rangeToPosition(m_surfaceWindowStart);
+        const qreal ex = rangeToPosition(m_surfaceWindowEnd);
+        const QRectF windowRect(QPointF(qMin(sx, ex), pr.top()),
+                                QPointF(qMax(sx, ex), pr.bottom()));
+        p.fillRect(windowRect.intersected(pr), QColor(3, 169, 244, 25));
+        p.setPen(QPen(QColor("#039be5"), 1.4, Qt::DashLine));
+        p.drawLine(QPointF(sx, pr.top()), QPointF(sx, pr.bottom()));
+        p.drawLine(QPointF(ex, pr.top()), QPointF(ex, pr.bottom()));
+        const qreal thresholdY = thresholdToPosition(m_surfaceThreshold);
+        p.setPen(QPen(QColor("#00acc1"), 1.2, Qt::DashDotLine));
+        p.drawLine(QPointF(qMin(sx, ex), thresholdY),
+                   QPointF(qMax(sx, ex), thresholdY));
+        if (m_bipolar) {
+            const qreal negativeThresholdY = pr.center().y()
+                    + m_surfaceThreshold / 100.0 * pr.height() / 2.0;
+            p.drawLine(QPointF(qMin(sx, ex), negativeThresholdY),
+                       QPointF(qMax(sx, ex), negativeThresholdY));
+        }
+        p.drawText(QRectF(qMin(sx, ex) + 5, pr.top() + 4, 112, 20),
+                   QStringLiteral("表面搜索区域"));
+        if (m_surfaceReferenceValid) {
+            p.setPen(QPen(QColor("#1565c0"), 1.3, Qt::DotLine));
+            const qreal x = rangeToPosition(m_surfaceReference);
+            p.drawLine(QPointF(x, pr.top()), QPointF(x, pr.bottom()));
+        }
+        if (m_surfaceCurrentValid) {
+            p.setPen(QPen(QColor("#00a884"), 2.2));
+            const qreal x = rangeToPosition(m_surfaceCurrent);
+            p.drawLine(QPointF(x, pr.top()), QPointF(x, pr.bottom()));
+            p.drawText(QRectF(x + 4, pr.top() + 24, 110, 20),
+                       QStringLiteral("表面 %1 mm").arg(m_surfaceCurrent, 0, 'f', 2));
+        }
+    }
+
     for (int i = 0; i < m_gates.size() && i < 4; ++i) {
-        if (m_gates[i].size() < 4 || m_gates[i][0] < 0.5)
+        const QVector<double> gate = displayedGate(i);
+        if (gate.size() < 4 || gate[0] < 0.5)
             continue;
-        const double start = (m_gates[i][1] - m_rangeStart) / span;
-        const double end = (m_gates[i][2] - m_rangeStart) / span;
-        const double threshold = m_gates[i][3] / 100.0;
-        const qreal gateY = m_bipolar ? pr.center().y() - threshold * pr.height() / 2.0
-                                      : pr.bottom() - threshold * pr.height();
-        p.setPen(QPen(gateColors[i], 2));
-        p.drawLine(QPointF(pr.left() + start * pr.width(), gateY),
-                   QPointF(pr.left() + end * pr.width(), gateY));
+        const qreal startX = pr.left() + (gate[1] - m_rangeStart) / span * pr.width();
+        const qreal endX = pr.left() + (gate[2] - m_rangeStart) / span * pr.width();
+        const qreal gateY = thresholdToPosition(gate[3]);
+        const bool active = i == m_activeGate;
+        p.setPen(QPen(gateColors[i], active ? 3.0 : 2.0));
+        p.drawLine(QPointF(startX, gateY), QPointF(endX, gateY));
+        p.drawLine(QPointF(startX, gateY - 8), QPointF(startX, gateY + 8));
+        p.drawLine(QPointF(endX, gateY - 8), QPointF(endX, gateY + 8));
+        if (active) {
+            p.setBrush(Qt::white);
+            p.drawEllipse(QPointF(startX, gateY), 4, 4);
+            p.drawEllipse(QPointF(endX, gateY), 4, 4);
+        }
+        p.setBrush(Qt::NoBrush);
+        p.drawText(QRectF(qMin(startX, endX) + 4, gateY - 25, 130, 20),
+                   QStringLiteral("Gate %1  %2%").arg(QStringLiteral("ABCI").mid(i, 1))
+                       .arg(gate[3], 0, 'f', 1));
+    }
+
+    if (m_placementMode != PlacementMode::None && m_placementHasStart) {
+        const qreal startX = rangeToPosition(m_placementStart);
+        const qreal currentX = qBound(pr.left(), m_mousePosition.x(), pr.right());
+        p.setPen(QPen(QColor("#1976d2"), 1.5, Qt::DashLine));
+        p.drawLine(QPointF(startX, pr.top()), QPointF(startX, pr.bottom()));
+        p.drawLine(QPointF(currentX, pr.top()), QPointF(currentX, pr.bottom()));
     }
 
     if (m_samples.size() < 2)
@@ -193,6 +405,162 @@ void AScanWidget::paintEvent(QPaintEvent *)
     p.drawPath(path);
 }
 
+void AScanWidget::mousePressEvent(QMouseEvent *event)
+{
+    const QRectF pr = plotRect(this);
+    if (!pr.contains(event->position())) {
+        QWidget::mousePressEvent(event);
+        return;
+    }
+    if (event->button() == Qt::RightButton && m_placementMode != PlacementMode::None) {
+        cancelPlacement();
+        emit interactionHint(QStringLiteral("图上设置已取消"));
+        return;
+    }
+    if (event->button() != Qt::LeftButton)
+        return;
+
+    m_mousePosition = event->position();
+    const double value = positionToRange(event->position().x());
+    if (m_placementMode != PlacementMode::None) {
+        if (!m_placementHasStart) {
+            m_placementStart = value;
+            m_placementHasStart = true;
+            emit interactionHint(QStringLiteral("已记录起点，请点击终点"));
+            update();
+            return;
+        }
+        const double start = qMin(m_placementStart, value);
+        const double end = qMax(m_placementStart, value);
+        if (m_placementMode == PlacementMode::Gate)
+            emit gateRangeEdited(m_placementGate, start, qMax(start + 0.001, end));
+        else
+            emit surfaceWindowEdited(start, qMax(start + 0.001, end));
+        cancelPlacement();
+        return;
+    }
+
+    const qreal hit = 8.0;
+    for (int i = m_gates.size() - 1; i >= 0; --i) {
+        const QVector<double> gate = displayedGate(i);
+        if (gate.size() < 4 || gate[0] < 0.5)
+            continue;
+        const qreal sx = rangeToPosition(gate[1]);
+        const qreal ex = rangeToPosition(gate[2]);
+        const qreal gy = thresholdToPosition(gate[3]);
+        DragPart part = DragPart::None;
+        if (qAbs(event->position().x() - sx) <= hit && qAbs(event->position().y() - gy) <= 16)
+            part = DragPart::GateStart;
+        else if (qAbs(event->position().x() - ex) <= hit && qAbs(event->position().y() - gy) <= 16)
+            part = DragPart::GateEnd;
+        else if (event->position().x() >= qMin(sx, ex) - hit
+                 && event->position().x() <= qMax(sx, ex) + hit
+                 && qAbs(event->position().y() - gy) <= hit)
+            part = (event->modifiers() & Qt::ShiftModifier) ? DragPart::GateBody
+                                                            : DragPart::GateThreshold;
+        if (part != DragPart::None) {
+            m_activeGate = i;
+            m_dragGate = i;
+            m_dragPart = part;
+            m_dragAnchorRange = value;
+            m_dragStart = m_gates[i][1];
+            m_dragEnd = m_gates[i][2];
+            emit gateSelected(i);
+            update();
+            return;
+        }
+    }
+}
+
+void AScanWidget::mouseMoveEvent(QMouseEvent *event)
+{
+    m_mousePosition = event->position();
+    if (m_placementMode != PlacementMode::None) {
+        update();
+        return;
+    }
+    if (m_dragPart == DragPart::None) {
+        updateHoverCursor(event->position());
+        return;
+    }
+    if (m_dragGate < 0 || m_dragGate >= m_gates.size())
+        return;
+    double value = positionToRange(event->position().x());
+    if (m_dragPart == DragPart::GateThreshold) {
+        const double threshold = positionToThreshold(event->position().y());
+        m_gates[m_dragGate][3] = threshold;
+        emit gateThresholdEdited(m_dragGate, threshold);
+    } else {
+        double start = m_dragStart;
+        double end = m_dragEnd;
+        const double surfaceOffset = m_surfaceEnabled && m_surfaceCurrentValid
+                && m_surfaceReferenceValid && m_dragGate < m_surfaceTrackedGates.size()
+                && m_surfaceTrackedGates[m_dragGate]
+            ? m_surfaceCurrent - m_surfaceReference : 0.0;
+        if (m_dragPart == DragPart::GateStart) {
+            value -= surfaceOffset;
+            start = qMin(value, end - 0.001);
+        } else if (m_dragPart == DragPart::GateEnd) {
+            value -= surfaceOffset;
+            end = qMax(value, start + 0.001);
+        } else if (m_dragPart == DragPart::GateBody) {
+            const double delta = value - m_dragAnchorRange;
+            start += delta;
+            end += delta;
+            if (start < m_rangeStart) {
+                end += m_rangeStart - start;
+                start = m_rangeStart;
+            }
+            if (end > m_rangeEnd) {
+                start -= end - m_rangeEnd;
+                end = m_rangeEnd;
+            }
+        }
+        m_gates[m_dragGate][1] = start;
+        m_gates[m_dragGate][2] = end;
+        emit gateRangeEdited(m_dragGate, start, end);
+    }
+    update();
+}
+
+void AScanWidget::mouseReleaseEvent(QMouseEvent *)
+{
+    m_dragPart = DragPart::None;
+    m_dragGate = -1;
+    updateHoverCursor(m_mousePosition);
+}
+
+void AScanWidget::leaveEvent(QEvent *event)
+{
+    if (m_placementMode == PlacementMode::None && m_dragPart == DragPart::None)
+        unsetCursor();
+    QWidget::leaveEvent(event);
+}
+
+void AScanWidget::updateHoverCursor(const QPointF &position)
+{
+    const qreal hit = 8.0;
+    for (int i = m_gates.size() - 1; i >= 0; --i) {
+        const QVector<double> gate = displayedGate(i);
+        if (gate.size() < 4 || gate[0] < 0.5)
+            continue;
+        const qreal sx = rangeToPosition(gate[1]);
+        const qreal ex = rangeToPosition(gate[2]);
+        const qreal gy = thresholdToPosition(gate[3]);
+        if ((qAbs(position.x() - sx) <= hit || qAbs(position.x() - ex) <= hit)
+            && qAbs(position.y() - gy) <= 16) {
+            setCursor(Qt::SizeHorCursor);
+            return;
+        }
+        if (position.x() >= qMin(sx, ex) - hit && position.x() <= qMax(sx, ex) + hit
+            && qAbs(position.y() - gy) <= hit) {
+            setCursor(Qt::SizeVerCursor);
+            return;
+        }
+    }
+    unsetCursor();
+}
+
 EScanWidget::EScanWidget(QWidget *parent) : QWidget(parent)
 {
     setMinimumSize(480, 300);
@@ -222,6 +590,17 @@ void EScanWidget::setFrame(const DecodedFrame &frame, double scale)
     update();
 }
 
+void EScanWidget::setImagingGate(bool enabled, double start, double end,
+                                 double rangeStart, double rangeEnd)
+{
+    m_gateEnabled = enabled;
+    m_gateStart = qMin(start, end);
+    m_gateEnd = qMax(start, end);
+    m_rangeStart = rangeStart;
+    m_rangeEnd = rangeEnd;
+    update();
+}
+
 void EScanWidget::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
@@ -231,7 +610,19 @@ void EScanWidget::paintEvent(QPaintEvent *)
         p.drawText(rect(), Qt::AlignCenter, QStringLiteral("等待 E 扫数据"));
         return;
     }
-    p.drawImage(rect().adjusted(40, 20, -20, -40), m_image);
+    if (!m_gateEnabled) {
+        p.setPen(QColor("#b42318"));
+        p.drawText(rect(), Qt::AlignCenter, QStringLiteral("当前成像闸门未启用"));
+        return;
+    }
+    const double span = qMax(0.001, m_rangeEnd - m_rangeStart);
+    const int top = qBound(0, int((m_gateStart - m_rangeStart) / span * m_image.height()),
+                           qMax(0, m_image.height() - 1));
+    const int bottom = qBound(top + 1,
+                              int(qCeil((m_gateEnd - m_rangeStart) / span * m_image.height())),
+                              m_image.height());
+    p.drawImage(rect().adjusted(40, 20, -20, -40), m_image,
+                QRect(0, top, m_image.width(), qMax(1, bottom - top)));
 }
 
 BScanWidget::BScanWidget(QWidget *parent) : QWidget(parent)
@@ -256,6 +647,14 @@ void BScanWidget::setRange(double rangeStart, double rangeEnd)
         return;
     m_rangeStart = rangeStart;
     m_rangeEnd = rangeEnd;
+    update();
+}
+
+void BScanWidget::setImagingGate(bool enabled, double start, double end)
+{
+    m_gateEnabled = enabled;
+    m_gateStart = qMin(start, end);
+    m_gateEnd = qMax(start, end);
     update();
 }
 
@@ -396,13 +795,26 @@ void BScanWidget::paintEvent(QPaintEvent *)
                    QStringLiteral("启动 B 扫后，转动编码器 A 开始成像"));
         return;
     }
+    if (!m_gateEnabled) {
+        p.setPen(QColor("#b42318"));
+        p.drawText(rect(), Qt::AlignCenter, QStringLiteral("当前成像闸门未启用"));
+        return;
+    }
     const QRect target = rect().adjusted(72, 32, -22, -54);
     // Always fit the complete acquired path (origin through newest position)
     // into the viewport.  The origin never scrolls away; as the path grows,
     // all existing columns are proportionally compressed.
     const int displayColumns = qMax(2, m_usedColumns);
+    const double rangeSpan = qMax(0.001, m_rangeEnd - m_rangeStart);
+    const int gateTop = qBound(0,
+        int((m_gateStart - m_rangeStart) / rangeSpan * m_image.height()),
+        qMax(0, m_image.height() - 1));
+    const int gateBottom = qBound(gateTop + 1,
+        int(qCeil((m_gateEnd - m_rangeStart) / rangeSpan * m_image.height())),
+        m_image.height());
     p.drawImage(target, m_image,
-                QRect(0, 0, qMin(displayColumns, m_image.width()), m_image.height()));
+                QRect(0, gateTop, qMin(displayColumns, m_image.width()),
+                      qMax(1, gateBottom - gateTop)));
 
     p.setPen(QPen(QColor("#22313f"), 1.2));
     p.drawRect(target);
@@ -417,8 +829,8 @@ void BScanWidget::paintEvent(QPaintEvent *)
                    Qt::AlignHCenter | Qt::AlignTop, QString::number(count));
 
         const qreal y = target.top() + target.height() * i / 4.0;
-        const double depth = m_rangeStart
-                             + (m_rangeEnd - m_rangeStart) * i / 4.0;
+        const double depth = m_gateStart
+                             + (m_gateEnd - m_gateStart) * i / 4.0;
         p.drawLine(QPointF(target.left() - 5, y), QPointF(target.left(), y));
         p.drawText(QRectF(2, y - 10, 64, 20), Qt::AlignRight | Qt::AlignVCenter,
                    QString::number(depth, 'f', 1));
@@ -446,6 +858,14 @@ CScanWidget::CScanWidget(QWidget *parent) : QWidget(parent)
 {
     setMinimumSize(480, 300);
     setAttribute(Qt::WA_OpaquePaintEvent);
+}
+
+void CScanWidget::setImagingGate(int gateIndex, bool enabled, double thresholdPercent)
+{
+    m_imagingGate = qBound(0, gateIndex, 3);
+    m_imagingGateEnabled = enabled;
+    m_imagingGateThreshold = qBound(0.0, thresholdPercent, 100.0);
+    update();
 }
 
 void CScanWidget::setEncoderPrecision(int countsPerCell)
@@ -511,25 +931,38 @@ bool CScanWidget::appendFrameInternal(const DecodedFrame &frame, double scale,
                               : qBound(0, sourceBeam,
                                        qMax(frame.beams.size(),
                                             frame.measurements.size()) - 1);
-    int amplitude = 0;
-    if (beamIndex >= 0 && beamIndex < frame.measurements.size())
-        amplitude = int(frame.measurements[beamIndex].amplitudeA);
-    if (amplitude <= 0 && beamIndex >= 0 && beamIndex < frame.beams.size()) {
-        for (qint16 sample : frame.beams[beamIndex])
-            amplitude = qMax(amplitude, qAbs(int(sample)));
+    QVector<int> amplitudes(4, 0);
+    if (beamIndex >= 0 && beamIndex < frame.measurements.size()) {
+        const BeamMeasurement &measurement = frame.measurements[beamIndex];
+        amplitudes[0] = int(measurement.amplitudeA);
+        amplitudes[1] = int(measurement.amplitudeB);
+        amplitudes[2] = int(measurement.amplitudeC);
+        amplitudes[3] = int(measurement.amplitudeI);
     }
-    const uchar intensity = uchar(qBound(0, int(amplitude * 255.0
-                                                 / qMax(1.0, scale)), 255));
+    // C 扫必须严格使用 SDK 给出的各闸门测量幅值。不能在 Gate A 为 0 时
+    // 从整条 A 扫重新找峰值，否则会越过 Gate A 的范围和阈值产生伪成像。
+    m_amplitudeScale = qMax(1.0, scale);
     const QPoint cell(x, y);
-    const auto existing = m_cells.constFind(cell);
-    if (existing != m_cells.constEnd() && *existing >= intensity)
+    bool hadAnyCell = false;
+    for (const auto &gateCells : m_gateCells)
+        hadAnyCell = hadAnyCell || !gateCells.isEmpty();
+    bool changed = false;
+    for (int gate = 0; gate < m_gateCells.size(); ++gate) {
+        const quint32 amplitude = quint32(qMax(0, amplitudes[gate]));
+        auto &cells = m_gateCells[gate];
+        const auto existing = cells.constFind(cell);
+        if (existing != cells.constEnd() && *existing >= amplitude)
+            continue;
+        // Each gate keeps the same path independently so switching the dropdown
+        // does not discard already acquired C-scan data.
+        if (existing == cells.constEnd() && cells.size() >= 262144)
+            continue;
+        cells.insert(cell, amplitude);
+        changed = true;
+    }
+    if (!changed)
         return false;
-    // Keep the complete path while bounding pathological memory growth caused
-    // by an uncalibrated or corrupt encoder stream.
-    if (existing == m_cells.constEnd() && m_cells.size() >= 262144)
-        return false;
-    m_cells.insert(cell, intensity);
-    if (m_cells.size() == 1) {
+    if (!hadAnyCell) {
         m_minX = m_maxX = x;
         m_minY = m_maxY = y;
     } else {
@@ -543,7 +976,8 @@ bool CScanWidget::appendFrameInternal(const DecodedFrame &frame, double scale,
 
 void CScanWidget::clear()
 {
-    m_cells.clear();
+    for (auto &cells : m_gateCells)
+        cells.clear();
     m_originEncoderA = 0;
     m_originEncoderB = 0;
     m_currentEncoderA = 0;
@@ -558,7 +992,13 @@ void CScanWidget::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
     p.fillRect(rect(), Qt::white);
-    if (m_cells.isEmpty()) {
+    if (!m_imagingGateEnabled) {
+        p.setPen(QColor("#b42318"));
+        p.drawText(rect(), Qt::AlignCenter, QStringLiteral("当前成像闸门未启用"));
+        return;
+    }
+    const QHash<QPoint, quint32> &cells = m_gateCells[m_imagingGate];
+    if (cells.isEmpty()) {
         p.setPen(QColor("#667788"));
         p.drawText(rect(), Qt::AlignCenter,
                    QStringLiteral("启动 C 扫后，编码器 A/B 的位置将生成平面路径图"));
@@ -597,14 +1037,18 @@ void CScanWidget::paintEvent(QPaintEvent *)
     raster.fill(Qt::white);
     QPainter rp(&raster);
     rp.setRenderHint(QPainter::Antialiasing, false);
-    for (auto it = m_cells.constBegin(); it != m_cells.constEnd(); ++it) {
+    for (auto it = cells.constBegin(); it != cells.constEnd(); ++it) {
         const qreal px = (it.key().x() - visibleMinX) * (raster.width() - 1)
                          / spanX;
         const qreal py = flatY ? (raster.height() - 1) / 2.0
                                : (visibleMaxY - it.key().y())
                                      * (raster.height() - 1) / spanY;
-        rp.fillRect(QRectF(px - 2, py - 2, 5, 5),
-                    amplitudeColor(double(it.value()) / 255.0));
+        const double thresholdAmplitude = m_amplitudeScale
+                                          * m_imagingGateThreshold / 100.0;
+        const double normalized = double(it.value()) >= thresholdAmplitude
+            ? double(it.value()) / qMax(1.0, m_amplitudeScale)
+            : 0.0;
+        rp.fillRect(QRectF(px - 2, py - 2, 5, 5), amplitudeColor(normalized));
     }
     rp.end();
     p.drawImage(target, raster);
@@ -629,7 +1073,9 @@ void CScanWidget::paintEvent(QPaintEvent *)
     }
     p.drawText(QRectF(target.left(), 5, target.width(), 28),
                Qt::AlignHCenter | Qt::AlignVCenter,
-               QStringLiteral("C 扫完整路径　原点 A/B：%1/%2　当前 A/B：%3/%4　精度：%5 计数/格")
+               QStringLiteral("C 扫 Gate %1　阈值 %2%　原点 A/B：%3/%4　当前 A/B：%5/%6　精度：%7 计数/格")
+                   .arg(QStringLiteral("ABCI").mid(m_imagingGate, 1))
+                   .arg(m_imagingGateThreshold, 0, 'f', 1)
                    .arg(m_originEncoderA).arg(m_originEncoderB)
                    .arg(m_currentEncoderA).arg(m_currentEncoderB)
                    .arg(m_encoderPrecision));

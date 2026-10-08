@@ -229,7 +229,7 @@ bool HardwareDiscovery::probeImuPort(const QString& portName, int baudRate, int 
 HardwareDetectionResult HardwareDiscovery::probeCanPorts(const QString& excludedPort) {
   HardwareDetectionResult result;
   const QStringList excludedPorts = excludedPort.trimmed().split(
-      QRegularExpression(QStringLiteral("[,;\\s]+")), QString::SkipEmptyParts);
+      QRegularExpression(QStringLiteral("[,;\\s]+")), Qt::SkipEmptyParts);
   for (const QSerialPortInfo& info : QSerialPortInfo::availablePorts()) {
     bool excluded = false;
     for (const QString& port : excludedPorts) {
@@ -265,6 +265,17 @@ HardwareDetectionResult HardwareDiscovery::probeCanPorts(const QString& excluded
                                     .arg(result.wheelCanBitrate)
                                     .arg(result.wheelMotorIds[0])
                                     .arg(result.wheelMotorIds[1]));
+        }
+        if (probe.servoIds.size() >= 2) {
+          std::sort(probe.servoIds.begin(), probe.servoIds.end());
+          result.wheelDetected = true;
+          result.wheelCanPort = probe.port;
+          result.wheelSerialBaudRate = probe.serialBaudRate;
+          result.wheelCanBitrate = probe.canBitrate;
+          result.wheelMotorIds =
+              probe.servoIds.contains(1) && probe.servoIds.contains(2)
+                  ? QVector<int>{1, 2}
+                  : QVector<int>{probe.servoIds[0], probe.servoIds[1]};
         }
         if (probe.clampNodeId > 0 && !result.clampDetected) {
           result.clampDetected = true;

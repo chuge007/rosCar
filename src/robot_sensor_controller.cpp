@@ -231,8 +231,17 @@ void RobotSensorController::scanCamera() {
       options.library_search_paths = {
           QDir(QCoreApplication::applicationDirPath()).filePath("mv3dlp_sdk").toStdString()};
       camera_ = std::make_unique<mv3dlp::Driver>(options);
+      camera_->setExceptionHandler([](const std::string& message) {
+        AppLogger::error(QStringLiteral("CAMERA.SDK"),
+            QStringLiteral("event=sdk_exception message=%1")
+                .arg(QString::fromStdString(message)));
+      });
       AppLogger::write(QStringLiteral("CAMERA.SDK"),
-                       QStringLiteral("event=driver_initialize result=OK"));
+                       QStringLiteral("event=driver_initialize result=OK library=%1 sdk=%2 executable=%3 pid=%4")
+                           .arg(QString::fromStdString(camera_->loadedLibraryPath()),
+                                QString::fromStdString(camera_->sdkVersion()))
+                           .arg(QCoreApplication::applicationFilePath())
+                           .arg(QCoreApplication::applicationPid()));
     }
     QStringList devices;
     for (const auto& device : camera_->enumerateDevices()) {
@@ -329,12 +338,22 @@ void RobotSensorController::startProfilePreview() {
     cameraTimer_->start();
     return;
   }
-  // The bundled SDK exposes the acquisition mode enum but does not expose a
-  // capability-query method. Mode 4 is the validated per-profile path used by
-  // the source project; let the camera report any unsupported-mode error.
-  AppLogger::write(QStringLiteral("CAMERA.CONFIG"),
-      QStringLiteral("event=profile_capabilities result=STATIC_MODE requested=4 sdk=%1")
-          .arg(QString::fromStdString(camera_->sdkVersion())));
+  std::vector<std::uint32_t> supportedModes;
+  try {
+    supportedModes = camera_->supportedAcquisitionModes();
+    QStringList modes;
+    for (const auto mode : supportedModes) modes.append(QString::number(mode));
+    AppLogger::write(QStringLiteral("CAMERA.CONFIG"),
+        QStringLiteral("event=profile_capabilities supported_image_modes=%1 requested=4 sdk=%2")
+            .arg(modes.join(QLatin1Char(',')), QString::fromStdString(camera_->sdkVersion())));
+  } catch (const std::exception& e) {
+    AppLogger::warning(QStringLiteral("CAMERA.CONFIG"),
+        QStringLiteral("event=profile_capabilities result=UNAVAILABLE fallback=validated_mode_4 error=%1")
+            .arg(QString::fromLocal8Bit(e.what())));
+  }
+  if (!supportedModes.empty() &&
+      std::find(supportedModes.begin(), supportedModes.end(), 4u) == supportedModes.end())
+    throw std::runtime_error("Camera does not advertise per-profile ImageMode=4");
   cameraTimer_->stop();
   if (camera_->isAcquiring()) camera_->stopAcquisition();
   camera_->setAcquisitionMode(mv3dlp::AcquisitionMode::point_cloud_image);
@@ -423,6 +442,8 @@ void RobotSensorController::shutdown() { disconnectImu(); disconnectCamera(); }
 void RobotSensorController::resetCameraDiagnostics() {
   const qint64 now = QDateTime::currentMSecsSinceEpoch();
   cameraAcquisitionStartedMs_ = now;
+  lastCameraPayloadDiagnosticMs_ = -1;
+  lastProfileEmitDiagnosticMs_ = -1;
   lastCameraFrameMs_ = now;
   cameraPollCount_ = 0;
   cameraTimeoutCount_ = 0;
@@ -457,6 +478,14 @@ void RobotSensorController::captureCameraFrame() {
   try {
     ++cameraPollCount_;
     if (!camera_ || !camera_->isAcquiring()) {
+      if (camera_ && !cameraStalled_) {
+        cameraStalled_ = true;
+        const auto callbackCounts = camera_->callbackCounts();
+        AppLogger::warning(QStringLiteral("CAMERA.ACQUISITION"),
+            QStringLiteral("event=acquisition_inactive connected=%1 last_frame=%2 image_callbacks=%3 profile_callbacks=%4")
+                .arg(camera_->isConnected()).arg(lastCameraFrameNumber_)
+                .arg(callbackCounts[0]).arg(callbackCounts[1]));
+      }
       return;
     }
 
@@ -467,11 +496,12 @@ void RobotSensorController::captureCameraFrame() {
       const qint64 now = QDateTime::currentMSecsSinceEpoch();
       if (!cameraStalled_ && now - lastCameraFrameMs_ >= 2000) {
         cameraStalled_ = true;
+        const auto callbackCounts = camera_->callbackCounts();
         AppLogger::warning(QStringLiteral("CAMERA.ACQUISITION"),
-                           QStringLiteral("event=frame_stream_stalled no_frame_ms=%1 polls=%2 frames=%3 timeouts=%4 last_frame=%5")
+                           QStringLiteral("event=frame_stream_stalled no_frame_ms=%1 polls=%2 frames=%3 timeouts=%4 last_frame=%5 image_callbacks=%6 profile_callbacks=%7")
                                .arg(now - lastCameraFrameMs_).arg(cameraPollCount_)
                                .arg(cameraFrameCount_).arg(cameraTimeoutCount_)
-                               .arg(lastCameraFrameNumber_));
+                               .arg(lastCameraFrameNumber_).arg(callbackCounts[0]).arg(callbackCounts[1]));
       }
       return;
     }
@@ -485,6 +515,30 @@ void RobotSensorController::captureCameraFrame() {
     lastCameraFrameMs_ = frameReceivedMs;
     ++cameraFrameCount_;
     lastCameraFrameNumber_ = frame->frame_number;
+    if (lastCameraPayloadDiagnosticMs_ < 0 ||
+        frameReceivedMs - lastCameraPayloadDiagnosticMs_ >= 1000) {
+      lastCameraPayloadDiagnosticMs_ = frameReceivedMs;
+      const auto& details = frame->diagnostics;
+      const QByteArray rawSamples(
+          reinterpret_cast<const char*>(details.raw_samples.data()),
+          static_cast<int>(details.raw_sample_bytes));
+      AppLogger::write(QStringLiteral("CAMERA.PAYLOAD"),
+          QStringLiteral("event=payload_snapshot frame=%1 callback=%2 raw_size=%3x%4 raw_bytes=%5 "
+                         "decoded_size=%6x%7 decoded_bytes=%8 frame_valid=%9 decode_reason=%10 "
+                         "scales=%11,%12,%13 offsets=%14,%15,%16 device_timestamp=%17 "
+                         "image_callbacks=%18 profile_callbacks=%19 raw_head_middle_tail_hex=%20 raw_image_type=%21")
+              .arg(frame->frame_number)
+              .arg(details.profile_callback ? QStringLiteral("profile_xyz_s16")
+                                            : QStringLiteral("image"))
+              .arg(details.raw_width).arg(details.raw_height).arg(details.raw_data_bytes)
+              .arg(frame->width).arg(frame->height).arg(frame->data.size())
+              .arg(frame->valid).arg(QString::fromStdString(details.decode_reason))
+              .arg(frame->x_scale, 0, 'g', 9).arg(frame->y_scale, 0, 'g', 9)
+              .arg(frame->z_scale, 0, 'g', 9)
+              .arg(frame->x_offset).arg(frame->y_offset).arg(frame->z_offset)
+              .arg(frame->timestamp).arg(details.image_callbacks).arg(details.profile_callbacks)
+              .arg(QString::fromLatin1(rawSamples.toHex())).arg(details.raw_image_type));
+    }
     if (!frame->valid) {
       ++cameraInvalidFrameCount_;
       if (!cameraInvalidFrameActive_) {
@@ -533,6 +587,18 @@ void RobotSensorController::captureCameraFrame() {
         frame->type == mv3dlp::FrameType::profile_abc32) {
       const auto cloud = camera_->convertDepthToPointCloud(*frame);
       pointCount = cloud.points.size();
+      if (lastCameraPayloadDiagnosticMs_ == frameReceivedMs &&
+          (!correctionProfileMode_ || cloud.width < 32 || cloud.height == 0 ||
+           size_t(cloud.width) * cloud.height > cloud.points.size())) {
+        const QString reason = !correctionProfileMode_ ? QStringLiteral("profile_mode_inactive")
+            : cloud.width < 32 ? QStringLiteral("too_few_columns")
+            : cloud.height == 0 ? QStringLiteral("no_rows")
+                               : QStringLiteral("incomplete_decoded_rows");
+        AppLogger::warning(QStringLiteral("CAMERA.PROFILE"),
+            QStringLiteral("event=profile_not_emitted frame=%1 reason=%2 width=%3 height=%4 decoded_points=%5")
+                .arg(frame->frame_number).arg(reason).arg(cloud.width)
+                .arg(cloud.height).arg(cloud.points.size()));
+      }
       // Deliver the latest complete scan BEFORE preview decimation. Preserve
       // invalid slots and original column order; never concatenate scan rows.
       if (correctionProfileMode_ && frameReceivedMs - lastCorrectionProfileEmitMs_ >= 33 &&
@@ -540,13 +606,45 @@ void RobotSensorController::captureCameraFrame() {
           size_t(cloud.width) * cloud.height <= cloud.points.size()) {
         QVector<QVector3D> rawProfile;
         rawProfile.reserve(int(cloud.width));
-        const size_t rowStart = size_t(cloud.height - 1) * cloud.width;
-        for (size_t col = 0; col < cloud.width; ++col) {
+        const std::size_t rowStart = size_t(cloud.height - 1) * cloud.width;
+        for (std::size_t col = 0; col < cloud.width; ++col) {
           const auto& p = cloud.points[rowStart + col];
           rawProfile.append(QVector3D(p.x, p.y, p.z));
         }
         emit correctionProfileFrameReady(rawProfile, frame->frame_number, frameReceivedMs);
         lastCorrectionProfileEmitMs_ = frameReceivedMs;
+        if (lastProfileEmitDiagnosticMs_ < 0 ||
+            frameReceivedMs - lastProfileEmitDiagnosticMs_ >= 1000) {
+          lastProfileEmitDiagnosticMs_ = frameReceivedMs;
+          int validXz = 0;
+          int finiteXz = 0;
+          int zeroXz = 0;
+          for (const QVector3D& point : rawProfile) {
+            if (std::isfinite(point.x()) && std::isfinite(point.z())) {
+              ++finiteXz;
+              if (point.z() > 0.0f) ++validXz;
+              if (point.x() == 0.0f && point.z() == 0.0f) ++zeroXz;
+            }
+          }
+          const QString reason = validXz > 0 ? QStringLiteral("OK")
+              : zeroXz == rawProfile.size() ? QStringLiteral("all_zero_xz")
+              : finiteXz == 0 ? QStringLiteral("all_nonfinite_xz")
+                              : QStringLiteral("no_positive_z");
+          AppLogger::write(QStringLiteral("CAMERA.PROFILE"),
+                           QStringLiteral("event=profile_emit frame=%1 width=%2 height=%3 selected_row=%4 valid_xz=%5 samples=%6 finite_xz=%7 zero_xz=%8 reason=%9 head_xz=%10,%11 middle_xz=%12,%13 tail_xz=%14,%15")
+                               .arg(frame->frame_number)
+                               .arg(cloud.width)
+                               .arg(cloud.height)
+                               .arg(cloud.height - 1)
+                               .arg(validXz)
+                               .arg(rawProfile.size()).arg(finiteXz).arg(zeroXz).arg(reason)
+                               .arg(rawProfile.front().x(), 0, 'g', 9)
+                               .arg(rawProfile.front().z(), 0, 'g', 9)
+                               .arg(rawProfile[rawProfile.size() / 2].x(), 0, 'g', 9)
+                               .arg(rawProfile[rawProfile.size() / 2].z(), 0, 'g', 9)
+                               .arg(rawProfile.back().x(), 0, 'g', 9)
+                               .arg(rawProfile.back().z(), 0, 'g', 9));
+        }
         if (correctionProfilePreparing_) {
           correctionProfilePreparing_ = false;
           emit correctionProfilePrepared(true);
@@ -650,6 +748,14 @@ void RobotSensorController::captureCameraFrame() {
       }
     }
 
+    if (lastCameraPayloadDiagnosticMs_ == frameReceivedMs &&
+        frame->type != mv3dlp::FrameType::depth &&
+        frame->type != mv3dlp::FrameType::point_cloud &&
+        frame->type != mv3dlp::FrameType::profile_abc32) {
+      AppLogger::warning(QStringLiteral("CAMERA.PROFILE"),
+          QStringLiteral("event=profile_not_emitted frame=%1 reason=non_geometry_frame type=%2")
+              .arg(frame->frame_number).arg(static_cast<quint32>(frame->type)));
+    }
     const int previewPointCount = profile.size();
     if (!cameraImage.isNull() && cameraDecodeFailureActive_) {
       cameraDecodeFailureActive_ = false;
@@ -718,8 +824,8 @@ void RobotSensorController::captureCameraFrame() {
   } catch (const std::exception& e) {
     const QString message = QString::fromLocal8Bit(e.what());
     AppLogger::error(QStringLiteral("CAMERA.ACQUISITION"),
-                     QStringLiteral("event=capture_exception result=FAILED frame=%1 error=%2")
-                         .arg(lastCameraFrameNumber_).arg(message));
+        QStringLiteral("event=capture_exception result=FAILED action=disconnect frame=%1 error=%2")
+            .arg(lastCameraFrameNumber_).arg(message));
     disconnectCamera();
     emit logMessage(message);
   }

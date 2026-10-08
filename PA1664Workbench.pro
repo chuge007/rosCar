@@ -11,6 +11,7 @@ MOC_DIR = $$PWD/build/moc
 RCC_DIR = $$PWD/build/rcc
 UI_DIR = $$PWD/build/ui
 
+include(opencv.pri)
 ROBOT_SOURCE_ROOT = $$clean_path($$PWD/src/robot)
 MV3DLP_SOURCE_ROOT = $$clean_path($$PWD/vendor/mv3dlp_laser_profile)
 INCLUDEPATH += $$PWD/vendor/phaselink/include $$PWD/src $$ROBOT_SOURCE_ROOT
@@ -19,8 +20,6 @@ LIBS += -L$$PWD/vendor/phaselink/lib -lclient
 win32: LIBS += Setupapi.lib
 win32-msvc*: QMAKE_CXXFLAGS += /utf-8
 win32-msvc*: QMAKE_LFLAGS_RELEASE += /MAP:$$shell_path($$PWD/bin/PA1664Workbench.map)
-include($$PWD/opencv.pri)
-
 SOURCES += \
     src/main.cpp \
     src/mainwindow.cpp \
@@ -38,6 +37,12 @@ SOURCES += \
     src/robot_sensor_controller.cpp \
     src/robot_usb_camera_controller.cpp \
     src/robot_profile_view.cpp \
+    src/laser_correction_controller.cpp \
+    src/laser_trajectory_renderer.cpp \
+    src/laser_gap_detector.cpp \
+    src/laser_path_estimator.cpp \
+    src/laser_seam_trajectory.cpp \
+    src/opencv_laser_contour.cpp \
     src/probeadjustmentpanel.cpp \
     src/robot_hardware_discovery_qt6.cpp \
     $$MV3DLP_SOURCE_ROOT/src/driver.cpp \
@@ -69,6 +74,13 @@ HEADERS += \
     src/robot_sensor_controller.h \
     src/robot_usb_camera_controller.h \
     src/robot_profile_view.h \
+    src/laser_correction_controller.h \
+    src/laser_trajectory_renderer.h \
+    src/laser_gap_detector.h \
+    src/laser_path_estimator.h \
+    src/laser_seam_trajectory.h \
+    src/profile_weld_detector.h \
+    src/opencv_laser_contour.h \
     src/probeadjustmentpanel.h \
     $$ROBOT_SOURCE_ROOT/drive_types.h \
     $$ROBOT_SOURCE_ROOT/drive_settings.h \

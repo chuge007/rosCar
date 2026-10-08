@@ -9,9 +9,14 @@ class QSettings;
 
 namespace crawling {
 
+enum class WheelCommunicationMode {
+  Can,
+  Rs485,
+};
+
 struct DriveSettings {
   static constexpr int kMinimumFeedbackTimeoutMs = 800;
-  static constexpr int kCurrentSettingsSchemaVersion = 6;
+  static constexpr int kCurrentSettingsSchemaVersion = 7;
 
   // Legacy shared-port fields are retained for loading older settings files.
   QString serialPort;
@@ -40,6 +45,12 @@ struct DriveSettings {
   int clampXMotorSign = 1;
   int clampYMotorSign = 1;
   int clampZMotorSign = 1;
+
+  WheelCommunicationMode wheelCommunicationMode =
+      WheelCommunicationMode::Can;
+  QString wheelCanSerialPort;
+  int wheelCanSerialBaudRate = 115200;
+  int wheelCanBitrate = 1000000;
 
   int leftMotorId = 1;
   int rightMotorId = 2;

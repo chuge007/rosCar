@@ -57,10 +57,11 @@ void AppLogger::writeLine(const QString& level, const QString& category,
     file.write(retained);
   }
   file.seek(file.size());
-  const QString line = CRAWLING_TEXT("%1 #%2 [T%3] [%4] [%5] %6\n")
+  const QString line = CRAWLING_TEXT("%1 #%2 [T%3] [P%4] [%5] [%6] %7\n")
       .arg(QDateTime::currentDateTime().toString(CRAWLING_TEXT("yyyy-MM-dd HH:mm:ss.zzz")))
       .arg(++logSequence(), 8, 10, QLatin1Char('0'))
       .arg(reinterpret_cast<quintptr>(QThread::currentThreadId()), 0, 16)
+      .arg(QCoreApplication::applicationPid())
       .arg(level, category, message);
   file.write(line.toUtf8());
   file.flush();

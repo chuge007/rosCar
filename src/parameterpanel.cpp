@@ -8,13 +8,17 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHeaderView>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QTabWidget>
 #include <QTimer>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
 #include <QVBoxLayout>
 #include <QStringList>
 #include <exception>
@@ -296,8 +300,20 @@ void ParameterPanel::addGateTab(QTabWidget *tabs)
 {
     auto *page = new QWidget;
     auto *layout = new QVBoxLayout(page);
-    auto *gateTabs = new QTabWidget;
-    layout->addWidget(gateTabs);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(8);
+
+    auto *body = new QHBoxLayout;
+    body->setSpacing(8);
+    m_gateTree = new QTreeWidget;
+    m_gateTree->setHeaderHidden(true);
+    m_gateTree->setRootIsDecorated(true);
+    m_gateTree->setMinimumWidth(150);
+    m_gateTree->setMaximumWidth(220);
+    body->addWidget(m_gateTree, 1);
+    m_gateEditorStack = new QStackedWidget;
+    body->addWidget(m_gateEditorStack, 2);
+    layout->addLayout(body, 1);
 
     struct GateApi {
         QString name;
@@ -323,11 +339,132 @@ void ParameterPanel::addGateTab(QTabWidget *tabs)
         addDouble(form, QStringLiteral("终点"), 0, 10000, 3, g.end, g.setEnd, QStringLiteral(" mm"));
         addDouble(form, QStringLiteral("阈值"), 0, 100, 2, g.threshold, g.setThreshold, QStringLiteral(" %"));
         addEnum(form, QStringLiteral("测量方式"), {{QStringLiteral("最大峰值"),0},{QStringLiteral("波前"),1}}, g.measure, g.setMeasure);
-        for (int i = base; i < m_fields.size(); ++i) m_gateEditors.push_back(m_fields[i].editor);
         if (g.name == "I")
             addBool(form, QStringLiteral("同步采集"), [this]{return Client::getInstance().getGateISyncSample(selectedGroupId());}, [this](bool v){return Client::getInstance().setGateISyncSample(v, selectedGroupId());});
-        gateTabs->addTab(pageFor(form), "Gate " + g.name);
+        auto *plotButton = new QPushButton(QStringLiteral("在 A 扫图上设置闸门"));
+        form->addRow(plotButton);
+
+        GateWidgets widgets;
+        widgets.name = g.name;
+        widgets.enabled = qobject_cast<QCheckBox *>(m_fields[base].editor);
+        widgets.sync = qobject_cast<QComboBox *>(m_fields[base + 1].editor);
+        widgets.start = qobject_cast<QDoubleSpinBox *>(m_fields[base + 2].editor);
+        widgets.end = qobject_cast<QDoubleSpinBox *>(m_fields[base + 3].editor);
+        widgets.threshold = qobject_cast<QDoubleSpinBox *>(m_fields[base + 4].editor);
+        widgets.measure = qobject_cast<QComboBox *>(m_fields[base + 5].editor);
+        widgets.page = pageFor(form);
+        m_gateWidgets.push_back(widgets);
+        m_gateEditorStack->addWidget(widgets.page);
+        const int gateIndex = m_gateWidgets.size() - 1;
+        connect(plotButton, &QPushButton::clicked, this, [this, gateIndex] {
+            emit gatePlacementRequested(gateIndex);
+        });
+
+        connect(widgets.enabled, &QCheckBox::toggled, this, [this] {
+            if (!m_syncingGateUi) {
+                refreshGateTree();
+                emit gateVisualizationChanged();
+            }
+        });
+        connect(widgets.start, &QDoubleSpinBox::valueChanged, this, [this](double) {
+            if (!m_syncingGateUi) emit gateVisualizationChanged();
+        });
+        connect(widgets.end, &QDoubleSpinBox::valueChanged, this, [this](double) {
+            if (!m_syncingGateUi) emit gateVisualizationChanged();
+        });
+        connect(widgets.threshold, &QDoubleSpinBox::valueChanged, this, [this](double) {
+            if (!m_syncingGateUi) emit gateVisualizationChanged();
+        });
     }
+
+    auto *surfacePage = new QWidget;
+    auto *surfaceLayout = new QVBoxLayout(surfacePage);
+    surfaceLayout->setContentsMargins(8, 8, 8, 8);
+    auto *surfaceForm = new QFormLayout;
+    m_surfaceEnabled = new QCheckBox(QStringLiteral("启用表面跟踪"));
+    m_surfaceStart = new QDoubleSpinBox;
+    m_surfaceStart->setRange(0.0, 10000.0);
+    m_surfaceStart->setDecimals(3);
+    m_surfaceStart->setSuffix(QStringLiteral(" mm"));
+    m_surfaceLength = new QDoubleSpinBox;
+    m_surfaceLength->setRange(0.001, 10000.0);
+    m_surfaceLength->setDecimals(3);
+    m_surfaceLength->setSuffix(QStringLiteral(" mm"));
+    m_surfaceLength->setValue(5.0);
+    m_surfaceThreshold = new QDoubleSpinBox;
+    m_surfaceThreshold->setRange(0.1, 100.0);
+    m_surfaceThreshold->setDecimals(2);
+    m_surfaceThreshold->setSuffix(QStringLiteral(" %"));
+    m_surfaceThreshold->setValue(20.0);
+    m_surfaceHold = new QCheckBox(QStringLiteral("漏检时保持上一有效表面"));
+    m_surfaceHold->setChecked(true);
+    surfaceForm->addRow(m_surfaceEnabled);
+    surfaceForm->addRow(QStringLiteral("搜索起点"), m_surfaceStart);
+    surfaceForm->addRow(QStringLiteral("搜索长度"), m_surfaceLength);
+    surfaceForm->addRow(QStringLiteral("触发阈值"), m_surfaceThreshold);
+    surfaceForm->addRow(m_surfaceHold);
+    surfaceLayout->addLayout(surfaceForm);
+
+    auto *followBox = new QGroupBox(QStringLiteral("随表面移动的闸门"));
+    auto *followLayout = new QGridLayout(followBox);
+    const QString gateNames = QStringLiteral("ABCI");
+    for (int i = 0; i < 4; ++i) {
+        auto *check = new QCheckBox(QStringLiteral("Gate %1").arg(gateNames.mid(i, 1)));
+        m_surfaceGateChecks.push_back(check);
+        followLayout->addWidget(check, i / 2, i % 2);
+    }
+    surfaceLayout->addWidget(followBox);
+    m_surfaceStatus = new QLabel(QStringLiteral("请先在 A 扫图上设置搜索窗口"));
+    m_surfaceStatus->setWordWrap(true);
+    m_surfaceStatus->setStyleSheet(QStringLiteral("color:#52606d;padding:6px;background:#f4f8fc;border-radius:4px"));
+    surfaceLayout->addWidget(m_surfaceStatus);
+    auto *surfacePickButton = new QPushButton(QStringLiteral("在 A 扫图上划定区域"));
+    surfaceLayout->addWidget(surfacePickButton);
+    surfaceLayout->addStretch(1);
+    m_gateEditorStack->addWidget(surfacePage);
+
+    connect(m_gateTree, &QTreeWidget::currentItemChanged, this,
+            [this](QTreeWidgetItem *current) {
+        if (!current) return;
+        const int index = current->data(0, Qt::UserRole).toInt();
+        m_gateEditorStack->setCurrentIndex(index);
+        emit gateVisualizationChanged();
+    });
+    connect(m_gateTree, &QTreeWidget::itemChanged, this,
+            [this](QTreeWidgetItem *item, int column) {
+        if (!item || column != 0 || m_syncingGateUi)
+            return;
+        const int index = item->data(0, Qt::UserRole).toInt();
+        const bool checked = item->checkState(0) == Qt::Checked;
+        m_syncingGateUi = true;
+        if (index >= 0 && index < m_gateWidgets.size()) {
+            m_gateWidgets[index].enabled->setChecked(checked);
+            emit gateVisualizationChanged();
+        } else if (index == m_gateWidgets.size()) {
+            m_surfaceEnabled->setChecked(checked);
+            emit surfaceTrackingChanged();
+        }
+        m_syncingGateUi = false;
+        QTimer::singleShot(0, this, &ParameterPanel::refreshGateTree);
+    });
+    connect(surfacePickButton, &QPushButton::clicked, this, &ParameterPanel::surfaceWindowPlacementRequested);
+
+    const auto surfaceChanged = [this] {
+        if (m_syncingGateUi)
+            return;
+        refreshGateTree();
+        emit surfaceTrackingChanged();
+    };
+    connect(m_surfaceEnabled, &QCheckBox::toggled, this, surfaceChanged);
+    connect(m_surfaceStart, &QDoubleSpinBox::valueChanged, this, [surfaceChanged](double) { surfaceChanged(); });
+    connect(m_surfaceLength, &QDoubleSpinBox::valueChanged, this, [surfaceChanged](double) { surfaceChanged(); });
+    connect(m_surfaceThreshold, &QDoubleSpinBox::valueChanged, this, [surfaceChanged](double) { surfaceChanged(); });
+    connect(m_surfaceHold, &QCheckBox::toggled, this, surfaceChanged);
+    for (QCheckBox *check : m_surfaceGateChecks)
+        connect(check, &QCheckBox::toggled, this, surfaceChanged);
+
+    refreshGateTree();
+    selectGate(0);
     tabs->addTab(page, QStringLiteral("闸门"));
 }
 
@@ -407,6 +544,7 @@ void ParameterPanel::reload()
         else if (auto *w = qobject_cast<QCheckBox *>(field.editor)) field.loadedValue = w->isChecked();
         else if (auto *w = qobject_cast<QComboBox *>(field.editor)) field.loadedValue = w->currentData();
     }
+    refreshGateTree();
     emit configurationChanged();
 }
 
@@ -533,16 +671,179 @@ void ParameterPanel::apply()
 QVector<QVector<double>> ParameterPanel::currentGates() const
 {
     QVector<QVector<double>> result;
-    for (int gate = 0; gate < 4; ++gate) {
-        const int base = gate * 6;
-        if (base + 4 >= m_gateEditors.size()) break;
-        auto *enabled = qobject_cast<QCheckBox *>(m_gateEditors[base]);
-        auto *start = qobject_cast<QDoubleSpinBox *>(m_gateEditors[base + 2]);
-        auto *end = qobject_cast<QDoubleSpinBox *>(m_gateEditors[base + 3]);
-        auto *threshold = qobject_cast<QDoubleSpinBox *>(m_gateEditors[base + 4]);
-        result.push_back({enabled && enabled->isChecked() ? 1.0 : 0.0,
-                          start ? start->value() : 0.0, end ? end->value() : 0.0,
-                          threshold ? threshold->value() : 0.0});
+    for (const GateWidgets &gate : m_gateWidgets) {
+        result.push_back({gate.enabled && gate.enabled->isChecked() ? 1.0 : 0.0,
+                          gate.start ? gate.start->value() : 0.0,
+                          gate.end ? gate.end->value() : 0.0,
+                          gate.threshold ? gate.threshold->value() : 0.0});
     }
     return result;
+}
+
+int ParameterPanel::activeGate() const
+{
+    if (!m_gateTree || !m_gateTree->currentItem())
+        return -1;
+    const int index = m_gateTree->currentItem()->data(0, Qt::UserRole).toInt();
+    return index >= 0 && index < m_gateWidgets.size() ? index : -1;
+}
+
+bool ParameterPanel::surfaceTrackingEnabled() const
+{
+    return m_surfaceEnabled && m_surfaceEnabled->isChecked();
+}
+
+double ParameterPanel::surfaceWindowStart() const
+{
+    return m_surfaceStart ? m_surfaceStart->value() : 0.0;
+}
+
+double ParameterPanel::surfaceWindowEnd() const
+{
+    return surfaceWindowStart() + (m_surfaceLength ? m_surfaceLength->value() : 0.0);
+}
+
+double ParameterPanel::surfaceThreshold() const
+{
+    return m_surfaceThreshold ? m_surfaceThreshold->value() : 0.0;
+}
+
+bool ParameterPanel::surfaceHoldMissing() const
+{
+    return m_surfaceHold && m_surfaceHold->isChecked();
+}
+
+QVector<bool> ParameterPanel::surfaceTrackedGates() const
+{
+    QVector<bool> result;
+    result.reserve(m_surfaceGateChecks.size());
+    for (QCheckBox *check : m_surfaceGateChecks)
+        result.push_back(check && check->isChecked());
+    return result;
+}
+
+void ParameterPanel::setGateRangeFromPlot(int gateIndex, double start, double end)
+{
+    if (gateIndex < 0 || gateIndex >= m_gateWidgets.size())
+        return;
+    GateWidgets &gate = m_gateWidgets[gateIndex];
+    m_syncingGateUi = true;
+    gate.enabled->setChecked(true);
+    gate.start->setValue(qMin(start, end));
+    gate.end->setValue(qMax(start, end));
+    m_syncingGateUi = false;
+    selectGate(gateIndex);
+    refreshGateTree();
+    emit gateVisualizationChanged();
+    scheduleAutoApply();
+}
+
+void ParameterPanel::setGateThresholdFromPlot(int gateIndex, double threshold)
+{
+    if (gateIndex < 0 || gateIndex >= m_gateWidgets.size())
+        return;
+    m_syncingGateUi = true;
+    m_gateWidgets[gateIndex].threshold->setValue(qBound(0.0, threshold, 100.0));
+    m_syncingGateUi = false;
+    emit gateVisualizationChanged();
+    scheduleAutoApply();
+}
+
+void ParameterPanel::setSurfaceWindowFromPlot(double start, double end)
+{
+    if (!m_surfaceStart || !m_surfaceLength || !m_surfaceEnabled)
+        return;
+    const QSignalBlocker startBlocker(m_surfaceStart);
+    const QSignalBlocker lengthBlocker(m_surfaceLength);
+    const QSignalBlocker enabledBlocker(m_surfaceEnabled);
+    m_surfaceStart->setValue(qMin(start, end));
+    m_surfaceLength->setValue(qMax(0.001, qAbs(end - start)));
+    m_surfaceEnabled->setChecked(true);
+    refreshGateTree();
+    emit surfaceTrackingChanged();
+}
+
+void ParameterPanel::selectGate(int gateIndex)
+{
+    if (!m_gateTree || gateIndex < 0 || gateIndex >= m_gateWidgets.size())
+        return;
+    for (int i = 0; i < m_gateTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *top = m_gateTree->topLevelItem(i);
+        const QList<QTreeWidgetItem *> candidates = [&] {
+            QList<QTreeWidgetItem *> items{top};
+            for (int child = 0; child < top->childCount(); ++child)
+                items.push_back(top->child(child));
+            return items;
+        }();
+        for (QTreeWidgetItem *item : candidates) {
+            if (item->data(0, Qt::UserRole).toInt() == gateIndex) {
+                m_gateTree->setCurrentItem(item);
+                m_gateEditorStack->setCurrentIndex(gateIndex);
+                return;
+            }
+        }
+    }
+}
+
+void ParameterPanel::refreshGateTree()
+{
+    if (!m_gateTree)
+        return;
+    int selected = activeGate();
+    if (m_gateTree->currentItem()
+        && m_gateTree->currentItem()->data(0, Qt::UserRole).toInt() == m_gateWidgets.size())
+        selected = m_gateWidgets.size();
+    const QSignalBlocker blocker(m_gateTree);
+    m_gateTree->clear();
+    auto *surface = new QTreeWidgetItem(m_gateTree);
+    surface->setData(0, Qt::UserRole, m_gateWidgets.size());
+    surface->setFlags(surface->flags() | Qt::ItemIsUserCheckable);
+    surface->setCheckState(0, surfaceTrackingEnabled() ? Qt::Checked : Qt::Unchecked);
+    surface->setText(0, surfaceTrackingEnabled() ? QStringLiteral("表面跟踪  已启用")
+                                                 : QStringLiteral("表面跟踪  已关闭"));
+    for (int i = 0; i < m_gateWidgets.size(); ++i) {
+        const GateWidgets &gate = m_gateWidgets[i];
+        const bool enabled = gate.enabled && gate.enabled->isChecked();
+        const bool tracked = i < m_surfaceGateChecks.size()
+                             && m_surfaceGateChecks[i]->isChecked();
+        auto *item = tracked ? new QTreeWidgetItem(surface)
+                             : new QTreeWidgetItem(m_gateTree);
+        item->setData(0, Qt::UserRole, i);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, enabled ? Qt::Checked : Qt::Unchecked);
+        item->setText(0, QStringLiteral("Gate %1  %2")
+                         .arg(gate.name)
+                         .arg(enabled ? QStringLiteral("已启用") : QStringLiteral("已关闭")));
+    }
+    surface->setExpanded(true);
+    for (int i = 0; i < m_gateTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *top = m_gateTree->topLevelItem(i);
+        if (top->data(0, Qt::UserRole).toInt() == selected) {
+            m_gateTree->setCurrentItem(top);
+            return;
+        }
+        for (int child = 0; child < top->childCount(); ++child) {
+            QTreeWidgetItem *item = top->child(child);
+            if (item->data(0, Qt::UserRole).toInt() == selected) {
+                m_gateTree->setCurrentItem(item);
+                return;
+            }
+        }
+    }
+}
+
+void ParameterPanel::updateSurfaceStatus(bool valid, double reference, double current)
+{
+    if (!m_surfaceStatus)
+        return;
+    if (!surfaceTrackingEnabled()) {
+        m_surfaceStatus->setText(QStringLiteral("表面跟踪未启用"));
+    } else if (!valid) {
+        m_surfaceStatus->setText(QStringLiteral("搜索区域内暂未找到超过阈值的回波"));
+    } else {
+        m_surfaceStatus->setText(QStringLiteral("参考表面 %1 mm · 当前表面 %2 mm · 偏移 %3 mm")
+                                 .arg(reference, 0, 'f', 3)
+                                 .arg(current, 0, 'f', 3)
+                                 .arg(current - reference, 0, 'f', 3));
+    }
 }

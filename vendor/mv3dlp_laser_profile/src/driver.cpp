@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cmath>
 #include <cstring>
 #include <deque>
 #include <limits>
@@ -66,6 +67,20 @@ std::int32_t toVendorImageType(FrameType frame_type) {
     }
 }
 
+void captureRawSamples(FrameDiagnostics& diagnostics, const std::uint8_t* data,
+                       std::uint32_t data_bytes) {
+    diagnostics.raw_data_bytes = data_bytes;
+    if (data == nullptr || data_bytes == 0) return;
+    const std::size_t sample_bytes = std::min<std::size_t>(12, data_bytes);
+    const std::size_t offsets[] = {0, (data_bytes - sample_bytes) / 2,
+                                   data_bytes - sample_bytes};
+    for (std::size_t sample = 0; sample < 3; ++sample) {
+        std::memcpy(diagnostics.raw_samples.data() + sample * sample_bytes,
+                    data + offsets[sample], sample_bytes);
+    }
+    diagnostics.raw_sample_bytes = static_cast<std::uint32_t>(sample_bytes * 3);
+}
+
 Frame copyFrame(const vendor::ImageDataRaw& raw) {
     Frame frame;
     frame.type = toFrameType(raw.enImageType);
@@ -80,6 +95,11 @@ Frame copyFrame(const vendor::ImageDataRaw& raw) {
     frame.x_offset = raw.nXOffset;
     frame.y_offset = raw.nYOffset;
     frame.z_offset = raw.nZOffset;
+    frame.diagnostics.raw_width = raw.nWidth;
+    frame.diagnostics.raw_height = raw.nHeight;
+    frame.diagnostics.raw_image_type = static_cast<std::uint32_t>(raw.enImageType);
+    frame.diagnostics.decode_reason = frame.valid ? "OK" : "sdk_invalid";
+    captureRawSamples(frame.diagnostics, raw.pData, raw.nDataLen);
 
     if (raw.pData != nullptr && raw.nDataLen > 0) {
         frame.data.assign(raw.pData, raw.pData + raw.nDataLen);
@@ -100,45 +120,60 @@ Frame copyProfileFrame(const vendor::ProfileDataRaw& raw) {
     frame.frame_number = raw.nFrameNum;
     frame.timestamp = raw.nTimeStamp;
     frame.valid = raw.bValid == vendor::kTrue;
+    frame.x_scale = raw.fXScale;
+    frame.y_scale = raw.fYScale;
+    frame.z_scale = raw.fZScale;
+    frame.x_offset = raw.nXOffset;
+    frame.y_offset = raw.nYOffset;
+    frame.z_offset = raw.nZOffset;
+    frame.diagnostics.profile_callback = true;
+    frame.diagnostics.raw_width = raw.nLinePntNum;
+    frame.diagnostics.raw_height = raw.nProfileCnt;
+    frame.diagnostics.decode_reason = frame.valid ? "OK" : "sdk_invalid";
+    captureRawSamples(frame.diagnostics, raw.pData, raw.nDataLen);
 
-    constexpr std::size_t kRawCoordinateSize = sizeof(std::uint16_t) * 3u;
+    constexpr std::size_t kRawCoordinateSize = sizeof(std::int16_t) * 3u;
     constexpr float kMicrometersPerMillimeter = 1000.0F;
     const std::size_t declared_point_count =
         static_cast<std::size_t>(raw.nLinePntNum) * static_cast<std::size_t>(raw.nProfileCnt);
     if (raw.pData == nullptr || declared_point_count == 0u || raw.nDataLen == 0u) {
+        frame.diagnostics.decode_reason = "missing_payload_or_dimensions";
         return frame;
     }
 
-    // Some SDK builds expose profile callback data as already converted
-    // float XYZ (12 bytes/point), while the HFR path exposes packed 16-bit
-    // coordinates (6 bytes/point).  Preserve the former without interpreting
-    // float bytes as uint16_t coordinates.
-    constexpr std::size_t kFloatPointSize = sizeof(float) * 3u;
-    if (declared_point_count <= std::numeric_limits<std::size_t>::max() / kFloatPointSize) {
-        const std::size_t float_data_size = declared_point_count * kFloatPointSize;
-        if (raw.nDataLen == float_data_size) {
-            frame.data.assign(raw.pData, raw.pData + float_data_size);
-            return frame;
-        }
+    if (raw.nDataLen % kRawCoordinateSize != 0u) {
+        frame.valid = false;
+        frame.diagnostics.decode_reason = "payload_not_xyz_s16_aligned";
+        return frame;
     }
-
     const std::size_t available_point_count = raw.nDataLen / kRawCoordinateSize;
-    const std::size_t point_count = std::min(declared_point_count, available_point_count);
+    if (available_point_count % raw.nProfileCnt != 0u ||
+        available_point_count > declared_point_count) {
+        frame.valid = false;
+        frame.diagnostics.decode_reason = "incomplete_rows_or_exceeds_capacity";
+        return frame;
+    }
+    const std::size_t point_count = available_point_count;
+    frame.width = static_cast<std::uint32_t>(point_count / raw.nProfileCnt);
     frame.data.resize(point_count * sizeof(float) * 3u);
 
     for (std::size_t index = 0; index < point_count; ++index) {
-        std::uint16_t coordinates[3]{};
+        std::int16_t coordinates[3]{};
         std::memcpy(coordinates, raw.pData + index * kRawCoordinateSize, kRawCoordinateSize);
 
         float values[3]{};
-        if (coordinates[0] == std::numeric_limits<std::uint16_t>::max() ||
-            coordinates[1] == std::numeric_limits<std::uint16_t>::max() ||
-            coordinates[2] == std::numeric_limits<std::uint16_t>::max()) {
+        if (coordinates[0] == std::numeric_limits<std::int16_t>::min() ||
+            coordinates[1] == std::numeric_limits<std::int16_t>::min() ||
+            coordinates[2] == std::numeric_limits<std::int16_t>::min()) {
             values[0] = values[1] = values[2] = std::numeric_limits<float>::quiet_NaN();
         } else {
-            values[0] = (coordinates[0] * raw.fXScale + raw.nXOffset) / kMicrometersPerMillimeter;
-            values[1] = (coordinates[1] * raw.fYScale + raw.nYOffset) / kMicrometersPerMillimeter;
-            values[2] = (coordinates[2] * raw.fZScale + raw.nZOffset) / kMicrometersPerMillimeter;
+            const float scales[] = {raw.fXScale, raw.fYScale, raw.fZScale};
+            const std::int32_t offsets[] = {raw.nXOffset, raw.nYOffset, raw.nZOffset};
+            for (int axis = 0; axis < 3; ++axis) {
+                values[axis] = std::isfinite(scales[axis]) && scales[axis] != 0.0F
+                    ? (coordinates[axis] * scales[axis] + offsets[axis]) / kMicrometersPerMillimeter
+                    : static_cast<float>(coordinates[axis]);
+            }
         }
         std::memcpy(frame.data.data() + index * sizeof(values), values, sizeof(values));
     }
@@ -253,21 +288,19 @@ public:
     }
 
     void shutdown() noexcept {
-        std::lock_guard<std::mutex> lock(mutex);
-
-        if (acquiring && handle != nullptr) {
-            sdk.stopMeasure(handle);
-            acquiring = false;
-        }
-
-        if (connected && handle != nullptr) {
-            sdk.closeDevice(&handle);
-            handle = nullptr;
-            connected = false;
-        }
+        std::lock_guard<std::mutex> operation(acquisition_mutex);
+        std::unique_lock<std::mutex> lock(mutex);
+        auto closing_handle = handle;
+        const bool was_acquiring = acquiring;
+        acquiring = false;
+        connected = false;
+        handle = nullptr;
         profile_callback_seen.store(false, std::memory_order_release);
         image_queue.clear();
         image_condition.notify_all();
+        lock.unlock();
+        if (was_acquiring && closing_handle != nullptr) sdk.stopMeasure(closing_handle);
+        if (closing_handle != nullptr) sdk.closeDevice(&closing_handle);
     }
 
     void ensureConnected() const {
@@ -298,8 +331,10 @@ public:
 
     void registerProfileCallbackLocked() {
         ensureConnected();
+        constexpr std::uint32_t kLowLatencyProfileCount = 1u;
         throwIfError(
-            sdk.registerProfileCallBack(handle, &Impl::profileCallbackThunk, 1u, this),
+            sdk.registerProfileCallBack(handle, &Impl::profileCallbackThunk,
+                                         kLowLatencyProfileCount, this),
             "MV3D_LP_RegisterProfileCallBack failed");
     }
 
@@ -333,6 +368,7 @@ public:
     }
 
     void onImage(vendor::ImageDataRaw* raw) {
+        image_callback_count.fetch_add(1, std::memory_order_relaxed);
         if (raw == nullptr) {
             return;
         }
@@ -341,12 +377,14 @@ public:
         // seconds.  Once per-profile output is flowing, discard those large
         // snapshots so they cannot replace the low-latency profile frame in
         // the live-preview queue.
-        if (profile_callback_seen.load(std::memory_order_acquire) && raw->nHeight > 1u) {
+        if (profile_callback_seen.load(std::memory_order_acquire) && raw->nHeight > 1u &&
+            (toFrameType(raw->enImageType) == FrameType::depth ||
+             toFrameType(raw->enImageType) == FrameType::point_cloud ||
+             toFrameType(raw->enImageType) == FrameType::profile_abc32)) {
             return;
         }
         Frame frame;
         try {
-            // The SDK owns this buffer only for the callback duration, so copy it immediately.
             frame = copyFrame(*raw);
         } catch (...) {
             return;
@@ -363,6 +401,7 @@ public:
     }
 
     void onProfile(vendor::ProfileDataRaw* raw) {
+        profile_callback_count.fetch_add(1, std::memory_order_relaxed);
         if (raw == nullptr) {
             return;
         }
@@ -378,7 +417,8 @@ public:
         enqueueFrame(std::move(frame));
     }
 
-    static void MV3DLP_CALL profileCallbackThunk(vendor::ProfileDataRaw* raw, void* user) {
+    static void MV3DLP_CALL profileCallbackThunk(vendor::ProfileDataRaw* raw,
+                                               vendor::IntensityDataRaw*, void* user) {
         auto* self = static_cast<Impl*>(user);
         if (self != nullptr) {
             self->onProfile(raw);
@@ -390,7 +430,9 @@ public:
         if (!connected || handle == nullptr) {
             return;
         }
-        constexpr std::size_t kMaxQueuedFrames = 2;
+        image_queue.erase(std::remove_if(image_queue.begin(), image_queue.end(),
+            [&](const Frame& queued) { return queued.type == frame.type; }), image_queue.end());
+        constexpr std::size_t kMaxQueuedFrames = 4;
         if (image_queue.size() >= kMaxQueuedFrames) {
             image_queue.pop_front();
         }
@@ -401,10 +443,13 @@ public:
     DriverOptions options;
     vendor::VendorSdk sdk;
     mutable std::mutex mutex;
+    std::mutex acquisition_mutex;
     vendor::Handle handle = nullptr;
     bool connected = false;
     bool acquiring = false;
     std::atomic<bool> profile_callback_seen{false};
+    std::atomic<std::uint64_t> image_callback_count{0};
+    std::atomic<std::uint64_t> profile_callback_count{0};
     std::function<void(std::string)> exception_handler;
     std::deque<Frame> image_queue;
     std::condition_variable image_condition;
@@ -583,27 +628,43 @@ bool Driver::isConnected() const noexcept {
 }
 
 void Driver::startAcquisition() {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::mutex> operation(impl_->acquisition_mutex);
+    std::unique_lock<std::mutex> lock(impl_->mutex);
     impl_->ensureConnected();
 
     if (impl_->acquiring) {
         return;
     }
 
-    throwIfError(impl_->sdk.startMeasure(impl_->handle), "MV3D_LP_StartMeasure failed");
+    impl_->image_queue.clear();
+    impl_->profile_callback_seen.store(false, std::memory_order_release);
+    const auto handle = impl_->handle;
+    lock.unlock();
+    const auto status = impl_->sdk.startMeasure(handle);
+    lock.lock();
+    throwIfError(status, "MV3D_LP_StartMeasure failed");
+    if (!impl_->connected || impl_->handle != handle)
+        throw std::runtime_error("Device disconnected while starting acquisition");
     impl_->acquiring = true;
 }
 
 void Driver::stopAcquisition() {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::mutex> operation(impl_->acquisition_mutex);
+    std::unique_lock<std::mutex> lock(impl_->mutex);
     impl_->ensureConnected();
 
     if (!impl_->acquiring) {
         return;
     }
 
-    throwIfError(impl_->sdk.stopMeasure(impl_->handle), "MV3D_LP_StopMeasure failed");
+    const auto handle = impl_->handle;
+    lock.unlock();
+    const auto status = impl_->sdk.stopMeasure(handle);
+    lock.lock();
+    throwIfError(status, "MV3D_LP_StopMeasure failed");
     impl_->acquiring = false;
+    impl_->image_queue.clear();
+    impl_->image_condition.notify_all();
 }
 
 bool Driver::isAcquiring() const noexcept {
@@ -611,14 +672,43 @@ bool Driver::isAcquiring() const noexcept {
     return impl_->acquiring;
 }
 
+std::array<std::uint64_t, 2> Driver::callbackCounts() const noexcept {
+    return {impl_->image_callback_count.load(std::memory_order_relaxed),
+            impl_->profile_callback_count.load(std::memory_order_relaxed)};
+}
+
 void Driver::clearBuffer() {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::mutex> operation(impl_->acquisition_mutex);
+    std::unique_lock<std::mutex> lock(impl_->mutex);
     impl_->ensureConnected();
-    throwIfError(impl_->sdk.clearDataBuffer(impl_->handle), "MV3D_LP_ClearDataBuffer failed");
+    const auto handle = impl_->handle;
+    lock.unlock();
+    const auto status = impl_->sdk.clearDataBuffer(handle);
+    lock.lock();
+    throwIfError(status, "MV3D_LP_ClearDataBuffer failed");
+    impl_->image_queue.clear();
+    impl_->profile_callback_seen.store(false, std::memory_order_release);
 }
 
 void Driver::setAcquisitionMode(AcquisitionMode mode) {
     setEnumParam(param_keys::kImageMode, static_cast<std::uint32_t>(mode));
+}
+
+std::vector<std::uint32_t> Driver::supportedAcquisitionModes() const {
+    std::lock_guard<std::mutex> operation(impl_->acquisition_mutex);
+    std::unique_lock<std::mutex> lock(impl_->mutex);
+    impl_->ensureConnected();
+    const auto handle = impl_->handle;
+    lock.unlock();
+    vendor::ParamRaw param{};
+    throwIfError(impl_->sdk.getParam(handle, "ImageMode", &param),
+                 "MV3D_LP_GetParam(ImageMode) failed");
+    if (param.enParamType != vendor::ParamType::enum_value ||
+        param.ParamInfo.stEnumParam.nSupportedNum > vendor::kMaxEnumCount) {
+        throw std::runtime_error("Invalid ImageMode enumeration from SDK");
+    }
+    const auto& values = param.ParamInfo.stEnumParam;
+    return {values.nSupportValue, values.nSupportValue + values.nSupportedNum};
 }
 
 void Driver::setBoolParam(std::string_view key, bool value) {
@@ -681,11 +771,10 @@ std::optional<Frame> Driver::tryFetchFrame(std::chrono::milliseconds timeout) {
     if (impl_->image_queue.empty()) {
         return std::nullopt;
     }
-    // This is a live-preview API: stale frames are worse than dropped
-    // frames. Return the newest image and discard everything accumulated
-    // behind it so a temporary conversion/UI stall cannot create latency.
-    Frame frame = std::move(impl_->image_queue.back());
-    impl_->image_queue.clear();
+    Frame frame = std::move(impl_->image_queue.front());
+    impl_->image_queue.pop_front();
+    frame.diagnostics.image_callbacks = impl_->image_callback_count.load(std::memory_order_relaxed);
+    frame.diagnostics.profile_callbacks = impl_->profile_callback_count.load(std::memory_order_relaxed);
     return frame;
 }
 

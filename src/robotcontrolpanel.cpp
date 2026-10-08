@@ -1,6 +1,8 @@
 #include "robotcontrolpanel.h"
 
 #include "robot_profile_view.h"
+#include "robot_app_logger.h"
+#include "profile_weld_detector.h"
 #include "robot_sensor_controller.h"
 #include "robot_usb_camera_controller.h"
 #include "synchronized_drive_controller.h"
@@ -10,7 +12,9 @@
 #include <QFrame>
 #include <QDateTime>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QEvent>
 #include <QFormLayout>
 #include <QMetaObject>
 #include <QGridLayout>
@@ -114,6 +118,12 @@ RobotControlPanel::RobotControlPanel(QWidget *parent) : QWidget(parent)
     qRegisterMetaType<crawling::DriveTelemetry>("crawling::DriveTelemetry");
     qRegisterMetaType<crawling::ImuSample>("crawling::ImuSample");
     qRegisterMetaType<QVector<QVector3D>>("QVector<QVector3D>");
+    qRegisterMetaType<crawling::LaserGapDetection>(
+        "crawling::LaserGapDetection");
+    qRegisterMetaType<crawling::LaserCorrectionSettings>(
+        "crawling::LaserCorrectionSettings");
+    qRegisterMetaType<crawling::LaserCorrectionStatus>(
+        "crawling::LaserCorrectionStatus");
 
     buildUi();
     loadSettings();
@@ -151,11 +161,107 @@ RobotControlPanel::RobotControlPanel(QWidget *parent) : QWidget(parent)
             this, &RobotControlPanel::updateLaserConnection, Qt::QueuedConnection);
     connect(m_sensorController, &crawling::RobotSensorController::cameraFrameChanged,
             this, &RobotControlPanel::updateLaserFrame, Qt::QueuedConnection);
-    connect(m_sensorController, &crawling::RobotSensorController::pointCloudProfileChanged,
-            this, &RobotControlPanel::setLaserProfilePoints, Qt::QueuedConnection);
+    connect(m_sensorController,
+            &crawling::RobotSensorController::cameraProfileModeChanged,
+            this, [this](bool active) {
+                if (m_laserView && active && m_correctionStatus)
+                    m_correctionStatus->setText(QStringLiteral("SDK X/Z 轮廓流已切换"));
+            }, Qt::QueuedConnection);
     connect(m_sensorController, &crawling::RobotSensorController::logMessage,
             this, &RobotControlPanel::appendLog, Qt::QueuedConnection);
     m_sensorThread->start();
+
+    m_correctionThread = new QThread(this);
+    m_correctionController = new crawling::LaserCorrectionController;
+    m_correctionController->moveToThread(m_correctionThread);
+    connect(m_correctionThread, &QThread::finished, m_correctionController,
+            &QObject::deleteLater);
+    connect(m_sensorController,
+            &crawling::RobotSensorController::correctionProfileFrameReady,
+            m_correctionController,
+            &crawling::LaserCorrectionController::processProfileFrame,
+            Qt::QueuedConnection);
+    connect(m_controller, &crawling::SynchronizedDriveController::telemetryChanged,
+            m_correctionController,
+            &crawling::LaserCorrectionController::processDriveTelemetry,
+            Qt::QueuedConnection);
+    connect(m_sensorController,
+            &crawling::RobotSensorController::correctionProfilePrepared,
+            this, [this](bool ready) {
+                if (!m_autoCorrectionStartPending)
+                    return;
+                if (ready) {
+                    m_autoCorrectionStartPending = false;
+                    QMetaObject::invokeMethod(
+                        m_correctionController, "setEnabled", Qt::QueuedConnection,
+                        Q_ARG(bool, true));
+                    appendLog(QStringLiteral("激光轮廓流已就绪，自动纠偏已启动"));
+                } else {
+                    m_autoCorrectionStartPending = false;
+                    m_autoCorrectionActive = false;
+                    m_autoCorrectionStart->setEnabled(true);
+                    m_autoCorrectionStop->setEnabled(false);
+                    appendLog(QStringLiteral("激光轮廓流准备失败，自动纠偏未启动"));
+                    m_correctionStatus->setText(QStringLiteral("启动失败：轮廓流准备失败"));
+                }
+            }, Qt::QueuedConnection);
+    connect(m_correctionController,
+            &crawling::LaserCorrectionController::profileObservationReady,
+            this, [this](const QVector<QVector3D> &points,
+                         const crawling::LaserGapDetection &detection,
+                         quint32 frameNumber, qint64 receivedAtEpochMs) {
+                if (m_laserView)
+                    m_laserView->setProfileObservation(
+                        points, detection, frameNumber, receivedAtEpochMs);
+            }, Qt::QueuedConnection);
+    connect(m_correctionController, &crawling::LaserCorrectionController::commandChanged,
+            m_controller, &crawling::SynchronizedDriveController::setCorrectionCommand,
+            Qt::QueuedConnection);
+    connect(m_correctionController, &crawling::LaserCorrectionController::statusChanged,
+            this, &RobotControlPanel::updateCorrectionStatus, Qt::QueuedConnection);
+    connect(m_correctionController, &crawling::LaserCorrectionController::logMessage,
+            this, &RobotControlPanel::appendLog, Qt::QueuedConnection);
+    connect(m_correctionController,
+            &crawling::LaserCorrectionController::diagnosticLogMessage,
+            this, [](const QString &message) {
+                crawling::AppLogger::write(QStringLiteral("CORRECTION.RAW_IMAGE"),
+                                           message);
+            }, Qt::QueuedConnection);
+    m_trajectoryThread = new QThread(this);
+    m_trajectoryWriter = new crawling::LaserTrajectoryWriter;
+    m_trajectoryWriter->moveToThread(m_trajectoryThread);
+    connect(m_trajectoryThread, &QThread::finished, m_trajectoryWriter,
+            &QObject::deleteLater);
+    connect(m_correctionController,
+            &crawling::LaserCorrectionController::trajectorySessionRequested,
+            m_trajectoryWriter, &crawling::LaserTrajectoryWriter::beginSession,
+            Qt::QueuedConnection);
+    connect(m_correctionController,
+            &crawling::LaserCorrectionController::trajectorySegmentReady,
+            m_trajectoryWriter, &crawling::LaserTrajectoryWriter::saveSegment,
+            Qt::QueuedConnection);
+    connect(m_correctionController,
+            &crawling::LaserCorrectionController::rawFrameReady,
+            m_trajectoryWriter, &crawling::LaserTrajectoryWriter::saveRawFrame,
+            Qt::QueuedConnection);
+    connect(m_trajectoryWriter, &crawling::LaserTrajectoryWriter::sessionStarted,
+            m_correctionController,
+            &crawling::LaserCorrectionController::trajectorySessionStarted,
+            Qt::QueuedConnection);
+    connect(m_trajectoryWriter, &crawling::LaserTrajectoryWriter::imageSaved,
+            m_correctionController,
+            &crawling::LaserCorrectionController::trajectoryImageSaved,
+            Qt::QueuedConnection);
+    connect(m_trajectoryWriter, &crawling::LaserTrajectoryWriter::saveFailed,
+            m_correctionController,
+            &crawling::LaserCorrectionController::trajectorySaveFailed,
+            Qt::QueuedConnection);
+    connect(m_trajectoryWriter, &crawling::LaserTrajectoryWriter::rawFrameSaved,
+            m_correctionController,
+            &crawling::LaserCorrectionController::rawFrameSaved,
+            Qt::QueuedConnection);
+    m_correctionThread->start();
+    m_trajectoryThread->start();
 
     m_usbCameraController = new crawling::RobotUsbCameraController;
     m_usbCameraThread = new QThread(this);
@@ -187,6 +293,23 @@ RobotControlPanel::~RobotControlPanel()
 {
     if (m_commandTimer)
         m_commandTimer->stop();
+    if (m_correctionController) {
+        QMetaObject::invokeMethod(m_correctionController, "setEnabled",
+                                  Qt::BlockingQueuedConnection, Q_ARG(bool, false));
+        QMetaObject::invokeMethod(m_correctionController, "shutdown",
+                                  Qt::BlockingQueuedConnection);
+    }
+    if (m_trajectoryWriter)
+        QMetaObject::invokeMethod(m_trajectoryWriter, "shutdown",
+                                  Qt::BlockingQueuedConnection);
+    if (m_trajectoryThread) {
+        m_trajectoryThread->quit();
+        m_trajectoryThread->wait();
+    }
+    if (m_correctionThread) {
+        m_correctionThread->quit();
+        m_correctionThread->wait();
+    }
     if (m_sensorController)
         QMetaObject::invokeMethod(m_sensorController, "shutdown",
                                   Qt::BlockingQueuedConnection);
@@ -357,11 +480,58 @@ void RobotControlPanel::buildUi()
     driveGrid->addWidget(stop, 0, 1);
     driveGrid->addWidget(emergency, 1, 0, 1, 2);
     manualLayout->addLayout(driveGrid);
+
+    auto *correctionGroup = new QGroupBox(QStringLiteral("激光自动纠偏"));
+    auto *correctionLayout = new QVBoxLayout(correctionGroup);
+    auto *correctionForm = new QFormLayout;
+    m_correctionSpeed = makeDouble(1.0, 150.0, 1.0, 1, correctionGroup);
+    m_correctionSpeed->setValue(5.0);
+    m_correctionSegment = makeDouble(20.0, 500.0, 10.0, 1, correctionGroup);
+    m_correctionSegment->setValue(100.0);
+    m_correctionKp = makeDouble(0.0, 20.0, 0.1, 2, correctionGroup);
+    m_correctionKp->setValue(3.0);
+    m_correctionKd = makeDouble(0.0, 5.0, 0.01, 2, correctionGroup);
+    m_correctionKd->setValue(0.12);
+    correctionForm->addRow(QStringLiteral("纠偏速度 (mm/s)"), m_correctionSpeed);
+    correctionForm->addRow(QStringLiteral("分段长度 (mm)"), m_correctionSegment);
+    correctionForm->addRow(QStringLiteral("Kp"), m_correctionKp);
+    correctionForm->addRow(QStringLiteral("Kd"), m_correctionKd);
+    correctionLayout->addLayout(correctionForm);
+    auto *correctionButtons = new QHBoxLayout;
+    m_autoCorrectionStart = actionButton(QStringLiteral("启动自动纠偏"), "primary");
+    m_autoCorrectionStop = actionButton(QStringLiteral("停止自动纠偏"));
+    m_autoCorrectionStop->setEnabled(false);
+    correctionButtons->addWidget(m_autoCorrectionStart);
+    correctionButtons->addWidget(m_autoCorrectionStop);
+    correctionLayout->addLayout(correctionButtons);
+    m_correctionStatus = new QLabel(QStringLiteral("未启动"));
+    m_correctionStatus->setWordWrap(true);
+    correctionLayout->addWidget(m_correctionStatus);
+    manualLayout->insertWidget(manualLayout->count() - 1, correctionGroup);
     manualLayout->addStretch();
 
     auto *profileGroup = new QGroupBox(QStringLiteral("SDK 实时轮廓与焊道定位"));
     auto *profileLayout = new QVBoxLayout(profileGroup);
+    auto *profileModeRow = new QHBoxLayout;
+    profileModeRow->addWidget(new QLabel(QStringLiteral("轮廓显示方式")));
+    auto *profileMode = new QComboBox(profileGroup);
+    profileMode->addItem(QStringLiteral("XY"), static_cast<int>(RobotProfileView::ViewMode::XY));
+    profileMode->addItem(QStringLiteral("XZ"), static_cast<int>(RobotProfileView::ViewMode::XZ));
+    profileMode->addItem(QStringLiteral("YZ"), static_cast<int>(RobotProfileView::ViewMode::YZ));
+    profileMode->setCurrentIndex(profileMode->findData(
+        static_cast<int>(RobotProfileView::ViewMode::XZ)));
+    profileModeRow->addWidget(profileMode);
+    auto *templateButton = actionButton(QStringLiteral("建立/管理模板"));
+    templateButton->setMinimumHeight(30);
+    profileModeRow->addWidget(templateButton);
+    profileModeRow->addStretch();
+    profileLayout->addLayout(profileModeRow);
     m_laserView = new RobotProfileView;
+    connect(profileMode,
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
+            m_laserView, &RobotProfileView::setViewMode);
+    connect(templateButton, &QPushButton::clicked,
+            this, &RobotControlPanel::showProfileTemplateDialog);
     profileLayout->addWidget(m_laserView, 1);
     columns->addWidget(manual, 1);
 
@@ -423,10 +593,16 @@ void RobotControlPanel::buildUi()
     connect(m_enableButton, &QPushButton::clicked, this, [this] { requestEnable(true); });
     connect(stop, &QPushButton::clicked, this, &RobotControlPanel::stopMotion);
     connect(emergency, &QPushButton::clicked, this, &RobotControlPanel::emergencyStop);
+    connect(m_autoCorrectionStart, &QPushButton::clicked,
+            this, &RobotControlPanel::startAutoCorrection);
+    connect(m_autoCorrectionStop, &QPushButton::clicked,
+            this, &RobotControlPanel::stopAutoCorrection);
     connect(m_speedSlider, &QSlider::valueChanged, this, [this](int value) {
         m_speedLabel->setText(QStringLiteral("%1%").arg(value));
     });
     const auto bindJog = [this](QPushButton *button, bool *flag) {
+        button->setAutoRepeat(false);
+        button->setFocusPolicy(Qt::NoFocus);
         connect(button, &QPushButton::pressed, this, [this, flag] { setMotion(*flag, true); });
         connect(button, &QPushButton::released, this, [this, flag] { setMotion(*flag, false); });
     };
@@ -474,6 +650,18 @@ QWidget *RobotControlPanel::buildConfigurationPage()
 
     auto *adapter = new QGroupBox(QStringLiteral("MWD RS485 适配器"), page);
     auto *adapterForm = new QFormLayout(adapter);
+    m_wheelCommunicationMode = new QComboBox(adapter);
+    m_wheelCommunicationMode->addItem(QStringLiteral("CAN（默认）"),
+                                       QStringLiteral("can"));
+    m_wheelCommunicationMode->addItem(QStringLiteral("RS485"),
+                                       QStringLiteral("rs485"));
+    m_wheelCanPort = new QComboBox(adapter);
+    m_wheelCanBaud = new QComboBox(adapter);
+    for (int baud : {115200, 230400, 460800, 921600})
+        m_wheelCanBaud->addItem(QString::number(baud), baud);
+    m_wheelCanBitrate = new QComboBox(adapter);
+    for (int bitrate : {125000, 250000, 500000, 800000, 1000000})
+        m_wheelCanBitrate->addItem(QString::number(bitrate), bitrate);
     m_leftPort = new QComboBox(adapter);
     m_rightPort = new QComboBox(adapter);
     m_leftBaud = new QComboBox(adapter);
@@ -493,18 +681,45 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     auto *refresh = actionButton(QStringLiteral("刷新串口"));
     auto *connectButton = actionButton(QStringLiteral("连接底盘"), "primary");
     auto *disconnectButton = actionButton(QStringLiteral("断开底盘"));
-    adapterForm->addRow(QStringLiteral("左轮串口"), m_leftPort);
-    adapterForm->addRow(QStringLiteral("左轮波特率"), m_leftBaud);
+    adapterForm->addRow(QStringLiteral("驱动轮通信方式"), m_wheelCommunicationMode);
+    auto addTransportRow = [adapterForm](const QString &label, QWidget *widget,
+                                          QList<QWidget *> *rows) {
+        adapterForm->addRow(label, widget);
+        if (rows != nullptr) {
+            rows->append(adapterForm->labelForField(widget));
+            rows->append(widget);
+        }
+    };
+    addTransportRow(QStringLiteral("CAN/SLCAN 串口"), m_wheelCanPort,
+                    &m_wheelCanRows);
+    addTransportRow(QStringLiteral("CAN 适配器波特率"), m_wheelCanBaud,
+                    &m_wheelCanRows);
+    addTransportRow(QStringLiteral("CAN 总线波特率"), m_wheelCanBitrate,
+                    &m_wheelCanRows);
+    addTransportRow(QStringLiteral("左轮串口"), m_leftPort, &m_wheelRs485Rows);
+    addTransportRow(QStringLiteral("左轮波特率"), m_leftBaud, &m_wheelRs485Rows);
     adapterForm->addRow(QStringLiteral("左轮 ID"), m_leftId);
     adapterForm->addRow(QStringLiteral("左轮方向"), m_leftSign);
-    adapterForm->addRow(QStringLiteral("右轮串口"), m_rightPort);
-    adapterForm->addRow(QStringLiteral("右轮波特率"), m_rightBaud);
+    addTransportRow(QStringLiteral("右轮串口"), m_rightPort, &m_wheelRs485Rows);
+    addTransportRow(QStringLiteral("右轮波特率"), m_rightBaud, &m_wheelRs485Rows);
     adapterForm->addRow(QStringLiteral("右轮 ID"), m_rightId);
     adapterForm->addRow(QStringLiteral("右轮方向"), m_rightSign);
     adapterForm->addRow(QString(), buttonRow({refresh, connectButton, disconnectButton}));
     connect(refresh, &QPushButton::clicked, this, &RobotControlPanel::refreshPorts);
     connect(connectButton, &QPushButton::clicked, this, &RobotControlPanel::connectDrive);
     connect(disconnectButton, &QPushButton::clicked, this, &RobotControlPanel::disconnectDrive);
+    const auto updateWheelTransportUi = [this] {
+        const bool can = m_wheelCommunicationMode->currentData().toString() == QStringLiteral("can");
+        for (QWidget *widget : m_wheelCanRows) {
+            widget->setVisible(can);
+        }
+        for (QWidget *widget : m_wheelRs485Rows) {
+            widget->setVisible(!can);
+        }
+    };
+    connect(m_wheelCommunicationMode, &QComboBox::currentIndexChanged,
+            this, [updateWheelTransportUi](int) { updateWheelTransportUi(); });
+    updateWheelTransportUi();
     compactGroup(adapter);
     leftColumn->addWidget(adapter);
 
@@ -548,14 +763,15 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     auto *laser = new QGroupBox(QStringLiteral("MV3DLP 激光相机"), page);
     auto *laserForm = new QFormLayout(laser);
     m_laserSerial = new QLineEdit(laser);
-    m_laserSerial->setPlaceholderText(QStringLiteral("填写序列号，或扫描后选择"));
+    m_laserSerial->setReadOnly(true);
+    m_laserSerial->setPlaceholderText(QStringLiteral("扫描后自动选择"));
     m_laserDevice = new QComboBox(laser);
     auto *laserScan = actionButton(QStringLiteral("扫描激光相机"));
     auto *laserConnect = actionButton(QStringLiteral("连接配置中的激光相机"), "primary");
     auto *laserDisconnect = actionButton(QStringLiteral("断开激光相机"));
     m_laserConfigState = new QLabel(QStringLiteral("未连接"), laser);
     m_laserFrameState = new QLabel(QStringLiteral("暂无帧数据"), laser);
-    laserForm->addRow(QStringLiteral("配置序列号"), m_laserSerial);
+    laserForm->addRow(QStringLiteral("当前设备序列号"), m_laserSerial);
     laserForm->addRow(QStringLiteral("已发现设备"), m_laserDevice);
     laserForm->addRow(QString(), buttonRow({laserScan, laserConnect, laserDisconnect}));
     laserForm->addRow(QStringLiteral("连接状态"), m_laserConfigState);
@@ -755,7 +971,12 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                           m_armingTimeout, m_clampNodeId, m_clampXId, m_clampYId,
                           m_clampZId, m_cameraFps})
         connect(box, QOverload<int>::of(&QSpinBox::valueChanged), this, markDirty);
-    connect(m_laserSerial, &QLineEdit::textChanged, this, markDirty);
+    for (QComboBox *box : {m_wheelCommunicationMode, m_wheelCanPort,
+                           m_wheelCanBaud, m_wheelCanBitrate, m_leftPort,
+                           m_rightPort, m_leftBaud, m_rightBaud, m_leftSign,
+                           m_rightSign})
+        connect(box, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [markDirty](int) { markDirty(); });
     for (QCheckBox *box : {m_cameraAutoConnect, m_cameraFlipHorizontal,
                            m_cameraFlipVertical, m_autoConnectCheck})
         connect(box, &QCheckBox::toggled, this, markDirty);
@@ -774,6 +995,419 @@ void RobotControlPanel::loadSettings()
                          QSettings::IniFormat);
     m_settings = crawling::DriveSettings::load(persistent);
     settingsToUi(m_settings);
+    loadProfileWeldTuning();
+    loadProfileTemplates();
+}
+
+void RobotControlPanel::loadProfileWeldTuning()
+{
+    QSettings persistent(crawling::DriveSettings::persistentFilePath(),
+                         QSettings::IniFormat);
+    const int tuningVersion = persistent.value(
+        QStringLiteral("laserProfileTuning/version"), 0).toInt();
+    if (tuningVersion < 3) {
+        m_profileWeldTuning = crawling::ProfileWeldTuning{};
+        persistent.setValue(QStringLiteral("laserProfileTuning/version"), 3);
+        persistent.sync();
+        return;
+    }
+    m_profileWeldTuning.smoothingRadius = persistent.value(
+        QStringLiteral("laserProfileTuning/smoothingRadius"), 2).toInt();
+    m_profileWeldTuning.baselineEdgeRatio = persistent.value(
+        QStringLiteral("laserProfileTuning/baselineEdgeRatio"), 0.10).toDouble();
+    m_profileWeldTuning.growNoiseSigma = persistent.value(
+        QStringLiteral("laserProfileTuning/growNoiseSigma"), 2.0).toDouble();
+    m_profileWeldTuning.seedNoiseSigma = persistent.value(
+        QStringLiteral("laserProfileTuning/seedNoiseSigma"), 3.0).toDouble();
+    m_profileWeldTuning.minimumWidthRatio = persistent.value(
+        QStringLiteral("laserProfileTuning/minimumWidthRatio"), 0.005).toDouble();
+    m_profileWeldTuning.minimumSeedCount = persistent.value(
+        QStringLiteral("laserProfileTuning/minimumSeedCount"), 2).toInt();
+    m_profileWeldTuning.minimumSupportRatio = persistent.value(
+        QStringLiteral("laserProfileTuning/minimumSupportRatio"), 0.20).toDouble();
+    m_profileWeldTuning.maximumCandidateHoleRatio = persistent.value(
+        QStringLiteral("laserProfileTuning/maximumCandidateHoleRatio"), 0.12).toDouble();
+    m_profileWeldTuning.maximumInternalHoleRatio = persistent.value(
+        QStringLiteral("laserProfileTuning/maximumInternalHoleRatio"), 0.70).toDouble();
+    m_profileWeldTuning.shoulderRatio = persistent.value(
+        QStringLiteral("laserProfileTuning/shoulderRatio"), 0.002).toDouble();
+}
+
+void RobotControlPanel::persistProfileWeldTuning()
+{
+    QSettings persistent(crawling::DriveSettings::persistentFilePath(),
+                         QSettings::IniFormat);
+    persistent.setValue(QStringLiteral("laserProfileTuning/version"), 3);
+    persistent.setValue(QStringLiteral("laserProfileTuning/smoothingRadius"),
+                        m_profileWeldTuning.smoothingRadius);
+    persistent.setValue(QStringLiteral("laserProfileTuning/baselineEdgeRatio"),
+                        m_profileWeldTuning.baselineEdgeRatio);
+    persistent.setValue(QStringLiteral("laserProfileTuning/growNoiseSigma"),
+                        m_profileWeldTuning.growNoiseSigma);
+    persistent.setValue(QStringLiteral("laserProfileTuning/seedNoiseSigma"),
+                        m_profileWeldTuning.seedNoiseSigma);
+    persistent.setValue(QStringLiteral("laserProfileTuning/minimumWidthRatio"),
+                        m_profileWeldTuning.minimumWidthRatio);
+    persistent.setValue(QStringLiteral("laserProfileTuning/minimumSeedCount"),
+                        m_profileWeldTuning.minimumSeedCount);
+    persistent.setValue(QStringLiteral("laserProfileTuning/minimumSupportRatio"),
+                        m_profileWeldTuning.minimumSupportRatio);
+    persistent.setValue(QStringLiteral("laserProfileTuning/maximumCandidateHoleRatio"),
+                        m_profileWeldTuning.maximumCandidateHoleRatio);
+    persistent.setValue(QStringLiteral("laserProfileTuning/maximumInternalHoleRatio"),
+                        m_profileWeldTuning.maximumInternalHoleRatio);
+    persistent.setValue(QStringLiteral("laserProfileTuning/shoulderRatio"),
+                        m_profileWeldTuning.shoulderRatio);
+    persistent.sync();
+}
+
+void RobotControlPanel::applyProfileWeldTuning()
+{
+    if (!m_correctionController)
+        return;
+    const crawling::ProfileWeldTuning tuning = m_profileWeldTuning;
+    QMetaObject::invokeMethod(m_correctionController,
+        [controller = m_correctionController, tuning] {
+            controller->setProfileTuning(tuning);
+        }, Qt::QueuedConnection);
+}
+
+void RobotControlPanel::loadProfileTemplates()
+{
+    QSettings persistent(crawling::DriveSettings::persistentFilePath(),
+                         QSettings::IniFormat);
+    m_profileTemplates.clear();
+    const int count = persistent.value(QStringLiteral("laserProfileTemplates/count"), 0)
+                          .toInt();
+    for (int index = 0; index < count; ++index) {
+        const QString prefix = QStringLiteral("laserProfileTemplates/%1/").arg(index);
+        crawling::ProfileWeldTemplate profileTemplate;
+        profileTemplate.name = persistent.value(prefix + QStringLiteral("name")).toString();
+        const QStringList encoded = persistent.value(prefix + QStringLiteral("shape")).toStringList();
+        for (const QString &value : encoded)
+            profileTemplate.normalizedShape.append(value.toFloat());
+        profileTemplate.widthRatio = persistent.value(prefix + QStringLiteral("widthRatio"), 0.0)
+                                         .toDouble();
+        profileTemplate.minimumWidthScale = persistent.value(
+            prefix + QStringLiteral("minimumWidthScale"), 0.20).toDouble();
+        profileTemplate.maximumWidthScale = persistent.value(
+            prefix + QStringLiteral("maximumWidthScale"), 5.00).toDouble();
+        profileTemplate.minimumSimilarity = persistent.value(
+            prefix + QStringLiteral("minimumSimilarity"), 0.72).toDouble();
+        profileTemplate.enabled = persistent.value(prefix + QStringLiteral("enabled"), true)
+                                      .toBool();
+        if (profileTemplate.normalizedShape.size() >= 41 &&
+            profileTemplate.widthRatio > 0.0 &&
+            profileTemplate.maximumWidthScale >= profileTemplate.minimumWidthScale) {
+            if (profileTemplate.name.trimmed().isEmpty())
+                profileTemplate.name = QStringLiteral("焊道模板 %1").arg(index + 1);
+            m_profileTemplates.append(profileTemplate);
+        }
+    }
+}
+
+void RobotControlPanel::persistProfileTemplates()
+{
+    QSettings persistent(crawling::DriveSettings::persistentFilePath(),
+                         QSettings::IniFormat);
+    persistent.remove(QStringLiteral("laserProfileTemplates"));
+    persistent.setValue(QStringLiteral("laserProfileTemplates/count"),
+                        m_profileTemplates.size());
+    for (int index = 0; index < m_profileTemplates.size(); ++index) {
+        const crawling::ProfileWeldTemplate &profileTemplate = m_profileTemplates[index];
+        const QString prefix = QStringLiteral("laserProfileTemplates/%1/").arg(index);
+        QStringList encoded;
+        encoded.reserve(profileTemplate.normalizedShape.size());
+        for (float value : profileTemplate.normalizedShape)
+            encoded.append(QString::number(value, 'g', 9));
+        persistent.setValue(prefix + QStringLiteral("name"), profileTemplate.name);
+        persistent.setValue(prefix + QStringLiteral("shape"), encoded);
+        persistent.setValue(prefix + QStringLiteral("widthRatio"), profileTemplate.widthRatio);
+        persistent.setValue(prefix + QStringLiteral("minimumWidthScale"),
+                            profileTemplate.minimumWidthScale);
+        persistent.setValue(prefix + QStringLiteral("maximumWidthScale"),
+                            profileTemplate.maximumWidthScale);
+        persistent.setValue(prefix + QStringLiteral("minimumSimilarity"),
+                            profileTemplate.minimumSimilarity);
+        persistent.setValue(prefix + QStringLiteral("enabled"), profileTemplate.enabled);
+    }
+    persistent.sync();
+}
+
+void RobotControlPanel::applyProfileTemplates()
+{
+    if (!m_correctionController)
+        return;
+    const QVector<crawling::ProfileWeldTemplate> templates = m_profileTemplates;
+    QMetaObject::invokeMethod(m_correctionController,
+        [controller = m_correctionController, templates] {
+            controller->setProfileTemplates(templates);
+        }, Qt::QueuedConnection);
+}
+
+void RobotControlPanel::showProfileTemplateDialog()
+{
+    if (m_profileTemplateDialog) {
+        m_profileTemplateDialog->raise();
+        m_profileTemplateDialog->activateWindow();
+        return;
+    }
+    auto *dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setModal(false);
+    m_profileTemplateDialog = dialog;
+    dialog->setWindowTitle(QStringLiteral("焊道轮廓模板"));
+    dialog->setMinimumSize(700, 620);
+    dialog->resize(760, 700);
+    auto *layout = new QVBoxLayout(dialog);
+    auto *description = new QLabel(
+        QStringLiteral("先在 X/Z 图中按住鼠标拖出红色框选焊道区域，再采集模板。"
+                       "框选采集不要求当前已经识别成功。所有数值参数均可用滑块调整。"), dialog);
+    description->setWordWrap(true);
+    layout->addWidget(description);
+
+    auto *selector = new QComboBox(dialog);
+    layout->addWidget(selector);
+    auto *form = new QFormLayout;
+    const auto slider = [dialog](int minimum, int maximum, int initial,
+                                 int decimals, double scale) {
+        auto *container = new QWidget(dialog);
+        auto *row = new QHBoxLayout(container);
+        row->setContentsMargins(0, 0, 0, 0);
+        auto *control = new QSlider(Qt::Horizontal, container);
+        auto *value = new QLabel(container);
+        value->setMinimumWidth(62);
+        control->setRange(minimum, maximum);
+        control->setValue(std::clamp(initial, minimum, maximum));
+        const auto updateValue = [control, value, decimals, scale] {
+            value->setText(QString::number(control->value() * scale, 'f', decimals));
+        };
+        QObject::connect(control, &QSlider::valueChanged, container,
+                         [updateValue](int) { updateValue(); });
+        updateValue();
+        row->addWidget(control, 1);
+        row->addWidget(value);
+        return control;
+    };
+    auto *name = new QLineEdit(dialog);
+    auto *minimumSimilarity = slider(30, 90, 50, 0, 1.0);
+    auto *widthTolerance = slider(10, 90, 50, 0, 1.0);
+    auto *smoothingRadius = slider(1, 5, m_profileWeldTuning.smoothingRadius, 0, 1.0);
+    auto *sensitivity = slider(5, 60,
+        int((6.5 - m_profileWeldTuning.growNoiseSigma) * 10), 1, 0.1);
+    auto *minimumWidthRatio = slider(1, 100, int(m_profileWeldTuning.minimumWidthRatio * 10000), 2, 0.01);
+    auto *candidateHoleRatio = slider(0, 25, int(m_profileWeldTuning.maximumCandidateHoleRatio * 100), 0, 1.0);
+    auto *enabled = new QCheckBox(QStringLiteral("匹配时启用此模板"), dialog);
+    form->addRow(QStringLiteral("模板名称"), name);
+    form->addRow(QStringLiteral("形状匹配严格度 (%)"), minimumSimilarity);
+    form->addRow(QStringLiteral("焊道宽度可变化（±%）"), widthTolerance);
+    form->addRow(QStringLiteral("去噪强度（越大越平滑）"), smoothingRadius);
+    form->addRow(QStringLiteral("低矮拱起灵敏度（越大越敏感）"), sensitivity);
+    form->addRow(QStringLiteral("最小拱起宽度 (%)"), minimumWidthRatio);
+    form->addRow(QStringLiteral("允许连续轮廓断开 (%)"), candidateHoleRatio);
+    auto *hint = new QLabel(
+        QStringLiteral("识别原理：先估计焊道两侧母材高度，再找高于基线的拱起段。"
+                       "允许断开控制跨过的最大缺口；形状匹配用于排除其他凸起。"), dialog);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+    form->addRow(QString(), enabled);
+    layout->addLayout(form);
+    auto *selectionStatus = new QLabel(dialog);
+    selectionStatus->setWordWrap(true);
+    selectionStatus->setText(QStringLiteral("请在 X/Z 图上拖拽红框选择焊道区域。"));
+    layout->addWidget(selectionStatus);
+    auto *status = new QLabel(dialog);
+    status->setWordWrap(true);
+    layout->addWidget(status);
+    auto *buttons = new QHBoxLayout;
+    auto *capture = actionButton(QStringLiteral("采集红框区域为模板"), "primary");
+    auto *update = actionButton(QStringLiteral("更新匹配参数"));
+    auto *reset = actionButton(QStringLiteral("恢复拱起默认值"));
+    auto *remove = actionButton(QStringLiteral("删除选中模板"));
+    buttons->addWidget(capture);
+    buttons->addWidget(update);
+    buttons->addWidget(reset);
+    buttons->addWidget(remove);
+    layout->addLayout(buttons);
+    auto *close = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    close->button(QDialogButtonBox::Close)->setText(QStringLiteral("关闭"));
+    layout->addWidget(close);
+
+    const auto applyTuning = [this, smoothingRadius, sensitivity,
+                              minimumWidthRatio, candidateHoleRatio] {
+        m_profileWeldTuning.smoothingRadius = smoothingRadius->value();
+        m_profileWeldTuning.growNoiseSigma = 6.5 - sensitivity->value() / 10.0;
+        m_profileWeldTuning.seedNoiseSigma = m_profileWeldTuning.growNoiseSigma * 1.5;
+        m_profileWeldTuning.minimumWidthRatio = minimumWidthRatio->value() / 10000.0;
+        m_profileWeldTuning.maximumCandidateHoleRatio = candidateHoleRatio->value() / 100.0;
+        m_profileWeldTuning.baselineEdgeRatio = 0.10;
+        m_profileWeldTuning.minimumSeedCount = 2;
+        m_profileWeldTuning.minimumSupportRatio = 0.20;
+        m_profileWeldTuning.maximumInternalHoleRatio = 0.70;
+        m_profileWeldTuning.shoulderRatio = 0.002;
+        persistProfileWeldTuning();
+        applyProfileWeldTuning();
+    };
+    const auto fillTemplate = [this, selector, name, minimumSimilarity,
+                               widthTolerance, smoothingRadius, sensitivity,
+                               minimumWidthRatio, candidateHoleRatio, enabled, status] {
+        const int index = selector->currentData().toInt();
+        smoothingRadius->setValue(m_profileWeldTuning.smoothingRadius);
+        sensitivity->setValue(int((6.5 - m_profileWeldTuning.growNoiseSigma) * 10));
+        minimumWidthRatio->setValue(int(m_profileWeldTuning.minimumWidthRatio * 10000));
+        candidateHoleRatio->setValue(int(m_profileWeldTuning.maximumCandidateHoleRatio * 100));
+        if (index < 0 || index >= m_profileTemplates.size()) {
+            name->setText(QStringLiteral("焊道模板 %1").arg(m_profileTemplates.size() + 1));
+            minimumSimilarity->setValue(50);
+            widthTolerance->setValue(50);
+            enabled->setChecked(true);
+            status->setText(QStringLiteral("尚未建立模板。先在主界面的 X/Z 轮廓上拖拽红框，再采集。"));
+            return;
+        }
+        const crawling::ProfileWeldTemplate &profileTemplate = m_profileTemplates[index];
+        name->setText(profileTemplate.name);
+        minimumSimilarity->setValue(int(profileTemplate.minimumSimilarity * 100));
+        widthTolerance->setValue(std::clamp(
+            int(std::max(1.0 - profileTemplate.minimumWidthScale,
+                         profileTemplate.maximumWidthScale - 1.0) * 100), 10, 90));
+        enabled->setChecked(profileTemplate.enabled);
+        status->setText(QStringLiteral("特征点 %1；基准宽度占扫描 %2；启用=%3。"
+                                       "低于相似度或超出宽度范围的候选将被拒绝。")
+                            .arg(profileTemplate.normalizedShape.size())
+                            .arg(profileTemplate.widthRatio, 0, 'f', 3)
+                            .arg(profileTemplate.enabled ? QStringLiteral("是")
+                                                         : QStringLiteral("否")));
+    };
+    for (QSlider *control : {smoothingRadius, sensitivity, minimumWidthRatio,
+                             candidateHoleRatio}) {
+        connect(control, &QSlider::valueChanged, dialog,
+                [applyTuning](int) { applyTuning(); });
+    }
+    connect(reset, &QPushButton::clicked, dialog,
+            [minimumSimilarity, widthTolerance, smoothingRadius, sensitivity,
+             minimumWidthRatio, candidateHoleRatio, enabled, applyTuning] {
+                minimumSimilarity->setValue(50);
+                widthTolerance->setValue(50);
+                smoothingRadius->setValue(2);
+                sensitivity->setValue(45);
+                minimumWidthRatio->setValue(50);
+                candidateHoleRatio->setValue(12);
+                enabled->setChecked(true);
+                applyTuning();
+            });
+    const auto refresh = [this, selector, fillTemplate] {
+        const int selected = selector->currentData().toInt();
+        QSignalBlocker blocker(selector);
+        selector->clear();
+        for (int index = 0; index < m_profileTemplates.size(); ++index) {
+            const crawling::ProfileWeldTemplate &profileTemplate = m_profileTemplates[index];
+            selector->addItem(QStringLiteral("%1%2")
+                                  .arg(profileTemplate.enabled ? QStringLiteral("● ")
+                                                               : QStringLiteral("○ "))
+                                  .arg(profileTemplate.name), index);
+        }
+        const int row = selector->findData(selected);
+        selector->setCurrentIndex(row >= 0 ? row : (selector->count() ? 0 : -1));
+        fillTemplate();
+    };
+    connect(selector, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            dialog, [fillTemplate](int) { fillTemplate(); });
+    connect(capture, &QPushButton::clicked, dialog,
+            [this, name, minimumSimilarity, widthTolerance,
+             enabled, applyTuning, refresh, status] {
+                if (!m_laserView || !m_laserView->hasTemplateSelection()) {
+                    QMessageBox::warning(this, QStringLiteral("请先框选焊道"),
+                        QStringLiteral("请保持模板窗口打开，并在主界面 X/Z 轮廓图上拖动鼠标框选焊道区域。"));
+                    return;
+                }
+                crawling::ProfileWeldTemplate profileTemplate =
+                    crawling::ProfileWeldDetector::captureTemplate(
+                        m_laserView->rawPoints(), m_laserView->templateSelectionMinimumX(),
+                        m_laserView->templateSelectionMaximumX(),
+                        name->text().trimmed());
+                if (profileTemplate.normalizedShape.size() < 41 ||
+                    profileTemplate.widthRatio <= 0.0) {
+                    QMessageBox::warning(this, QStringLiteral("无法建立模板"),
+                        QStringLiteral("红框内没有足够的有效轮廓点。请扩大红框，"
+                                       "并保证焊道两侧保留可见的母材轮廓。"));
+                    return;
+                }
+                profileTemplate.name = profileTemplate.name.isEmpty()
+                    ? QStringLiteral("焊道模板 %1").arg(m_profileTemplates.size() + 1)
+                    : profileTemplate.name;
+                profileTemplate.minimumSimilarity = minimumSimilarity->value() / 100.0;
+                profileTemplate.minimumWidthScale =
+                    1.0 - widthTolerance->value() / 100.0;
+                profileTemplate.maximumWidthScale =
+                    1.0 + widthTolerance->value() / 100.0;
+                profileTemplate.enabled = enabled->isChecked();
+                m_profileTemplates.append(profileTemplate);
+                applyTuning();
+                persistProfileTemplates();
+                applyProfileTemplates();
+                appendLog(QStringLiteral("已建立焊道模板：%1（相似度 ≥ %2）")
+                              .arg(profileTemplate.name)
+                              .arg(profileTemplate.minimumSimilarity, 0, 'f', 2));
+                refresh();
+                m_laserView->clearTemplateSelection();
+                status->setText(QStringLiteral("已完成：模板“%1”已采集并启用。可继续调整参数，或关闭窗口。")
+                                    .arg(profileTemplate.name));
+            });
+    connect(update, &QPushButton::clicked, dialog,
+            [this, selector, name, minimumSimilarity, widthTolerance,
+             enabled, applyTuning, refresh, status] {
+                const int index = selector->currentData().toInt();
+                if (index < 0 || index >= m_profileTemplates.size()) {
+                    status->setText(QStringLiteral("没有可更新的模板，请先采集一个模板。"));
+                    return;
+                }
+                crawling::ProfileWeldTemplate &profileTemplate = m_profileTemplates[index];
+                profileTemplate.name = name->text().trimmed().isEmpty()
+                    ? QStringLiteral("焊道模板 %1").arg(index + 1) : name->text().trimmed();
+                profileTemplate.minimumSimilarity = minimumSimilarity->value() / 100.0;
+                profileTemplate.minimumWidthScale =
+                    1.0 - widthTolerance->value() / 100.0;
+                profileTemplate.maximumWidthScale =
+                    1.0 + widthTolerance->value() / 100.0;
+                profileTemplate.enabled = enabled->isChecked();
+                applyTuning();
+                persistProfileTemplates();
+                applyProfileTemplates();
+                appendLog(QStringLiteral("已更新焊道模板：%1").arg(profileTemplate.name));
+                refresh();
+                status->setText(QStringLiteral("已完成：模板“%1”的匹配参数已更新并立即生效。")
+                                    .arg(profileTemplate.name));
+            });
+    connect(remove, &QPushButton::clicked, dialog, [this, selector, refresh] {
+        const int index = selector->currentData().toInt();
+        if (index < 0 || index >= m_profileTemplates.size()) return;
+        const QString name = m_profileTemplates[index].name;
+        m_profileTemplates.removeAt(index);
+        persistProfileTemplates();
+        applyProfileTemplates();
+        appendLog(QStringLiteral("已删除焊道模板：%1").arg(name));
+        refresh();
+    });
+    if (m_laserView) {
+        m_laserView->setTemplateSelectionEnabled(true);
+        connect(m_laserView, &RobotProfileView::templateSelectionChanged, dialog,
+                [selectionStatus](bool available, double minimumX, double maximumX) {
+                    selectionStatus->setText(available
+                        ? QStringLiteral("已框选 X=%1 至 %2；可点击“采集红框区域为模板”。")
+                              .arg(minimumX, 0, 'f', 2).arg(maximumX, 0, 'f', 2)
+                        : QStringLiteral("红框范围过窄，请重新拖拽。"));
+                });
+    }
+    connect(close, &QDialogButtonBox::rejected, dialog,
+            [dialog] { dialog->close(); });
+    connect(dialog, &QObject::destroyed, this, [this] {
+        m_profileTemplateDialog = nullptr;
+        if (m_laserView) m_laserView->setTemplateSelectionEnabled(false);
+    });
+    refresh();
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
 }
 
 void RobotControlPanel::saveSettings()
@@ -816,9 +1450,17 @@ crawling::DriveSettings RobotControlPanel::settingsFromUi() const
     value.rightMotorId = m_rightId->value();
     value.leftMotorSign = comboInt(m_leftSign, value.leftMotorSign);
     value.rightMotorSign = comboInt(m_rightSign, value.rightMotorSign);
+    value.wheelCommunicationMode =
+        m_wheelCommunicationMode->currentData().toString() == QStringLiteral("rs485")
+            ? crawling::WheelCommunicationMode::Rs485
+            : crawling::WheelCommunicationMode::Can;
+    value.wheelCanSerialPort = comboText(m_wheelCanPort, value.wheelCanSerialPort);
+    value.wheelCanSerialBaudRate = comboInt(m_wheelCanBaud, value.wheelCanSerialBaudRate);
+    value.wheelCanBitrate = comboInt(m_wheelCanBitrate, value.wheelCanBitrate);
     value.imuSerialPort = comboText(m_imuPort, value.imuSerialPort);
     value.imuBaudRate = comboInt(m_imuBaud, value.imuBaudRate);
     value.imuOutputDivider = comboInt(m_imuDivider, value.imuOutputDivider);
+    // The serial number is selected from the discovery list, never typed by hand.
     value.laserSerialNumber = m_laserSerial->text().trimmed();
     value.usbCameraDeviceIndex = m_cameraDevice->currentIndex() >= 0
                                      ? m_cameraDevice->currentData().toInt() : -1;
@@ -867,6 +1509,21 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
     setComboValue(m_rightSign, settings.rightMotorSign);
     m_leftId->setValue(settings.leftMotorId);
     m_rightId->setValue(settings.rightMotorId);
+    setComboValue(m_wheelCommunicationMode,
+                  settings.wheelCommunicationMode == crawling::WheelCommunicationMode::Can
+                      ? QStringLiteral("can")
+                      : QStringLiteral("rs485"));
+    setComboText(m_wheelCanPort, settings.wheelCanSerialPort);
+    setComboValue(m_wheelCanBaud, settings.wheelCanSerialBaudRate);
+    setComboValue(m_wheelCanBitrate, settings.wheelCanBitrate);
+    if (m_wheelCommunicationMode != nullptr) {
+        const bool can = settings.wheelCommunicationMode ==
+                         crawling::WheelCommunicationMode::Can;
+        for (QWidget *widget : m_wheelCanRows)
+            widget->setVisible(can);
+        for (QWidget *widget : m_wheelRs485Rows)
+            widget->setVisible(!can);
+    }
     setComboText(m_imuPort, settings.imuSerialPort);
     setComboValue(m_imuBaud, settings.imuBaudRate);
     setComboValue(m_imuDivider, settings.imuOutputDivider);
@@ -880,6 +1537,18 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
     m_cameraFlipVertical->setChecked(settings.usbCameraFlipVertical);
     m_autoConnectCheck->setChecked(settings.autoConnectOnStartup);
     m_speedSlider->setValue(settings.manualJogPercent);
+    QSettings persistent(crawling::DriveSettings::persistentFilePath(),
+                         QSettings::IniFormat);
+    m_correctionSpeed->setValue(
+        persistent.value(QStringLiteral("laserCorrection/speed"), 0.005)
+            .toDouble() * kMillimetersPerMeter);
+    m_correctionSegment->setValue(
+        persistent.value(QStringLiteral("laserCorrection/segmentLength"), 0.10)
+            .toDouble() * kMillimetersPerMeter);
+    m_correctionKp->setValue(
+        persistent.value(QStringLiteral("laserCorrection/kp"), 3.0).toDouble());
+    m_correctionKd->setValue(
+        persistent.value(QStringLiteral("laserCorrection/kd"), 0.12).toDouble());
     setComboText(m_clampPort, settings.clampSerialPort);
     setComboValue(m_clampBaud, settings.clampSerialBaudRate);
     setComboValue(m_clampCanBitrate, settings.clampCanBitrate);
@@ -930,10 +1599,12 @@ void RobotControlPanel::refreshPorts()
     };
     const QString selectedLeft = m_leftPort->currentData().toString();
     const QString selectedRight = m_rightPort->currentData().toString();
+    const QString selectedWheelCan = m_wheelCanPort->currentData().toString();
     const QString selectedImu = m_imuPort->currentData().toString();
     const QString selectedClamp = m_clampPort->currentData().toString();
     repopulate(m_leftPort, selectedLeft, m_settings.leftMotorSerialPort);
     repopulate(m_rightPort, selectedRight, m_settings.rightMotorSerialPort);
+    repopulate(m_wheelCanPort, selectedWheelCan, m_settings.wheelCanSerialPort);
     repopulate(m_imuPort, selectedImu, m_settings.imuSerialPort);
     repopulate(m_clampPort, selectedClamp, m_settings.clampSerialPort);
 }
@@ -973,9 +1644,13 @@ void RobotControlPanel::connectConfiguredDevices()
 {
     m_settings = settingsFromUi();
     saveSettings();
-    if (m_settings.leftMotorSerialPort.trimmed().isEmpty() ||
-        m_settings.rightMotorSerialPort.trimmed().isEmpty()) {
-        appendLog(QStringLiteral("底盘连接已跳过：左右轮串口配置不完整"));
+    const bool canMode =
+        m_settings.wheelCommunicationMode == crawling::WheelCommunicationMode::Can;
+    if ((canMode && m_settings.wheelCanSerialPort.trimmed().isEmpty()) ||
+        (!canMode &&
+         (m_settings.leftMotorSerialPort.trimmed().isEmpty() ||
+          m_settings.rightMotorSerialPort.trimmed().isEmpty()))) {
+        appendLog(QStringLiteral("底盘连接已跳过：驱动轮通信端口配置不完整"));
     } else {
         connectDrive();
     }
@@ -1003,15 +1678,24 @@ void RobotControlPanel::connectConfiguredImu()
 void RobotControlPanel::connectConfiguredLaser()
 {
     m_settings = settingsFromUi();
+    QString serial = m_settings.laserSerialNumber.trimmed();
+    if (serial.isEmpty() && m_laserDevice->currentIndex() >= 0) {
+        serial = m_laserDevice->currentText()
+                     .section(QStringLiteral(" | "), 0, 0)
+                     .trimmed();
+        if (!serial.isEmpty()) {
+            m_settings.laserSerialNumber = serial;
+            m_laserSerial->setText(serial);
+        }
+    }
     saveSettings();
-    if (m_settings.laserSerialNumber.trimmed().isEmpty()) {
-        appendLog(QStringLiteral("激光相机连接已跳过：未配置序列号"));
-        return;
+    if (serial.isEmpty()) {
+        appendLog(QStringLiteral("未填写激光序列号，将自动连接扫描到的第一台设备"));
     }
     if (m_sensorController)
         QMetaObject::invokeMethod(m_sensorController, "connectCamera",
                                   Qt::QueuedConnection,
-                                  Q_ARG(QString, m_settings.laserSerialNumber));
+                                  Q_ARG(QString, serial));
 }
 
 void RobotControlPanel::connectConfiguredUsbCamera()
@@ -1061,6 +1745,8 @@ void RobotControlPanel::persistAutoConnectSetting(bool enabled)
 
 void RobotControlPanel::setMotion(bool &flag, bool active)
 {
+    if (m_autoCorrectionActive)
+        return;
     flag = active;
     sendMotionCommand();
 }
@@ -1074,6 +1760,7 @@ void RobotControlPanel::requestEnable(bool enabled)
 
 void RobotControlPanel::emergencyStop()
 {
+    stopAutoCorrection();
     m_forward = m_reverse = m_left = m_right = false;
     if (m_controller)
         QMetaObject::invokeMethod(m_controller, "emergencyStop",
@@ -1082,6 +1769,7 @@ void RobotControlPanel::emergencyStop()
 
 void RobotControlPanel::stopMotion()
 {
+    stopAutoCorrection();
     m_forward = m_reverse = m_left = m_right = false;
     if (m_controller) {
         QMetaObject::invokeMethod(m_controller, "setInputCommand",
@@ -1094,7 +1782,7 @@ void RobotControlPanel::stopMotion()
 
 void RobotControlPanel::sendMotionCommand()
 {
-    if (!m_controller)
+    if (!m_controller || m_autoCorrectionActive)
         return;
     const auto settings = settingsFromUi();
     const double scale = m_speedSlider->value() / 100.0;
@@ -1155,6 +1843,7 @@ void RobotControlPanel::updateState(crawling::DriveState state, const QString &r
                            state != crawling::DriveState::EmergencyStop;
     m_enableButton->setEnabled(canEnable);
     appendLog(reason);
+    emitVehicleStatus();
 }
 
 void RobotControlPanel::updateConnection(bool connected, const QString &message)
@@ -1203,14 +1892,29 @@ void RobotControlPanel::updateSensorDetection(bool running, const QString &messa
 void RobotControlPanel::updateLaserDevices(const QStringList &devices)
 {
     const QString configured = m_laserSerial->text().trimmed();
-    QSignalBlocker blocker(m_laserDevice);
-    m_laserDevice->clear();
-    m_laserDevice->addItems(devices);
-    for (int index = 0; index < m_laserDevice->count(); ++index) {
-        if (m_laserDevice->itemText(index).section(QStringLiteral(" | "), 0, 0) == configured) {
-            m_laserDevice->setCurrentIndex(index);
-            break;
+    int selectedIndex = -1;
+    {
+        QSignalBlocker blocker(m_laserDevice);
+        m_laserDevice->clear();
+        m_laserDevice->addItems(devices);
+        for (int index = 0; index < m_laserDevice->count(); ++index) {
+            if (m_laserDevice->itemText(index).section(QStringLiteral(" | "), 0, 0) ==
+                configured) {
+                selectedIndex = index;
+                break;
+            }
         }
+        if (selectedIndex < 0 && configured.isEmpty() &&
+            m_laserDevice->count() > 0) {
+            selectedIndex = 0;
+        }
+        m_laserDevice->setCurrentIndex(selectedIndex);
+    }
+    if (selectedIndex >= 0) {
+        m_laserSerial->setText(
+            m_laserDevice->itemText(selectedIndex)
+                .section(QStringLiteral(" | "), 0, 0)
+                .trimmed());
     }
 }
 
@@ -1230,6 +1934,108 @@ void RobotControlPanel::updateLaserFrame(quint32 frame, quint32 width,
 {
     m_laserFrameState->setText(QStringLiteral("帧 #%1，%2 x %3，数据点 %4")
                                    .arg(frame).arg(width).arg(height).arg(points));
+}
+
+void RobotControlPanel::startAutoCorrection()
+{
+    if (!m_correctionController || !m_sensorController)
+        return;
+    if (!m_connected || m_state != crawling::DriveState::Enabled) {
+        appendLog(QStringLiteral("自动纠偏启动失败：请先连接并使能底盘"));
+        return;
+    }
+    if (!m_laserConnected) {
+        appendLog(QStringLiteral("自动纠偏启动失败：激光设备未连接"));
+        return;
+    }
+
+    crawling::LaserCorrectionSettings settings;
+    settings.targetSpeedMps = m_correctionSpeed->value() / kMillimetersPerMeter;
+    settings.segmentLengthM = m_correctionSegment->value() / kMillimetersPerMeter;
+    settings.proportionalGain = m_correctionKp->value();
+    settings.derivativeGain = m_correctionKd->value();
+    settings.wheelRadiusM = m_settings.wheelRadiusM;
+    settings.trackWidthM = m_settings.trackWidthM;
+    settings.detector.profileTuning = m_profileWeldTuning;
+    settings.detector.profileTemplates = m_profileTemplates;
+    settings.minimumInnerWheelRatio = m_settings.minimumInnerWheelRatio;
+
+    const double synchronizedLimit =
+        crawling::WheelMotorConfig::kMaximumSynchronizedMotorSpeedDps *
+        settings.wheelRadiusM * kRadiansPerDegree /
+        m_settings.motorOutputToWheelRatio;
+    const double speedLimit =
+        std::min({m_settings.maximumLinearSpeedMps,
+                  m_settings.maximumWheelSpeedMps, synchronizedLimit});
+    if (!std::isfinite(speedLimit) || settings.targetSpeedMps <= 0.0 ||
+        settings.targetSpeedMps > speedLimit) {
+        appendLog(QStringLiteral("自动纠偏速度超过当前底盘上限，未启动"));
+        return;
+    }
+
+    m_forward = m_reverse = m_left = m_right = false;
+    m_autoCorrectionActive = true;
+    m_autoCorrectionStartPending = true;
+    m_autoCorrectionStart->setEnabled(false);
+    m_autoCorrectionStop->setEnabled(true);
+    m_correctionStatus->setText(QStringLiteral("启动准备：等待激光轮廓流"));
+    QMetaObject::invokeMethod(m_correctionController, "setSettings",
+                              Qt::QueuedConnection,
+                              Q_ARG(crawling::LaserCorrectionSettings, settings));
+    QSettings persistent(crawling::DriveSettings::persistentFilePath(),
+                         QSettings::IniFormat);
+    persistent.setValue(QStringLiteral("laserCorrection/speed"),
+                        settings.targetSpeedMps);
+    persistent.setValue(QStringLiteral("laserCorrection/segmentLength"),
+                        settings.segmentLengthM);
+    persistent.setValue(QStringLiteral("laserCorrection/kp"),
+                        settings.proportionalGain);
+    persistent.setValue(QStringLiteral("laserCorrection/kd"),
+                        settings.derivativeGain);
+    persistent.sync();
+    QMetaObject::invokeMethod(m_sensorController, "prepareCorrectionProfile",
+                              Qt::QueuedConnection);
+    appendLog(QStringLiteral("已请求启动自动纠偏，等待激光轮廓流"));
+}
+
+void RobotControlPanel::stopAutoCorrection()
+{
+    if (!m_correctionController)
+        return;
+    m_autoCorrectionStartPending = false;
+    const bool wasActive = m_autoCorrectionActive;
+    m_autoCorrectionActive = false;
+    m_autoCorrectionStart->setEnabled(true);
+    m_autoCorrectionStop->setEnabled(false);
+    QMetaObject::invokeMethod(m_correctionController, "setEnabled",
+                              Qt::QueuedConnection, Q_ARG(bool, false));
+    if (m_sensorController)
+        QMetaObject::invokeMethod(m_sensorController, "restoreOriginalPreview",
+                                  Qt::QueuedConnection);
+    if (wasActive)
+        appendLog(QStringLiteral("自动纠偏已停止"));
+    if (m_correctionStatus)
+        m_correctionStatus->setText(QStringLiteral("未启动"));
+}
+
+void RobotControlPanel::updateCorrectionStatus(
+    const crawling::LaserCorrectionStatus &status)
+{
+    if (!m_correctionStatus)
+        return;
+    if (!status.active) {
+        m_correctionStatus->setText(status.reason.isEmpty()
+                                         ? QStringLiteral("未启动")
+                                         : status.reason);
+        return;
+    }
+    m_correctionStatus->setText(
+        QStringLiteral("%1；焊道%2；置信度 %3；线速度 %4 mm/s；角速度 %5 deg/s")
+            .arg(status.phase.isEmpty() ? QStringLiteral("运行中") : status.phase)
+            .arg(status.gapValid ? QStringLiteral("已定位") : QStringLiteral("等待定位"))
+            .arg(status.confidence, 0, 'f', 2)
+            .arg(status.linearCommandMps * kMillimetersPerMeter, 0, 'f', 1)
+            .arg(status.angularCommandRadps * kDegreesPerRadian, 0, 'f', 2));
 }
 
 void RobotControlPanel::updateUsbDevices(const QStringList &devices)
@@ -1316,6 +2122,7 @@ void RobotControlPanel::setStateStyle(crawling::DriveState state)
 
 void RobotControlPanel::updateInformationDialog()
 {
+    emitVehicleStatus();
     if (!m_infoDialog)
         return;
     const auto setLabel = [](QLabel *label, const QString &text) {
@@ -1340,6 +2147,27 @@ void RobotControlPanel::updateInformationDialog()
     setLabel(m_dialogRightWheel, m_rightWheelText);
     setLabel(m_dialogFeedback, m_feedbackText);
     setLabel(m_dialogSync, m_syncText);
+}
+
+void RobotControlPanel::emitVehicleStatus()
+{
+    // 顺序固定（12 项）：运行状态/状态说明/适配器/目标运动/实际运动/
+    // 左轮/右轮/反馈看门狗/双轮同步/IMU/激光/USB。
+    const QStringList metrics{
+        crawling::driveStateText(m_state),
+        m_reasonText,
+        m_connected ? QStringLiteral("适配器已连接") : QStringLiteral("适配器未连接"),
+        m_targetText,
+        m_appliedText,
+        m_leftWheelText,
+        m_rightWheelText,
+        m_feedbackText,
+        m_syncText,
+        m_imuText,
+        m_laserText,
+        m_usbStatus ? m_usbStatus->text() : m_usbText,
+    };
+    emit vehicleStatusChanged(metrics);
 }
 
 void RobotControlPanel::showInformationDialog(QWidget *parent)
@@ -1399,4 +2227,20 @@ void RobotControlPanel::resizeEvent(QResizeEvent *event)
     QWidget::resizeEvent(event);
     if (!m_usbImage.isNull())
         setUsbCameraImage(m_usbImage);
+}
+
+void RobotControlPanel::changeEvent(QEvent *event)
+{
+    QWidget::changeEvent(event);
+    if (event == nullptr ||
+        (event->type() != QEvent::WindowDeactivate &&
+         event->type() != QEvent::ApplicationDeactivate)) {
+        return;
+    }
+    if (m_autoCorrectionActive)
+        stopAutoCorrection();
+    const bool wasJogging = m_forward || m_reverse || m_left || m_right;
+    m_forward = m_reverse = m_left = m_right = false;
+    if (wasJogging)
+        sendMotionCommand();
 }

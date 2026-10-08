@@ -11,6 +11,84 @@ constexpr int kFeedbackReplyWaitMs = 20;
 constexpr int kInterByteWaitMs = 2;
 constexpr int kPositionReplyWaitMs = 20;
 constexpr double kHoldMaximumMotorSpeedDps = 360.0;
+constexpr int kCanAckWaitMs = 15;
+
+QByteArray slcanBitrateCommand(int bitrate) {
+  switch (bitrate) {
+    case 125000: return "S4\r";
+    case 250000: return "S5\r";
+    case 500000: return "S6\r";
+    case 800000: return "S7\r";
+    case 1000000: return "S8\r";
+    default: return {};
+  }
+}
+
+QByteArray encodeSlcanFrame(const CanFrame& frame) {
+  if (frame.id > 0x7FFU) {
+    return {};
+  }
+  QByteArray encoded =
+      QStringLiteral("t%1%2")
+          .arg(frame.id, 3, 16, QLatin1Char('0'))
+          .arg(8, 1, 16, QLatin1Char('0'))
+          .toUpper()
+          .toLatin1();
+  encoded[0] = 't';
+  for (const std::uint8_t byte : frame.data) {
+    encoded.append(QStringLiteral("%1").arg(byte, 2, 16, QLatin1Char('0'))
+                       .toUpper()
+                       .toLatin1());
+  }
+  encoded.append('\r');
+  return encoded;
+}
+
+bool parseSlcanHex(const QByteArray& input, int* value) {
+  bool okay = false;
+  const int parsed = input.toInt(&okay, 16);
+  if (okay) {
+    *value = parsed;
+  }
+  return okay;
+}
+
+bool takeSlcanFrame(QByteArray* buffer, CanFrame* frame) {
+  if (buffer == nullptr || frame == nullptr) {
+    return false;
+  }
+  while (true) {
+    const int terminator = buffer->indexOf('\r');
+    if (terminator < 0) {
+      return false;
+    }
+    const QByteArray line = buffer->left(terminator);
+    buffer->remove(0, terminator + 1);
+    if (line.size() != 21 || (line.at(0) != 't' && line.at(0) != 'T')) {
+      continue;
+    }
+    int id = 0;
+    int length = 0;
+    if (!parseSlcanHex(line.mid(1, 3), &id) ||
+        !parseSlcanHex(line.mid(4, 1), &length) || length != 8) {
+      continue;
+    }
+    frame->id = static_cast<std::uint32_t>(id);
+    bool valid = true;
+    for (int index = 0; index < length; ++index) {
+      int byte = 0;
+      if (!parseSlcanHex(line.mid(5 + index * 2, 2), &byte)) {
+        valid = false;
+        break;
+      }
+      frame->data[static_cast<std::size_t>(index)] =
+          static_cast<std::uint8_t>(byte);
+    }
+    if (valid) {
+      return true;
+    }
+  }
+}
 
 }  // namespace
 
@@ -25,14 +103,22 @@ bool WheelMotorController::initialize(const WheelMotorConfig& config,
   }
   shutdown();
   config_ = config;
+  canMode_ = config_.communicationMode == WheelCommunicationMode::Can;
   const bool samePort = config_.leftSerialPort.trimmed().compare(
                             config_.rightSerialPort.trimmed(), Qt::CaseInsensitive) == 0;
-  if (config_.leftSerialPort.trimmed().isEmpty() || config_.rightSerialPort.trimmed().isEmpty() ||
-      config_.leftBaudRate <= 0 || config_.rightBaudRate <= 0 ||
+  const bool transportInvalid =
+      canMode_
+          ? config_.canSerialPort.trimmed().isEmpty() ||
+                config_.canSerialBaudRate <= 0 ||
+                slcanBitrateCommand(config_.canBitrate).isEmpty()
+          : config_.leftSerialPort.trimmed().isEmpty() ||
+                config_.rightSerialPort.trimmed().isEmpty() ||
+                config_.leftBaudRate <= 0 || config_.rightBaudRate <= 0 ||
+                (samePort && config_.leftBaudRate != config_.rightBaudRate);
+  if (transportInvalid ||
       config_.leftMotorId < 1 || config_.leftMotorId > 32 ||
       config_.rightMotorId < 1 || config_.rightMotorId > 32 ||
-      (samePort && config_.leftBaudRate != config_.rightBaudRate) ||
-      (samePort && config_.leftMotorId == config_.rightMotorId) ||
+      ((canMode_ || samePort) && config_.leftMotorId == config_.rightMotorId) ||
       (config_.leftDirectionSign != -1 && config_.leftDirectionSign != 1) ||
       (config_.rightDirectionSign != -1 && config_.rightDirectionSign != 1) ||
       config_.wheelRadiusM <= 0.0 || !std::isfinite(config_.wheelRadiusM) ||
@@ -42,7 +128,7 @@ bool WheelMotorController::initialize(const WheelMotorConfig& config,
       !std::isfinite(config_.maximumWheelSpeedMps) ||
       config_.maximumMotorSpeedDps <= 0.0 ||
       !std::isfinite(config_.maximumMotorSpeedDps)) {
-    setError(errorMessage, QStringLiteral("Invalid MWD RS485 wheel motor configuration"));
+    setError(errorMessage, QStringLiteral("Invalid wheel motor configuration"));
     return false;
   }
 
@@ -68,14 +154,48 @@ bool WheelMotorController::initialize(const WheelMotorConfig& config,
     return true;
   };
   QString portOpenError;
-  sharedPort_ = samePort;
-  if (!openPort(config_.leftSerialPort, config_.leftBaudRate, &leftSerialPort_, &portOpenError) ||
-      (!sharedPort_ &&
-       !openPort(config_.rightSerialPort, config_.rightBaudRate, &rightSerialPort_, &portOpenError))) {
+  sharedPort_ = !canMode_ && samePort;
+  if (canMode_) {
+    if (!openPort(config_.canSerialPort, config_.canSerialBaudRate,
+                  &canSerialPort_, &portOpenError)) {
+      setError(errorMessage,
+               QStringLiteral("Cannot open wheel CAN SLCAN port: %1")
+                   .arg(portOpenError));
+      return false;
+    }
+    const auto writeControl = [this](const QByteArray& command) {
+      if (canSerialPort_->write(command) != command.size() ||
+          !canSerialPort_->waitForBytesWritten(100)) {
+        return false;
+      }
+      QByteArray reply;
+      if (canSerialPort_->waitForReadyRead(100)) {
+        reply = canSerialPort_->readAll();
+      }
+      return !reply.contains('\a');
+    };
+    if (!writeControl("C\r") ||
+        !writeControl(slcanBitrateCommand(config_.canBitrate)) ||
+        !writeControl("M0\r") || !writeControl("A0\r") ||
+        !writeControl("O\r")) {
+      canSerialPort_->close();
+      canSerialPort_.reset();
+      setError(errorMessage,
+               QStringLiteral("Failed to initialize the wheel CAN SLCAN adapter"));
+      return false;
+    }
+    canSerialPort_->clear(QSerialPort::AllDirections);
+    canReceiveBuffer_.clear();
+  } else if (!openPort(config_.leftSerialPort, config_.leftBaudRate,
+                       &leftSerialPort_, &portOpenError) ||
+             (!sharedPort_ &&
+              !openPort(config_.rightSerialPort, config_.rightBaudRate,
+                        &rightSerialPort_, &portOpenError))) {
     if (leftSerialPort_ != nullptr) leftSerialPort_->close();
     if (rightSerialPort_ != nullptr) rightSerialPort_->close();
     setError(errorMessage,
-             QStringLiteral("Cannot open MWD RS485 wheel port: %1").arg(portOpenError));
+             QStringLiteral("Cannot open MWD RS485 wheel port: %1")
+                 .arg(portOpenError));
     return false;
   }
   leftReceiveBuffer_.clear();
@@ -84,6 +204,8 @@ bool WheelMotorController::initialize(const WheelMotorConfig& config,
   rightFeedback_ = {};
   leftFeedbackUpdated_ = false;
   rightFeedbackUpdated_ = false;
+  leftCanFeedbackUpdated_ = false;
+  rightCanFeedbackUpdated_ = false;
   leftEncoderValue_ = 0;
   rightEncoderValue_ = 0;
   leftAngleHundredthDegree_ = 0;
@@ -93,7 +215,15 @@ bool WheelMotorController::initialize(const WheelMotorConfig& config,
   rightRunning_ = true;
   lastLeftCommandDps_ = 0;
   lastRightCommandDps_ = 0;
-  if (!stop()) {
+  if (canMode_) {
+    leftRunning_ = false;
+    rightRunning_ = false;
+    if (!stop()) {
+      shutdown();
+      setError(errorMessage, QStringLiteral("Failed to stop CAN wheel motors"));
+      return false;
+    }
+  } else if (!stop()) {
     shutdown();
     setError(errorMessage,
              QStringLiteral("Failed to stop and hold MWD RS485 motors on %1 and %2")
@@ -104,15 +234,22 @@ bool WheelMotorController::initialize(const WheelMotorConfig& config,
 }
 
 void WheelMotorController::shutdown() {
-  if (initialized_ && !isStopped()) {
+  if (initialized_ && !isStopped() && !canMode_) {
     stop();
   }
+  if (canSerialPort_ != nullptr && canSerialPort_->isOpen()) {
+    canSerialPort_->write("C\r");
+    canSerialPort_->waitForBytesWritten(50);
+    canSerialPort_->close();
+  }
+  canSerialPort_.reset();
   if (leftSerialPort_ != nullptr && leftSerialPort_->isOpen()) leftSerialPort_->close();
   if (rightSerialPort_ != nullptr && rightSerialPort_->isOpen()) rightSerialPort_->close();
   leftSerialPort_.reset();
   rightSerialPort_.reset();
   initialized_ = false;
   sharedPort_ = false;
+  canMode_ = config_.communicationMode == WheelCommunicationMode::Can;
   leftRunning_ = false;
   rightRunning_ = false;
   lastLeftCommandDps_ = 0;
@@ -121,8 +258,11 @@ void WheelMotorController::shutdown() {
   lastRightHoldAngleHundredthDegree_ = 0;
   leftReceiveBuffer_.clear();
   rightReceiveBuffer_.clear();
+  canReceiveBuffer_.clear();
   leftFeedbackUpdated_ = false;
   rightFeedbackUpdated_ = false;
+  leftCanFeedbackUpdated_ = false;
+  rightCanFeedbackUpdated_ = false;
   leftEncoderValue_ = 0;
   rightEncoderValue_ = 0;
   leftAngleHundredthDegree_ = 0;
@@ -152,10 +292,16 @@ bool WheelMotorController::sendSpeed(bool leftMotor, std::uint8_t motorId,
   int* lastCommandDps = leftMotor ? &lastLeftCommandDps_
                                   : &lastRightCommandDps_;
   *lastCommandDps = speedDps;
-  const QByteArray speedFrame = MwdRs485Protocol::speedCommand(motorId, speedDps);
-  const bool sent = !speedFrame.isEmpty() &&
-                    sendCommand(leftMotor, MwdRs485Protocol::kSpeedClosedLoop, motorId,
-                                speedFrame.mid(4, 7));
+  bool sent = false;
+  if (canMode_) {
+    sent = sendCanFrame(
+        ServoProtocol::speedCommand(motorId, static_cast<double>(speedDps)));
+  } else {
+    const QByteArray speedFrame = MwdRs485Protocol::speedCommand(motorId, speedDps);
+    sent = !speedFrame.isEmpty() &&
+           sendCommand(leftMotor, MwdRs485Protocol::kSpeedClosedLoop, motorId,
+                       speedFrame.mid(4, 7));
+  }
   if (sent) {
     *running = true;
   }
@@ -165,6 +311,21 @@ bool WheelMotorController::sendSpeed(bool leftMotor, std::uint8_t motorId,
 bool WheelMotorController::stop() {
   if (!initialized_) {
     return false;
+  }
+  if (canMode_) {
+    const bool leftSent = sendCanFrame(
+        ServoProtocol::stopCommand(config_.leftMotorId));
+    const bool rightSent = sendCanFrame(
+        ServoProtocol::stopCommand(config_.rightMotorId));
+    if (leftSent) {
+      leftRunning_ = false;
+      lastLeftCommandDps_ = 0;
+    }
+    if (rightSent) {
+      rightRunning_ = false;
+      lastRightCommandDps_ = 0;
+    }
+    return leftSent && rightSent;
   }
   const bool leftSent = sendCommand(true, MwdRs485Protocol::kMotorStop, config_.leftMotorId);
   const bool rightSent = sendCommand(false, MwdRs485Protocol::kMotorStop, config_.rightMotorId);
@@ -191,6 +352,21 @@ bool WheelMotorController::reset() {
   if (!initialized_) {
     return false;
   }
+  if (canMode_) {
+    const bool leftSent = sendCanFrame(
+        ServoProtocol::systemResetCommand(config_.leftMotorId));
+    const bool rightSent = sendCanFrame(
+        ServoProtocol::systemResetCommand(config_.rightMotorId));
+    if (leftSent) {
+      leftRunning_ = false;
+      lastLeftCommandDps_ = 0;
+    }
+    if (rightSent) {
+      rightRunning_ = false;
+      lastRightCommandDps_ = 0;
+    }
+    return leftSent && rightSent;
+  }
   const bool leftSent =
       sendCommand(true, MwdRs485Protocol::kSystemReset, config_.leftMotorId);
   const bool rightSent =
@@ -208,6 +384,9 @@ bool WheelMotorController::reset() {
 
 bool WheelMotorController::pollFeedback(WheelMotorFeedback* feedback,
                                         bool requestStatus) {
+  if (canMode_) {
+    return pollCanFeedback(requestStatus, feedback);
+  }
   if (!initialized_ || serialPortFor(true) == nullptr || serialPortFor(false) == nullptr ||
       !serialPortFor(true)->isOpen() || !serialPortFor(false)->isOpen() ||
       feedback == nullptr) {
@@ -340,6 +519,111 @@ bool WheelMotorController::pollFeedback(WheelMotorFeedback* feedback,
   return leftFeedbackUpdated_ || rightFeedbackUpdated_;
 }
 
+bool WheelMotorController::pollCanFeedback(bool requestStatus,
+                                           WheelMotorFeedback* feedback) {
+  if (canSerialPort_ == nullptr || !canSerialPort_->isOpen() ||
+      feedback == nullptr) {
+    return false;
+  }
+  leftCanFeedbackUpdated_ = false;
+  rightCanFeedbackUpdated_ = false;
+  const auto consume = [this] {
+    CanFrame frame;
+    while (takeSlcanFrame(&canReceiveBuffer_, &frame)) {
+      if (const auto parsed = ServoProtocol::parseFeedback(frame);
+          parsed.has_value()) {
+        if (parsed->motorId == config_.leftMotorId) {
+          leftCanFeedback_ = *parsed;
+          leftCanFeedbackUpdated_ = true;
+        } else if (parsed->motorId == config_.rightMotorId) {
+          rightCanFeedback_ = *parsed;
+          rightCanFeedbackUpdated_ = true;
+        }
+      }
+      if (const auto angle = ServoProtocol::parseMultiTurnAngle(frame);
+          angle.has_value()) {
+        if (frame.id == ServoProtocol::kFeedbackIdBase +
+                            config_.leftMotorId) {
+          leftAngleHundredthDegree_ = *angle;
+        } else if (frame.id == ServoProtocol::kFeedbackIdBase +
+                                   config_.rightMotorId) {
+          rightAngleHundredthDegree_ = *angle;
+        }
+      }
+      if (const auto encoder =
+              ServoProtocol::parseMultiTurnEncoderPosition(frame);
+          encoder.has_value()) {
+        if (frame.id == ServoProtocol::kFeedbackIdBase +
+                            config_.leftMotorId) {
+          leftEncoderValue_ = *encoder;
+        } else if (frame.id == ServoProtocol::kFeedbackIdBase +
+                                   config_.rightMotorId) {
+          rightEncoderValue_ = *encoder;
+        }
+      }
+    }
+  };
+  canReceiveBuffer_.append(canSerialPort_->readAll());
+  consume();
+
+  const auto sendRequest = [this](std::uint8_t motorId,
+                                  std::uint8_t command) {
+    CanFrame frame;
+    frame.id = ServoProtocol::kCommandIdBase + motorId;
+    frame.data[0] = command;
+    return sendCanFrame(frame);
+  };
+  const auto collectReply = [this, &consume] {
+    if (canSerialPort_->waitForReadyRead(kCanAckWaitMs)) {
+      canReceiveBuffer_.append(canSerialPort_->readAll());
+      consume();
+    }
+  };
+  if (requestStatus) {
+    if (!leftCanFeedbackUpdated_ &&
+        sendRequest(config_.leftMotorId, ServoProtocol::kSpeedFeedbackQuery)) {
+      collectReply();
+    }
+    if (!rightCanFeedbackUpdated_ &&
+        sendRequest(config_.rightMotorId, ServoProtocol::kSpeedFeedbackQuery)) {
+      collectReply();
+    }
+  }
+  if (!leftCanFeedbackUpdated_) {
+    sendRequest(config_.leftMotorId, ServoProtocol::kSpeedFeedbackQuery);
+    collectReply();
+  }
+  if (!rightCanFeedbackUpdated_) {
+    sendRequest(config_.rightMotorId, ServoProtocol::kSpeedFeedbackQuery);
+    collectReply();
+  }
+
+  const double positionScale = config_.wheelRadiusM * kPi / 18000.0 /
+                               config_.motorOutputToWheelRatio;
+  const double speedScale = config_.wheelRadiusM * kPi / 180.0 /
+                            config_.motorOutputToWheelRatio;
+  feedback->leftUpdated = leftCanFeedbackUpdated_;
+  feedback->rightUpdated = rightCanFeedbackUpdated_;
+  feedback->valid = leftCanFeedbackUpdated_ && rightCanFeedbackUpdated_;
+  feedback->leftEncoder = leftEncoderValue_;
+  feedback->rightEncoder = rightEncoderValue_;
+  feedback->leftPositionM = leftAngleHundredthDegree_ * positionScale *
+                            config_.leftDirectionSign;
+  feedback->rightPositionM = rightAngleHundredthDegree_ * positionScale *
+                             config_.rightDirectionSign;
+  feedback->leftMotorSpeedDps =
+      leftCanFeedback_.outputSpeedDps * config_.leftDirectionSign;
+  feedback->rightMotorSpeedDps =
+      rightCanFeedback_.outputSpeedDps * config_.rightDirectionSign;
+  feedback->leftMotorControlValue = leftCanFeedback_.torqueCurrentA;
+  feedback->rightMotorControlValue = rightCanFeedback_.torqueCurrentA;
+  feedback->leftSpeedMps = feedback->leftMotorSpeedDps * speedScale;
+  feedback->rightSpeedMps = feedback->rightMotorSpeedDps * speedScale;
+  feedback->leftTemperatureC = leftCanFeedback_.temperatureC;
+  feedback->rightTemperatureC = rightCanFeedback_.temperatureC;
+  return leftCanFeedbackUpdated_ || rightCanFeedbackUpdated_;
+}
+
 bool WheelMotorController::resolvePort(const QString& specification, QString* serialPort,
                                        QString* errorMessage) {
   if (serialPort == nullptr) {
@@ -376,6 +660,27 @@ bool WheelMotorController::sendCommand(bool leftMotor, std::uint8_t command,
   }
   if (port->waitForReadyRead(2)) {
     receiveBuffer.append(port->readAll());
+  }
+  return true;
+}
+
+bool WheelMotorController::sendCanFrame(const CanFrame& frame) {
+  if (!canMode_ || canSerialPort_ == nullptr ||
+      !canSerialPort_->isOpen()) {
+    return false;
+  }
+  const QByteArray encoded = encodeSlcanFrame(frame);
+  if (encoded.isEmpty() ||
+      canSerialPort_->write(encoded) != encoded.size() ||
+      !canSerialPort_->waitForBytesWritten(20)) {
+    return false;
+  }
+  if (canSerialPort_->waitForReadyRead(kCanAckWaitMs)) {
+    const QByteArray response = canSerialPort_->readAll();
+    if (response.contains('\a')) {
+      return false;
+    }
+    canReceiveBuffer_.append(response);
   }
   return true;
 }

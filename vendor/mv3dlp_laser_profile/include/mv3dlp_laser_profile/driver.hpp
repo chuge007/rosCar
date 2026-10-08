@@ -74,11 +74,14 @@ public:
     void startAcquisition();
     void stopAcquisition();
     bool isAcquiring() const noexcept;
+    std::array<std::uint64_t, 2> callbackCounts() const noexcept;
 
     void clearBuffer();
 
     void setAcquisitionMode(AcquisitionMode mode);
+    std::vector<std::uint32_t> supportedAcquisitionModes() const;
     void setBoolParam(std::string_view key, bool value);
+    std::int64_t getIntParam(std::string_view key) const;
     void setIntParam(std::string_view key, std::int64_t value);
     void setFloatParam(std::string_view key, float value);
     void setEnumParam(std::string_view key, std::uint32_t value);

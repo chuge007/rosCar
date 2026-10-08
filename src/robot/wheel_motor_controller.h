@@ -1,6 +1,8 @@
 #pragma once
 
+#include "drive_settings.h"
 #include "mwd_rs485_protocol.h"
+#include "servo_protocol.h"
 
 #include <QByteArray>
 #include <QSerialPort>
@@ -12,11 +14,15 @@
 
 namespace crawling {
 
-// The two wheel motors may use separate MWD RS485 adapters. Motor IDs are
-// scoped to their configured serial port (1..32), not globally to the robot.
+// Wheel motors can be driven through the V3.8 CAN bus or the V3.8 RS485 bus.
+// Both transports use the same motor command IDs and direction conversion.
 struct WheelMotorConfig {
   static constexpr double kMaximumSynchronizedMotorSpeedDps = 4300.0;
 
+  WheelCommunicationMode communicationMode = WheelCommunicationMode::Can;
+  QString canSerialPort;
+  int canSerialBaudRate = 115200;
+  int canBitrate = 1000000;
   QString leftSerialPort;
   int leftBaudRate = 115200;
   QString rightSerialPort;
@@ -52,7 +58,7 @@ struct WheelMotorFeedback {
   int rightTemperatureC = 0;
 };
 
-// Small synchronous adapter for the MWD RS485 protocol. The controller is
+// Small synchronous adapter for both V3.8 transports. The controller is
 // intentionally not a QObject; callers poll it from their existing timer.
 class WheelMotorController final {
  public:
@@ -91,6 +97,8 @@ class WheelMotorController final {
  private:
   bool sendCommand(bool leftMotor, std::uint8_t command, std::uint8_t motorId,
                    const QByteArray& data = {});
+  bool sendCanFrame(const CanFrame& frame);
+  bool pollCanFeedback(bool requestStatus, WheelMotorFeedback* feedback);
   bool holdCurrentPosition(bool leftMotor, std::uint8_t motorId,
                            std::int64_t* holdAngleHundredthDegree);
   bool sendSpeed(bool leftMotor, std::uint8_t motorId, double wheelMps,
@@ -104,10 +112,13 @@ class WheelMotorController final {
   WheelMotorConfig config_;
   std::unique_ptr<QSerialPort> leftSerialPort_;
   std::unique_ptr<QSerialPort> rightSerialPort_;
+  std::unique_ptr<QSerialPort> canSerialPort_;
+  QByteArray canReceiveBuffer_;
   QByteArray leftReceiveBuffer_;
   QByteArray rightReceiveBuffer_;
   bool initialized_ = false;
   bool sharedPort_ = false;
+  bool canMode_ = true;
   bool leftRunning_ = false;
   bool rightRunning_ = false;
   int lastLeftCommandDps_ = 0;
@@ -116,6 +127,10 @@ class WheelMotorController final {
   std::int64_t lastRightHoldAngleHundredthDegree_ = 0;
   MwdMotorFeedback leftFeedback_;
   MwdMotorFeedback rightFeedback_;
+  ServoFeedback leftCanFeedback_;
+  ServoFeedback rightCanFeedback_;
+  bool leftCanFeedbackUpdated_ = false;
+  bool rightCanFeedbackUpdated_ = false;
   bool leftFeedbackUpdated_ = false;
   bool rightFeedbackUpdated_ = false;
   std::int32_t leftEncoderValue_ = 0;

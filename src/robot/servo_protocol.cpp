@@ -23,6 +23,17 @@ std::int16_t readInt16LittleEndian(const std::array<std::uint8_t, 8>& data,
   return static_cast<std::int16_t>(raw);
 }
 
+std::int32_t readInt32LittleEndian(const std::array<std::uint8_t, 8>& data,
+                                   int offset) {
+  std::uint32_t raw = 0;
+  for (int index = 0; index < 4; ++index) {
+    raw |= static_cast<std::uint32_t>(
+               data[static_cast<std::size_t>(offset + index)])
+           << (8 * index);
+  }
+  return static_cast<std::int32_t>(raw);
+}
+
 }  // namespace
 
 CanFrame ServoProtocol::speedCommand(std::uint8_t motorId, double outputSpeedDps) {
@@ -30,7 +41,7 @@ CanFrame ServoProtocol::speedCommand(std::uint8_t motorId, double outputSpeedDps
   frame.id = kCommandIdBase + motorId;
   frame.data[0] = kSpeedClosedLoop;
   const double bounded = std::clamp(std::round(std::isfinite(outputSpeedDps)
-                                                    ? outputSpeedDps * 100.0
+                                                    ? outputSpeedDps
                                                     : 0.0),
                                       static_cast<double>(std::numeric_limits<std::int32_t>::min()),
                                       static_cast<double>(std::numeric_limits<std::int32_t>::max()));
@@ -72,6 +83,24 @@ std::optional<ServoFeedback> ServoProtocol::parseFeedback(const CanFrame& frame)
   feedback.outputSpeedDps = readInt16LittleEndian(frame.data, 4);
   feedback.outputAngleDeg = readInt16LittleEndian(frame.data, 6);
   return feedback;
+}
+
+std::optional<std::int32_t> ServoProtocol::parseMultiTurnEncoderPosition(
+    const CanFrame& frame) {
+  if (frame.id <= kFeedbackIdBase || frame.id > kFeedbackIdBase + 32 ||
+      frame.data[0] != 0x60) {
+    return std::nullopt;
+  }
+  return readInt32LittleEndian(frame.data, 4);
+}
+
+std::optional<std::int32_t> ServoProtocol::parseMultiTurnAngle(
+    const CanFrame& frame) {
+  if (frame.id <= kFeedbackIdBase || frame.id > kFeedbackIdBase + 32 ||
+      frame.data[0] != 0x92) {
+    return std::nullopt;
+  }
+  return readInt32LittleEndian(frame.data, 4);
 }
 
 std::optional<ServoStatus> ServoProtocol::parseStatus(const CanFrame& frame) {

@@ -28,6 +28,11 @@ bool isSupportedMwdRs485BaudRate(int baudRate) {
       baudRate == 1000000 || baudRate == 1500000 || baudRate == 2500000;
 }
 
+bool isSupportedCanBitrate(int bitrate) {
+  return bitrate == 125000 || bitrate == 250000 || bitrate == 500000 ||
+      bitrate == 800000 || bitrate == 1000000;
+}
+
 bool approximately(double actual, double expected) {
   return std::abs(actual - expected) <= 1e-9;
 }
@@ -61,23 +66,38 @@ QString DriveSettings::persistentFilePath() {
 }
 
 QString DriveSettings::validationError() const {
-  if (leftMotorId < 1 || leftMotorId > 32 || rightMotorId < 1 || rightMotorId > 32) {
-    return QStringLiteral("Motor RS485 IDs must be in the range 1..32.");
+  if (wheelCommunicationMode == WheelCommunicationMode::Can) {
+    if (wheelCanSerialPort.trimmed().isEmpty()) {
+      return QStringLiteral("Select the SLCAN serial port for wheel CAN.");
+    }
+    if (wheelCanSerialBaudRate <= 0) {
+      return QStringLiteral("Wheel CAN adapter baud rate must be positive.");
+    }
+    if (!isSupportedCanBitrate(wheelCanBitrate)) {
+      return QStringLiteral(
+          "Wheel CAN bitrate must be 125000, 250000, 500000, 800000, or 1000000.");
+    }
   }
-  if (!leftMotorSerialPort.trimmed().isEmpty() && !rightMotorSerialPort.trimmed().isEmpty() &&
+  if (leftMotorId < 1 || leftMotorId > 32 || rightMotorId < 1 || rightMotorId > 32) {
+    return QStringLiteral("Motor IDs must be in the range 1..32.");
+  }
+  if (wheelCommunicationMode == WheelCommunicationMode::Rs485 &&
+      !leftMotorSerialPort.trimmed().isEmpty() && !rightMotorSerialPort.trimmed().isEmpty() &&
       leftMotorSerialPort.trimmed().compare(rightMotorSerialPort.trimmed(), Qt::CaseInsensitive) == 0) {
     if (leftMotorId == rightMotorId) {
-      return QStringLiteral("Two motors cannot use the same RS485 ID on the same port.");
+      return QStringLiteral("Two motors cannot use the same ID on the same port.");
     }
     if (leftMotorBaudRate != rightMotorBaudRate) {
       return QStringLiteral("Motors sharing one RS485 port must use the same baud rate.");
     }
   }
-  if (leftMotorBaudRate <= 0 || rightMotorBaudRate <= 0) {
+  if (wheelCommunicationMode == WheelCommunicationMode::Rs485 &&
+      (leftMotorBaudRate <= 0 || rightMotorBaudRate <= 0)) {
     return QStringLiteral("Motor RS485 baud rates must be positive.");
   }
-  if (!isSupportedMwdRs485BaudRate(leftMotorBaudRate) ||
-      !isSupportedMwdRs485BaudRate(rightMotorBaudRate)) {
+  if (wheelCommunicationMode == WheelCommunicationMode::Rs485 &&
+      (!isSupportedMwdRs485BaudRate(leftMotorBaudRate) ||
+       !isSupportedMwdRs485BaudRate(rightMotorBaudRate))) {
     return QStringLiteral(
         "MWD V3.8 motor RS485 baud rates must be 115200, 500000, "
         "1000000, 1500000, or 2500000.");
@@ -145,6 +165,15 @@ void DriveSettings::save(QSettings& settings) const {
   settings.setValue(CRAWLING_TEXT("clampXMotorSign"), clampXMotorSign);
   settings.setValue(CRAWLING_TEXT("clampYMotorSign"), clampYMotorSign);
   settings.setValue(CRAWLING_TEXT("clampZMotorSign"), clampZMotorSign);
+  settings.setValue(
+      CRAWLING_TEXT("wheelCommunicationMode"),
+      wheelCommunicationMode == WheelCommunicationMode::Can
+          ? CRAWLING_TEXT("can")
+          : CRAWLING_TEXT("rs485"));
+  settings.setValue(CRAWLING_TEXT("wheelCanSerialPort"), wheelCanSerialPort);
+  settings.setValue(CRAWLING_TEXT("wheelCanSerialBaudRate"),
+                    wheelCanSerialBaudRate);
+  settings.setValue(CRAWLING_TEXT("wheelCanBitrate"), wheelCanBitrate);
   settings.setValue(CRAWLING_TEXT("leftMotorId"), leftMotorId);
   settings.setValue(CRAWLING_TEXT("rightMotorId"), rightMotorId);
   settings.setValue(CRAWLING_TEXT("leftMotorSerialPort"), leftMotorSerialPort);
@@ -215,6 +244,20 @@ DriveSettings DriveSettings::load(QSettings& settings) {
   value.clampXMotorSign = settings.value(CRAWLING_TEXT("clampXMotorSign"), value.clampXMotorSign).toInt() < 0 ? -1 : 1;
   value.clampYMotorSign = settings.value(CRAWLING_TEXT("clampYMotorSign"), value.clampYMotorSign).toInt() < 0 ? -1 : 1;
   value.clampZMotorSign = settings.value(CRAWLING_TEXT("clampZMotorSign"), value.clampZMotorSign).toInt() < 0 ? -1 : 1;
+  const QString wheelMode = settings.value(
+      CRAWLING_TEXT("wheelCommunicationMode"), CRAWLING_TEXT("can"))
+      .toString().trimmed().toLower();
+  value.wheelCommunicationMode =
+      wheelMode == CRAWLING_TEXT("rs485")
+          ? WheelCommunicationMode::Rs485
+          : WheelCommunicationMode::Can;
+  value.wheelCanSerialPort = settings.value(
+      CRAWLING_TEXT("wheelCanSerialPort"), value.wheelCanSerialPort).toString();
+  value.wheelCanSerialBaudRate = settings.value(
+      CRAWLING_TEXT("wheelCanSerialBaudRate"),
+      value.wheelCanSerialBaudRate).toInt();
+  value.wheelCanBitrate = settings.value(
+      CRAWLING_TEXT("wheelCanBitrate"), value.wheelCanBitrate).toInt();
   value.leftMotorId = settings.value(CRAWLING_TEXT("leftMotorId"), value.leftMotorId).toInt();
   value.rightMotorId = settings.value(CRAWLING_TEXT("rightMotorId"), value.rightMotorId).toInt();
   value.leftMotorSerialPort = settings.value(CRAWLING_TEXT("leftMotorSerialPort"), QString()).toString();

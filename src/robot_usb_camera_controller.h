@@ -4,10 +4,10 @@
 #include <QObject>
 #include <QStringList>
 
-#include <memory>
-
-class QTimer;
-namespace cv { class VideoCapture; }
+class QCamera;
+class QMediaCaptureSession;
+class QVideoFrame;
+class QVideoSink;
 
 namespace crawling {
 
@@ -31,12 +31,12 @@ class RobotUsbCameraController final : public QObject {
   void logMessage(const QString& message);
 
  private slots:
-  void captureFrame();
+  void handleVideoFrame(const QVideoFrame& frame);
 
  private:
-  QTimer* captureTimer_ = nullptr;
-  std::unique_ptr<cv::VideoCapture> capture_;
-  int failedReadCount_ = 0;
+  QCamera* camera_ = nullptr;
+  QMediaCaptureSession* captureSession_ = nullptr;
+  QVideoSink* videoSink_ = nullptr;
   bool flipHorizontal_ = false;
   bool flipVertical_ = false;
 };

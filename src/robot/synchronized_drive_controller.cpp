@@ -11,8 +11,8 @@ namespace {
 // The correction loop is fed by the raw image at roughly 20 Hz. A 100 ms
 // command period leaves the chassis moving several millimetres before a new
 // turn command reaches the motors, which is enough to overshoot a narrow weld.
-// Both wheels use independent RS485 ports, so 10 Hz leaves bus margin while
-// keeping the steering feedback responsive.
+// Ten hertz leaves enough margin for either the SLCAN adapter or the RS485
+// transport while keeping steering feedback responsive.
 constexpr int kMotorCommunicationIntervalMs = 100;
 constexpr double kMotionEpsilonMps = 1e-9;
 constexpr bool kMotorOutputEnabled = true;
@@ -37,13 +37,24 @@ void SynchronizedDriveController::startControlLoop() {
 }
 
 void SynchronizedDriveController::connectAdapter(const DriveSettings& settings) {
-  emit logMessage(QStringLiteral("event=connect_start module=DRIVE.MOTOR left_port=%1 left_baud=%2 left_id=%3 left_sign=%4 right_port=%5 right_baud=%6 right_id=%7 right_sign=%8 wheel_radius_m=%9 motor_to_wheel_ratio=%10")
-                      .arg(settings.leftMotorSerialPort).arg(settings.leftMotorBaudRate)
-                      .arg(settings.leftMotorId).arg(settings.leftMotorSign)
-                      .arg(settings.rightMotorSerialPort).arg(settings.rightMotorBaudRate)
-                      .arg(settings.rightMotorId).arg(settings.rightMotorSign)
-                      .arg(settings.wheelRadiusM, 0, 'f', 6)
-                      .arg(settings.motorOutputToWheelRatio, 0, 'f', 4));
+  const bool canMode =
+      settings.wheelCommunicationMode == WheelCommunicationMode::Can;
+  emit logMessage(
+      QStringLiteral("event=connect_start module=DRIVE.MOTOR mode=%1 left_port=%2 left_baud=%3 right_port=%4 right_baud=%5 can_port=%6 can_adapter_baud=%7 can_bitrate=%8 left_id=%9 left_sign=%10 right_id=%11 right_sign=%12 wheel_radius_m=%13 motor_to_wheel_ratio=%14")
+          .arg(canMode ? QStringLiteral("CAN") : QStringLiteral("RS485"),
+               settings.leftMotorSerialPort)
+          .arg(settings.leftMotorBaudRate)
+          .arg(settings.rightMotorSerialPort)
+          .arg(settings.rightMotorBaudRate)
+          .arg(settings.wheelCanSerialPort)
+          .arg(settings.wheelCanSerialBaudRate)
+          .arg(settings.wheelCanBitrate)
+          .arg(settings.leftMotorId)
+          .arg(settings.leftMotorSign)
+          .arg(settings.rightMotorId)
+          .arg(settings.rightMotorSign)
+          .arg(settings.wheelRadiusM, 0, 'f', 6)
+          .arg(settings.motorOutputToWheelRatio, 0, 'f', 4));
   if (state_ == DriveState::Enabled || state_ == DriveState::Arming) {
     requestEnable(false);
   }
@@ -65,13 +76,26 @@ void SynchronizedDriveController::connectAdapter(const DriveSettings& settings) 
 
   WheelMotorConfig motorConfig;
   QString portError;
-  if (!WheelMotorController::resolvePort(settings_.leftMotorSerialPort,
-                                          &motorConfig.leftSerialPort, &portError) ||
-      !WheelMotorController::resolvePort(settings_.rightMotorSerialPort,
-                                          &motorConfig.rightSerialPort, &portError)) {
-    enterFault(portError);
-    emit connectionChanged(false, portError);
-    return;
+  motorConfig.communicationMode = settings_.wheelCommunicationMode;
+  if (settings_.wheelCommunicationMode == WheelCommunicationMode::Can) {
+    if (!WheelMotorController::resolvePort(settings_.wheelCanSerialPort,
+                                           &motorConfig.canSerialPort,
+                                           &portError)) {
+      enterFault(portError);
+      emit connectionChanged(false, portError);
+      return;
+    }
+    motorConfig.canSerialBaudRate = settings_.wheelCanSerialBaudRate;
+    motorConfig.canBitrate = settings_.wheelCanBitrate;
+  } else if (!WheelMotorController::resolvePort(
+                 settings_.leftMotorSerialPort, &motorConfig.leftSerialPort,
+                 &portError) ||
+             !WheelMotorController::resolvePort(
+                 settings_.rightMotorSerialPort, &motorConfig.rightSerialPort,
+                 &portError)) {
+      enterFault(portError);
+      emit connectionChanged(false, portError);
+      return;
   }
   motorConfig.leftBaudRate = settings_.leftMotorBaudRate;
   motorConfig.rightBaudRate = settings_.rightMotorBaudRate;
@@ -82,26 +106,47 @@ void SynchronizedDriveController::connectAdapter(const DriveSettings& settings) 
   motorConfig.wheelRadiusM = settings_.wheelRadiusM;
   motorConfig.motorOutputToWheelRatio = settings_.motorOutputToWheelRatio;
   motorConfig.maximumWheelSpeedMps = settings_.maximumWheelSpeedMps;
+  motorConfig.maximumMotorSpeedDps =
+      settings_.wheelCommunicationMode == WheelCommunicationMode::Can
+          ? 32767.0
+          : WheelMotorConfig::kMaximumSynchronizedMotorSpeedDps;
   QString motorError;
   if (!wheelMotors_.initialize(motorConfig, &motorError)) {
     enterFault(motorError);
     emit connectionChanged(false, motorError);
     return;
   }
-  emit logMessage(QStringLiteral("event=connect_complete result=OK module=DRIVE.MOTOR left_port=%1 right_port=%2")
-                      .arg(motorConfig.leftSerialPort, motorConfig.rightSerialPort));
   emit logMessage(QStringLiteral(
-      "event=wheel_position_hold result=OK module=DRIVE.MOTOR reason=connect "
-      "commands=0x81+0x92+0xA4 left_target_deg=%1 right_target_deg=%2")
-                      .arg(wheelMotors_.lastLeftHoldAngleHundredthDegree() / 100.0,
-                           0, 'f', 2)
-                      .arg(wheelMotors_.lastRightHoldAngleHundredthDegree() / 100.0,
-                           0, 'f', 2));
+      "event=connect_complete result=OK module=DRIVE.MOTOR mode=%1 left_port=%2 right_port=%3 can_port=%4 can_bitrate=%5")
+                      .arg(settings_.wheelCommunicationMode ==
+                                   WheelCommunicationMode::Can
+                               ? QStringLiteral("CAN")
+                               : QStringLiteral("RS485"),
+                           motorConfig.leftSerialPort,
+                           motorConfig.rightSerialPort,
+                           motorConfig.canSerialPort)
+                      .arg(motorConfig.canBitrate));
+  if (settings_.wheelCommunicationMode == WheelCommunicationMode::Rs485) {
+    emit logMessage(QStringLiteral(
+        "event=wheel_position_hold result=OK module=DRIVE.MOTOR reason=connect "
+        "commands=0x81+0x92+0xA4 left_target_deg=%1 right_target_deg=%2")
+                        .arg(wheelMotors_.lastLeftHoldAngleHundredthDegree() / 100.0,
+                             0, 'f', 2)
+                        .arg(wheelMotors_.lastRightHoldAngleHundredthDegree() / 100.0,
+                             0, 'f', 2));
+  } else {
+    emit logMessage(QStringLiteral(
+        "event=wheel_stop result=OK module=DRIVE.MOTOR reason=connect command=0x81"));
+  }
   emit logMessage(QStringLiteral(
       "event=motor_communication_profile cyclic_hz=10 interval_ms=%1 "
-      "feedback_timeout_ms=%2 mode=A2_REPLY_WHILE_MOVING_9C_WHILE_STOPPED")
+      "feedback_timeout_ms=%2 mode=%3")
                       .arg(kMotorCommunicationIntervalMs)
-                      .arg(settings_.feedbackTimeoutMs));
+                      .arg(settings_.feedbackTimeoutMs)
+                      .arg(settings_.wheelCommunicationMode ==
+                                   WheelCommunicationMode::Can
+                               ? QStringLiteral("CAN_A2_9C")
+                               : QStringLiteral("RS485_A2_9C")));
   emit logMessage(QStringLiteral(
       "event=wheel_command_limit configured_mps=%1 effective_mps=%2 "
       "motor_limit_dps=%3")
@@ -109,24 +154,27 @@ void SynchronizedDriveController::connectAdapter(const DriveSettings& settings) 
                       .arg(wheelMotors_.maximumCommandableWheelSpeedMps(),
                            0, 'f', 4)
                       .arg(motorConfig.maximumMotorSpeedDps, 0, 'f', 0));
-  emit connectionChanged(true, QStringLiteral("MWD RS485 wheel motor bus connected"));
+  emit connectionChanged(
+      true, settings_.wheelCommunicationMode == WheelCommunicationMode::Can
+                ? QStringLiteral("Servo CAN wheel motor bus connected")
+                : QStringLiteral("MWD RS485 wheel motor bus connected"));
   setState(DriveState::Idle,
-           QStringLiteral("MWD RS485 motor bus connected; drive output disabled"));
+           settings_.wheelCommunicationMode == WheelCommunicationMode::Can
+               ? QStringLiteral("Servo CAN motor bus connected; drive output disabled")
+               : QStringLiteral("MWD RS485 motor bus connected; drive output disabled"));
 }
 
 void SynchronizedDriveController::autoDetectCanDevices(const QString& excludedPort) {
   if (wheelMotors_.isInitialized()) {
-    emit logMessage(QStringLiteral("MWD RS485 motor bus is already connected"));
+    emit logMessage(QStringLiteral("Wheel motor bus is already connected"));
     emit canSettingsDetected(HardwareDetectionResult{});
     return;
   }
-  // Keep CAN discovery for the clamp and legacy diagnostics. Wheel control
-  // itself uses the configured MWD RS485 bus.
   const HardwareDetectionResult result = HardwareDiscovery::probeCanPorts(excludedPort);
   emit canSettingsDetected(result);
   QStringList details = result.details;
   if (details.isEmpty()) {
-    details << QStringLiteral("No CANopen device detected; wheel motors use MWD RS485");
+    details << QStringLiteral("No CAN motor or CANopen device detected");
   }
   emit logMessage(details.join(QStringLiteral("; ")));
 }
@@ -138,7 +186,7 @@ void SynchronizedDriveController::disconnectAdapter() {
   sendStopPair(true);
   wheelMotors_.shutdown();
   wheelCommandFailureActive_ = false;
-  emit connectionChanged(false, QStringLiteral("MWD RS485 wheel motor bus disconnected"));
+  emit connectionChanged(false, QStringLiteral("Wheel motor bus disconnected"));
 }
 
 void SynchronizedDriveController::setInputCommand(double linearMps, double angularRadps) {
@@ -210,7 +258,7 @@ void SynchronizedDriveController::requestEnable(bool enabled) {
   input_.receivedAtMs = nowMs();
   setState(DriveState::Enabled,
            CRAWLING_TEXT("\xE5\xba\x95\xE7\x9B\x98\xE5\xb7\xb2\xE4\xbd\xbf\xE8\x83\xbd\xEF\xbc\x8C\xE5\x8F\xaf\xE6\x8E\xa7\xE5\x88\xb6"));
-  emit logMessage(QStringLiteral("Drive enabled: MWD RS485 wheel speed control is active"));
+  emit logMessage(QStringLiteral("Drive enabled: wheel speed control is active"));
   // The motor bus is already stopped and holding the current position after
   // connect/reset. Enabling only arms command processing; avoid a duplicate
   // position-hold transaction that can fail on a transient serial reply.
@@ -225,22 +273,22 @@ void SynchronizedDriveController::emergencyStop() {
 
 void SynchronizedDriveController::systemReset() {
   if (!wheelMotors_.isInitialized()) {
-    emit logMessage(QStringLiteral("System reset skipped: MWD RS485 motor bus is disconnected"));
+    emit logMessage(QStringLiteral("System reset skipped: wheel motor bus is disconnected"));
     return;
   }
   resetMotionState();
-  setState(DriveState::Idle, QStringLiteral("MWD RS485 motor reset/stop command sent"));
-  emit logMessage(QStringLiteral("MWD RS485 motor reset/stop result=%1")
+  setState(DriveState::Idle, QStringLiteral("Wheel motor reset/stop command sent"));
+  emit logMessage(QStringLiteral("Wheel motor reset/stop result=%1")
                       .arg(wheelMotors_.reset() ? QStringLiteral("OK")
                                                  : QStringLiteral("FAILED")));
 }
 
 void SynchronizedDriveController::clearAlarm() {
   if (!wheelMotors_.isInitialized()) {
-    emit logMessage(QStringLiteral("Clear alarm skipped: MWD RS485 motor bus is disconnected"));
+    emit logMessage(QStringLiteral("Clear alarm skipped: wheel motor bus is disconnected"));
     return;
   }
-  emit logMessage(QStringLiteral("MWD RS485 motor clear alarm/stop result=%1")
+  emit logMessage(QStringLiteral("Wheel motor clear alarm/stop result=%1")
                       .arg(wheelMotors_.reset() ? QStringLiteral("OK")
                                                  : QStringLiteral("FAILED")));
 }
@@ -259,9 +307,23 @@ void SynchronizedDriveController::controlTick() {
   lastTickMs_ = now;
 
   if (wheelMotors_.isInitialized()) {
-    WheelMotorFeedback feedback;
     const bool zeroInput = std::abs(input_.linearMps) <= kMotionEpsilonMps &&
                            std::abs(input_.angularRadps) <= kMotionEpsilonMps;
+    // A released jog button must stop before a blocking CAN/serial feedback
+    // round trip. This keeps the 0x81 stop frame ahead of telemetry polling.
+    if (state_ == DriveState::Enabled && zeroInput &&
+        (!motionOutputStopped_ || !wheelMotors_.isStopped())) {
+      appliedLinearMps_ = 0.0;
+      appliedAngularRadps_ = 0.0;
+      synchronizer_.reset();
+      input_.preserveLinearSpeed = false;
+      lastCorrectionSteeringLimited_ = false;
+      sendStopPair(!motionOutputStopped_);
+      motionOutputStopped_ = true;
+      publishTelemetry();
+      return;
+    }
+    WheelMotorFeedback feedback;
     const bool statusPollingState = wheelMotors_.isStopped() &&
         (state_ == DriveState::Idle || state_ == DriveState::Fault ||
          state_ == DriveState::EmergencyStop ||
@@ -340,7 +402,7 @@ void SynchronizedDriveController::controlTick() {
                                     ? now - rightFeedback_.receivedAtMs
                                     : -1;
       enterFault(QStringLiteral(
-                     "MWD RS485 motor feedback timeout: "
+                     "Wheel motor feedback timeout: "
                      "left_valid=%1 left_age_ms=%2 "
                      "right_valid=%3 right_age_ms=%4 timeout_ms=%5")
                      .arg(leftFeedback_.valid ? 1 : 0)
@@ -508,12 +570,15 @@ void SynchronizedDriveController::sendStopPair(bool urgent) {
     const bool sent = wheelMotors_.stop();
     lastStopMs_ = nowMs();
     lastMotorCommunicationMs_ = lastStopMs_;
+    const bool canMode =
+        settings_.wheelCommunicationMode == WheelCommunicationMode::Can;
     if (!sent) {
       if (!wheelCommandFailureActive_) {
         wheelCommandFailureActive_ = true;
-        emit logMessage(QStringLiteral(
-            "event=wheel_position_hold result=FAILED module=DRIVE.MOTOR "
-            "commands=0x81+0x92+0xA4"));
+        emit logMessage(
+            canMode
+                ? QStringLiteral("event=wheel_stop result=FAILED module=DRIVE.MOTOR command=0x81")
+                : QStringLiteral("event=wheel_position_hold result=FAILED module=DRIVE.MOTOR commands=0x81+0x92+0xA4"));
       }
     } else {
       if (wheelCommandFailureActive_) {
@@ -522,16 +587,21 @@ void SynchronizedDriveController::sendStopPair(bool urgent) {
             "event=wheel_command_write_recovered result=OK module=DRIVE.MOTOR"));
       }
       if (urgent) {
-        emit logMessage(QStringLiteral(
-            "event=wheel_position_hold result=OK module=DRIVE.MOTOR "
-            "commands=0x81+0x92+0xA4 "
-            "left_target_deg=%1 right_target_deg=%2")
-                            .arg(wheelMotors_.lastLeftHoldAngleHundredthDegree() /
-                                     100.0,
-                                 0, 'f', 2)
-                            .arg(wheelMotors_.lastRightHoldAngleHundredthDegree() /
-                                     100.0,
-                                 0, 'f', 2));
+        if (canMode) {
+          emit logMessage(QStringLiteral(
+              "event=wheel_stop result=OK module=DRIVE.MOTOR command=0x81"));
+        } else {
+          emit logMessage(QStringLiteral(
+              "event=wheel_position_hold result=OK module=DRIVE.MOTOR "
+              "commands=0x81+0x92+0xA4 "
+              "left_target_deg=%1 right_target_deg=%2")
+                              .arg(wheelMotors_.lastLeftHoldAngleHundredthDegree() /
+                                       100.0,
+                                   0, 'f', 2)
+                              .arg(wheelMotors_.lastRightHoldAngleHundredthDegree() /
+                                       100.0,
+                                   0, 'f', 2));
+        }
       }
     }
   }

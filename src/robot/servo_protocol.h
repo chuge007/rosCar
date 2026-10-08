@@ -24,6 +24,7 @@ class ServoProtocol final {
  public:
   static constexpr std::uint8_t kSpeedClosedLoop = 0xA2;
   static constexpr std::uint8_t kStatusQuery = 0x9A;
+  static constexpr std::uint8_t kSpeedFeedbackQuery = 0x9C;
   static constexpr std::uint8_t kMotorStop = 0x81;
   static constexpr std::uint8_t kSystemReset = 0x80;
   static constexpr std::uint32_t kCommandIdBase = 0x140;
@@ -35,6 +36,10 @@ class ServoProtocol final {
   static CanFrame systemResetCommand(std::uint8_t motorId);
   static std::optional<ServoFeedback> parseFeedback(const CanFrame& frame);
   static std::optional<ServoStatus> parseStatus(const CanFrame& frame);
+  static std::optional<std::int32_t> parseMultiTurnEncoderPosition(
+      const CanFrame& frame);
+  static std::optional<std::int32_t> parseMultiTurnAngle(
+      const CanFrame& frame);
 };
 
 }  // namespace crawling

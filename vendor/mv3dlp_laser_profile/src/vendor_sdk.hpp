@@ -160,7 +160,9 @@ struct ExceptionInfoRaw {
 };
 
 using ImageDataCallback = void(MV3DLP_CALL*)(ImageDataRaw* image_data, void* user);
-using ProfileDataCallback = void(MV3DLP_CALL*)(ProfileDataRaw* profile_data, void* user);
+struct IntensityDataRaw;
+using ProfileDataCallback = void(MV3DLP_CALL*)(ProfileDataRaw* profile_data,
+                                            IntensityDataRaw* intensity_data, void* user);
 using ExceptionCallback = void(MV3DLP_CALL*)(ExceptionInfoRaw* exception_info, void* user);
 
 using FnGetVersion = const char*(MV3DLP_CALL*)();

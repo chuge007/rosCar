@@ -74,6 +74,8 @@ class RobotSensorController final : public QObject {
   quint64 profilePrepareGeneration_ = 0;
   qint64 lastPreviewImageEmitMs_ = -1000;
   qint64 cameraAcquisitionStartedMs_ = 0;
+  qint64 lastCameraPayloadDiagnosticMs_ = -1;
+  qint64 lastProfileEmitDiagnosticMs_ = -1;
   qint64 lastCameraFrameMs_ = 0;
   qint64 lastImuSampleMs_ = 0;
   quint64 imuSampleCount_ = 0;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -36,6 +37,19 @@ struct DeviceInfo {
     std::uint32_t device_type_info = 0;
 };
 
+struct FrameDiagnostics {
+    bool profile_callback = false;
+    std::uint32_t raw_width = 0;
+    std::uint32_t raw_height = 0;
+    std::uint32_t raw_data_bytes = 0;
+    std::uint32_t raw_image_type = 0;
+    std::array<std::uint8_t, 36> raw_samples{};
+    std::uint32_t raw_sample_bytes = 0;
+    std::uint64_t image_callbacks = 0;
+    std::uint64_t profile_callbacks = 0;
+    std::string decode_reason = "OK";
+};
+
 struct Frame {
     FrameType type = FrameType::unknown;
     std::uint32_t width = 0;
@@ -51,6 +65,7 @@ struct Frame {
     std::int32_t x_offset = 0;
     std::int32_t y_offset = 0;
     std::int32_t z_offset = 0;
+    FrameDiagnostics diagnostics;
 };
 
 struct PointXYZ {
