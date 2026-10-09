@@ -250,6 +250,17 @@ void LaserCorrectionController::setEnabled(bool enabled) {
   beginTrajectorySession();
   status_.active = true;
   enabledAtMs_ = clock_.elapsed();
+  emit diagnosticLogMessage(QStringLiteral(
+      "event=correction_task_started session=%1 phase=%2 "
+      "state_machine=survey_straight_v2 "
+      "motor_control_mode=A2_speed_closed_loop initial_sequence="
+      "survey_forward_straight>settle>survey_return_straight>settle>tracking "
+      "target_speed_mps=%3 segment_m=%4 linear_accel_mps2=%5")
+      .arg(trajectorySessionId_)
+      .arg(phaseName(phase_))
+      .arg(settings_.targetSpeedMps, 0, 'f', 6)
+      .arg(settings_.segmentLengthM, 0, 'f', 6)
+      .arg(settings_.maxLinearAccelerationMps2, 0, 'f', 6));
   emit logMessage(
       CRAWLING_TEXT("纠偏参数：速度 %1 mm/s，分段 %2 mm，Kp %3，Kd %4，"
                     "微分滤波 %5，内侧轮最低 %6%，角速度上限 %7 deg/s，"
@@ -450,12 +461,15 @@ void LaserCorrectionController::processProfileFrame(
     // Live inspection is independent of robot enable and the stop latch.
     // Do not refresh control state or reuse old tracking priors while idle.
     auto config = settings_.detector;
+    config.profileAxisHalfSpanX = profileAxisHalfSpanX_;
+    config.profileAxisLocked = false;
     config.expectedAbsoluteCenterRatio = -1;
     config.expectedAbsoluteGapWidthRatio = -1;
     config.referenceAbsoluteCenterRatio = -1;
     QElapsedTimer detectorTimer;
     detectorTimer.start();
     const LaserGapDetection detection = ProfileWeldDetector::detect(points, config);
+    profileAxisHalfSpanX_ = detection.profileAxisHalfSpanX;
     if (lastProfileFrameDiagnosticMs_ == now) {
       emit diagnosticLogMessage(
           QStringLiteral(
@@ -463,7 +477,8 @@ void LaserCorrectionController::processProfileFrame(
               "valid=%3 start_index=%4 end_index=%5 confidence=%6 "
               "detector_ms=%7 continuity_rejected=%8 width_rejected=%9 noise_z=%10 "
               "template_evaluated=%11 template_matched=%12 template_rejected=%13 "
-              "template_name=%14 template_similarity=%15 template_width_scale=%16")
+              "template_name=%14 template_similarity=%15 template_width_scale=%16 "
+              "coordinate_basis=sdk_x_zero axis_half_span_x=%17 center_x=%18 center_ratio=%19")
               .arg(sourceFrameNumber)
               .arg(points.size())
               .arg(detection.valid)
@@ -475,7 +490,10 @@ void LaserCorrectionController::processProfileFrame(
               .arg(detection.templateEvaluated).arg(detection.templateMatched)
               .arg(detection.templateRejected).arg(detection.templateName)
               .arg(detection.templateSimilarity, 0, 'f', 3)
-              .arg(detection.templateWidthScale, 0, 'f', 3));
+              .arg(detection.templateWidthScale, 0, 'f', 3)
+              .arg(detection.profileAxisHalfSpanX, 0, 'g', 9)
+              .arg(detection.profileCenterX, 0, 'g', 9)
+              .arg(detection.absoluteCenterRatio, 0, 'f', 6));
     }
     emit profileObservationReady(points, detection, sourceFrameNumber, receivedAtEpochMs);
     return;
@@ -519,6 +537,8 @@ void LaserCorrectionController::processObservation(
     beginSeamReacquisition(CRAWLING_TEXT("真实双边缘持续缺失，解除旧候选锁定"));
   }
   LaserGapDetectorConfig detectorConfig = settings_.detector;
+  detectorConfig.profileAxisHalfSpanX = profileAxisHalfSpanX_;
+  detectorConfig.profileAxisLocked = status_.active;
   // Re-localization broadens the local search while preserving the last
   // measured corridor, orientation and minimum seam scale.
   detectorConfig.referenceAbsoluteCenterRatio = -1.0;
@@ -625,6 +645,7 @@ void LaserCorrectionController::processObservation(
   const LaserGapDetection detection =
       profile ? ProfileWeldDetector::detect(*profile, detectorConfig) :
                 LaserGapDetector::detect(image, detectorConfig, rawFrameDiagnosticOutput);
+  if (profile) profileAxisHalfSpanX_ = detection.profileAxisHalfSpanX;
   const bool realTwoEdge = detection.valid && !detection.edgeBreakFallback &&
                            !detection.contourFallback;
   lastDetectorDurationMs_ = detectorTimer.elapsed();
@@ -639,7 +660,9 @@ void LaserCorrectionController::processObservation(
         "start_index=%4 end_index=%5 center_ratio=%6 confidence=%7 continuity_rejected=%8 width_rejected=%9 "
         "noise_z=%10 baseline_slope=%11 baseline_offset_z=%12 template_evaluated=%13 "
         "template_matched=%14 template_rejected=%15 template_name=%16 "
-        "template_similarity=%17 template_width_scale=%18 grow_sigma=3 seed_sigma=5")
+        "template_similarity=%17 template_width_scale=%18 grow_sigma=%19 seed_sigma=%20 "
+        "coordinate_basis=sdk_x_zero axis_half_span_x=%21 center_x=%22 "
+        "left_ratio=%23 right_ratio=%24 line_start_ratio=%25 line_end_ratio=%26")
         .arg(sourceFrameNumber_).arg(profile->size()).arg(detection.valid)
         .arg(detection.gapStartPx).arg(detection.gapEndPx).arg(detection.absoluteCenterRatio)
         .arg(detection.confidence).arg(detection.continuityRejected).arg(detection.widthRejected)
@@ -647,7 +670,15 @@ void LaserCorrectionController::processObservation(
         .arg(detection.templateEvaluated).arg(detection.templateMatched)
         .arg(detection.templateRejected).arg(detection.templateName)
         .arg(detection.templateSimilarity, 0, 'f', 3)
-        .arg(detection.templateWidthScale, 0, 'f', 3));
+        .arg(detection.templateWidthScale, 0, 'f', 3)
+        .arg(detectorConfig.profileTuning.growNoiseSigma)
+        .arg(detectorConfig.profileTuning.seedNoiseSigma)
+        .arg(detection.profileAxisHalfSpanX, 0, 'g', 9)
+        .arg(detection.profileCenterX, 0, 'g', 9)
+        .arg(detection.profileGapStartRatio, 0, 'f', 6)
+        .arg(detection.profileGapEndRatio, 0, 'f', 6)
+        .arg(detection.profileLineStartRatio, 0, 'f', 6)
+        .arg(detection.profileLineEndRatio, 0, 'f', 6));
   }
   if (rawFrameDiagnosticOutput && !profile) {
     logRawFrameDiagnostic(rawFrameDiagnostic, detection, detectorConfig, now);
@@ -691,8 +722,11 @@ void LaserCorrectionController::processObservation(
       status_.gapValid = false;
     } else {
       const double candidateWidthRatio =
-          static_cast<double>(detection.gapEndPx - detection.gapStartPx + 1) /
-          std::max(1, lineSpanPx + 1);
+          detection.profileContour
+              ? (detection.profileGapEndRatio - detection.profileGapStartRatio) /
+                    std::max(1e-9, detection.profileLineEndRatio - detection.profileLineStartRatio)
+              : static_cast<double>(detection.gapEndPx - detection.gapStartPx + 1) /
+                    std::max(1, lineSpanPx + 1);
       const bool sameCandidate = initialGapConfirmationCount_ > 0 &&
           detection.horizontal == initialGapConfirmationHorizontal_ &&
           confirmableContour == initialGapConfirmationContour_ &&
@@ -778,10 +812,12 @@ void LaserCorrectionController::processObservation(
     // the detected laser span: that span changes when reflections/occlusion
     // hide a part of the line and would make a stationary weld jump laterally.
     const double leftRatio = clamp(
-        static_cast<double>(detection.gapStartPx) / axisLastPixel,
+        detection.profileContour ? detection.profileGapStartRatio
+                                 : static_cast<double>(detection.gapStartPx) / axisLastPixel,
         0.0, 1.0);
     const double rightRatio = clamp(
-        static_cast<double>(detection.gapEndPx) / axisLastPixel,
+        detection.profileContour ? detection.profileGapEndRatio
+                                 : static_cast<double>(detection.gapEndPx) / axisLastPixel,
         0.0, 1.0);
     const double firstEdgeM = kCameraLateralToVehicleSign *
                               (leftRatio - 0.5) *
@@ -1125,13 +1161,18 @@ void LaserCorrectionController::processObservation(
     }
     trackedGapHorizontal_ = detection.horizontal;
     trackedGapWidthRatio_ =
-        static_cast<double>(detection.gapEndPx - detection.gapStartPx + 1) /
-        std::max(1, detection.lineEndPx - detection.lineStartPx + 1);
+        detection.profileContour
+            ? (detection.profileGapEndRatio - detection.profileGapStartRatio) /
+                  std::max(1e-9, detection.profileLineEndRatio - detection.profileLineStartRatio)
+            : static_cast<double>(detection.gapEndPx - detection.gapStartPx + 1) /
+                  std::max(1, detection.lineEndPx - detection.lineStartPx + 1);
     const int axisLength = detection.horizontal ? observationWidth : observationHeight;
     trackedLineStartRatio_ =
-        static_cast<double>(detection.lineStartPx) / std::max(1, axisLength - 1);
+        detection.profileContour ? detection.profileLineStartRatio
+            : static_cast<double>(detection.lineStartPx) / std::max(1, axisLength - 1);
     trackedLineEndRatio_ =
-        static_cast<double>(detection.lineEndPx) / std::max(1, axisLength - 1);
+        detection.profileContour ? detection.profileLineEndRatio
+            : static_cast<double>(detection.lineEndPx) / std::max(1, axisLength - 1);
     trackedGapConfidence_ = detection.confidence;
     gapTrackerValid_ = true;
     lastTrackedGapMs_ = now;
@@ -1528,6 +1569,29 @@ void LaserCorrectionController::processDriveTelemetry(
   }
   if (!telemetryUsable(telemetry)) {
     haveTelemetry_ = false;
+    if (lastInvalidTelemetryDiagnosticMs_ < 0 ||
+        now - lastInvalidTelemetryDiagnosticMs_ >= 500) {
+      lastInvalidTelemetryDiagnosticMs_ = now;
+      emit diagnosticLogMessage(QStringLiteral(
+          "event=correction_telemetry_rejected session=%1 state=%2 "
+          "left_valid=%3 right_valid=%4 left_speed_finite=%5 "
+          "right_speed_finite=%6 left_position_finite=%7 "
+          "right_position_finite=%8 left_speed_mps=%9 right_speed_mps=%10 "
+          "feedback_fresh=%11 command_fresh=%12 telemetry_age_ms=%13")
+          .arg(trajectorySessionId_)
+          .arg(driveStateText(telemetry.state))
+          .arg(telemetry.left.valid ? 1 : 0)
+          .arg(telemetry.right.valid ? 1 : 0)
+          .arg(std::isfinite(telemetry.left.wheelSpeedMps) ? 1 : 0)
+          .arg(std::isfinite(telemetry.right.wheelSpeedMps) ? 1 : 0)
+          .arg(std::isfinite(telemetry.left.wheelPositionRad) ? 1 : 0)
+          .arg(std::isfinite(telemetry.right.wheelPositionRad) ? 1 : 0)
+          .arg(telemetry.left.wheelSpeedMps, 0, 'f', 6)
+          .arg(telemetry.right.wheelSpeedMps, 0, 'f', 6)
+          .arg(telemetry.feedbackFresh ? 1 : 0)
+          .arg(telemetry.commandFresh ? 1 : 0)
+          .arg(lastTelemetryMs_ < 0 ? -1 : now - lastTelemetryMs_));
+    }
     if (now - enabledAtMs_ > settings_.telemetryTimeoutMs &&
         (lastTelemetryMs_ < enabledAtMs_ ||
          now - lastTelemetryMs_ > settings_.telemetryTimeoutMs)) {
@@ -1613,12 +1677,43 @@ bool LaserCorrectionController::wheelsStopped() const {
 }
 
 void LaserCorrectionController::tryStartSurvey() {
-  if (!status_.active || phase_ != Phase::AwaitingInputs || !haveTelemetry_ ||
-      !status_.gapValid || !boundaryObservationReliable_ ||
-      lastValidDetectionMs_ < enabledAtMs_ ||
-      lastTelemetryMs_ < enabledAtMs_ || !wheelsStopped()) {
+  if (!status_.active || phase_ != Phase::AwaitingInputs) {
     return;
   }
+  const bool freshDetection = lastValidDetectionMs_ >= enabledAtMs_;
+  const bool freshTelemetry = lastTelemetryMs_ >= enabledAtMs_;
+  const bool stopped = wheelsStopped();
+  if (lastStartupDiagnosticMs_ < 0 ||
+      clock_.elapsed() - lastStartupDiagnosticMs_ >= 500) {
+    lastStartupDiagnosticMs_ = clock_.elapsed();
+    emit diagnosticLogMessage(QStringLiteral(
+        "event=correction_start_gate session=%1 phase=%2 ready=%3 "
+        "telemetry_seen=%4 telemetry_fresh=%5 gap_valid=%6 "
+        "boundary_reliable=%7 detection_fresh=%8 wheels_stopped=%9 "
+        "left_speed_mps=%10 right_speed_mps=%11 left_target_mps=%12 "
+        "right_target_mps=%13 applied_linear_mps=%14 image_age_ms=%15 "
+        "detection_age_ms=%16 telemetry_age_ms=%17 stopped_threshold_mps=0.000500")
+        .arg(trajectorySessionId_)
+        .arg(phaseName(phase_))
+        .arg(haveTelemetry_ && status_.gapValid && boundaryObservationReliable_ &&
+                     freshDetection && freshTelemetry && stopped ? 1 : 0)
+        .arg(haveTelemetry_ ? 1 : 0)
+        .arg(freshTelemetry ? 1 : 0)
+        .arg(status_.gapValid ? 1 : 0)
+        .arg(boundaryObservationReliable_ ? 1 : 0)
+        .arg(freshDetection ? 1 : 0)
+        .arg(stopped ? 1 : 0)
+        .arg(leftSpeedMps_, 0, 'f', 6)
+        .arg(rightSpeedMps_, 0, 'f', 6)
+        .arg(leftTargetMps_, 0, 'f', 6)
+        .arg(rightTargetMps_, 0, 'f', 6)
+        .arg(driveAppliedLinearMps_, 0, 'f', 6)
+        .arg(lastImageMs_ < 0 ? -1 : clock_.elapsed() - lastImageMs_)
+        .arg(lastValidDetectionMs_ < 0 ? -1 : clock_.elapsed() - lastValidDetectionMs_)
+        .arg(lastTelemetryMs_ < 0 ? -1 : clock_.elapsed() - lastTelemetryMs_));
+  }
+  if (!haveTelemetry_ || !status_.gapValid || !boundaryObservationReliable_ ||
+      !freshDetection || !freshTelemetry || !stopped) return;
   beginInitialSurvey();
 }
 
@@ -1914,12 +2009,9 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
   if (stopIfMotionStalled(now)) return;
   if (stopIfScanBoundaryUnsafe(now)) return;
 
-  // Boundary containment changes the steering command, but it must not
-  // bypass the mandatory initial survey. The first pass is always one full
-  // forward sample followed by a settled reverse to the start point; only
-  // after that pass may the rolling tracking phase begin. applyCommand()
-  // enforces the inward turn while either survey leg is moving, and the
-  // stop gate still handles a genuinely lost/out-of-range observation.
+  // The initial forward/return pass establishes the reference path. Boundary
+  // containment remains active on every moving phase so an out-of-range seam
+  // cannot drive the vehicle beyond the usable laser field before tracking.
 
   switch (phase_) {
     case Phase::Idle:
@@ -3081,8 +3173,11 @@ void LaserCorrectionController::resetSession() {
   lastObservedGapAbsoluteCenterRatio_ = 0.5;
   lastObservedWasContour_ = false;
   lastTelemetryMs_ = -1;
+  lastStartupDiagnosticMs_ = -1;
+  lastInvalidTelemetryDiagnosticMs_ = -1;
   previousControlMs_ = -1;
   lastCommandMs_ = -1;
+  lastPhaseCommandDiagnosticMs_ = -1;
   lastControlDiagnosticMs_ = -1;
   lastDetectionDiagnosticMs_ = -1;
   lastDetectionRejectLogMs_ = -1;
@@ -3208,6 +3303,26 @@ void LaserCorrectionController::setPhase(Phase phase, const QString& reason,
   status_.phase = phaseName(phase_);
   status_.reason = reason;
   if (writeLog) {
+    emit diagnosticLogMessage(QStringLiteral(
+        "event=correction_phase_transition session=%1 from=%2 to=%3 "
+        "reason=%4 progress_m=%5 survey_travel_m=%6 samples=%7 "
+        "gap_valid=%8 telemetry_seen=%9 left_speed_mps=%10 "
+        "right_speed_mps=%11 left_target_mps=%12 right_target_mps=%13 "
+        "applied_linear_mps=%14 image_age_ms=%15 telemetry_age_ms=%16")
+        .arg(trajectorySessionId_)
+        .arg(phaseName(previousPhase), phaseName(phase), reason)
+        .arg(phaseTravelM_, 0, 'f', 6)
+        .arg(surveyTravelM_, 0, 'f', 6)
+        .arg(samples_.size())
+        .arg(status_.gapValid ? 1 : 0)
+        .arg(haveTelemetry_ ? 1 : 0)
+        .arg(leftSpeedMps_, 0, 'f', 6)
+        .arg(rightSpeedMps_, 0, 'f', 6)
+        .arg(leftTargetMps_, 0, 'f', 6)
+        .arg(rightTargetMps_, 0, 'f', 6)
+        .arg(driveAppliedLinearMps_, 0, 'f', 6)
+        .arg(lastImageMs_ < 0 ? -1 : clock_.elapsed() - lastImageMs_)
+        .arg(lastTelemetryMs_ < 0 ? -1 : clock_.elapsed() - lastTelemetryMs_));
     emit logMessage(reason);
     emit logMessage(
         CRAWLING_TEXT("纠偏阶段：%1 -> %2，进度 %3 mm，估算航向 %4°，"
@@ -3268,8 +3383,14 @@ void LaserCorrectionController::updateScanBoundaryObservation(
       detection.lineEndPx <= detection.lineStartPx ||
       detection.gapEndPx <= detection.gapStartPx) return;
   const double axis = axisLengthPx - 1.0;
-  const double left = detection.gapStartPx / axis;
-  const double right = detection.gapEndPx / axis;
+  const double left = detection.profileContour ? detection.profileGapStartRatio
+                                               : detection.gapStartPx / axis;
+  const double right = detection.profileContour ? detection.profileGapEndRatio
+                                                : detection.gapEndPx / axis;
+  const double lineStart = clamp(detection.profileContour ? detection.profileLineStartRatio
+                                                         : detection.lineStartPx / axis, 0.0, 1.0);
+  const double lineEnd = clamp(detection.profileContour ? detection.profileLineEndRatio
+                                                       : detection.lineEndPx / axis, 0.0, 1.0);
   const bool measured = identityConfirmed &&
       (!detection.edgeBreakFallback || detection.contourFallback) &&
       detection.confidence >= 0.060 && !reacquisitionPending_;
@@ -3285,8 +3406,8 @@ void LaserCorrectionController::updateScanBoundaryObservation(
     } else {
       boundarySignedRateRatioPerS_ = 0.0;
     }
-    boundaryLineStartRatio_ = clamp(detection.lineStartPx / axis, 0.0, 1.0);
-    boundaryLineEndRatio_ = clamp(detection.lineEndPx / axis, 0.0, 1.0);
+    boundaryLineStartRatio_ = lineStart;
+    boundaryLineEndRatio_ = lineEnd;
     boundaryGapStartRatio_ = left;
     boundaryGapEndRatio_ = right;
     boundaryMeasuredMarginRatio_ = std::min(
@@ -3301,9 +3422,9 @@ void LaserCorrectionController::updateScanBoundaryObservation(
     boundaryGapStartRatio_ = std::min(boundaryGapStartRatio_, left);
     boundaryGapEndRatio_ = std::max(boundaryGapEndRatio_, right);
     boundaryLineStartRatio_ = std::max(boundaryLineStartRatio_,
-        clamp(detection.lineStartPx / axis, 0.0, 1.0));
+        lineStart);
     boundaryLineEndRatio_ = std::min(boundaryLineEndRatio_,
-        clamp(detection.lineEndPx / axis, 0.0, 1.0));
+        lineEnd);
   }
 }
 
@@ -3563,6 +3684,38 @@ void LaserCorrectionController::applyCommand(double targetLinearMps,
   if (stopIfScanBoundaryUnsafe(clock_.elapsed())) return;
   status_.linearCommandMps = currentLinearMps_;
   status_.angularCommandRadps = currentAngularRadps_;
+  if (lastPhaseCommandDiagnosticMs_ < 0 ||
+      now - lastPhaseCommandDiagnosticMs_ >= 100) {
+    lastPhaseCommandDiagnosticMs_ = now;
+    emit diagnosticLogMessage(QStringLiteral(
+        "event=correction_phase_command session=%1 phase=%2 "
+        "progress_m=%3 target_linear_mps=%4 target_angular_radps=%5 "
+        "applied_linear_mps=%6 applied_angular_radps=%7 "
+        "left_target_mps=%8 right_target_mps=%9 "
+        "left_feedback_mps=%10 right_feedback_mps=%11 "
+        "gap_valid=%12 detection_held=%13 boundary_margin_ratio=%14 "
+        "boundary_containment=%15 return_direction=%16 "
+        "image_age_ms=%17 detection_age_ms=%18 telemetry_age_ms=%19")
+        .arg(trajectorySessionId_)
+        .arg(phaseName(phase_))
+        .arg(status_.segmentProgressM, 0, 'f', 6)
+        .arg(targetLinearMps, 0, 'f', 6)
+        .arg(targetAngularRadps, 0, 'f', 6)
+        .arg(currentLinearMps_, 0, 'f', 6)
+        .arg(currentAngularRadps_, 0, 'f', 6)
+        .arg(leftTargetMps_, 0, 'f', 6)
+        .arg(rightTargetMps_, 0, 'f', 6)
+        .arg(leftSpeedMps_, 0, 'f', 6)
+        .arg(rightSpeedMps_, 0, 'f', 6)
+        .arg(status_.gapValid ? 1 : 0)
+        .arg(detectionHeld_ ? 1 : 0)
+        .arg(boundaryMargin, 0, 'f', 6)
+        .arg(containment ? 1 : 0)
+        .arg(returnDirection)
+        .arg(lastImageMs_ < 0 ? -1 : now - lastImageMs_)
+        .arg(lastValidDetectionMs_ < 0 ? -1 : now - lastValidDetectionMs_)
+        .arg(lastTelemetryMs_ < 0 ? -1 : now - lastTelemetryMs_));
+  }
   emit commandChanged(currentLinearMps_, currentAngularRadps_);
   lastCommandMs_ = clock_.elapsed();
 }
@@ -3584,6 +3737,33 @@ void LaserCorrectionController::stop(const QString& reason) {
   const double stoppedHeadingErrorRad = status_.headingErrorRad;
   const double stoppedLinearMps = status_.linearCommandMps;
   const double stoppedAngularRadps = status_.angularCommandRadps;
+  if (wasActive) {
+    emit diagnosticLogMessage(QStringLiteral(
+        "event=correction_task_stopped session=%1 reason=%2 phase=%3 "
+        "cycle=%4 progress_m=%5 collected_samples=%6 gap_valid=%7 "
+        "telemetry_seen=%8 left_speed_mps=%9 right_speed_mps=%10 "
+        "left_target_mps=%11 right_target_mps=%12 applied_linear_mps=%13 "
+        "image_age_ms=%14 detection_age_ms=%15 telemetry_age_ms=%16 "
+        "final_linear_command_mps=%17 final_angular_command_radps=%18")
+        .arg(trajectorySessionId_)
+        .arg(reason)
+        .arg(phaseName(stoppedPhase))
+        .arg(status_.cycleCount)
+        .arg(status_.segmentProgressM, 0, 'f', 6)
+        .arg(status_.collectedSamples)
+        .arg(status_.gapValid ? 1 : 0)
+        .arg(haveTelemetry_ ? 1 : 0)
+        .arg(leftSpeedMps_, 0, 'f', 6)
+        .arg(rightSpeedMps_, 0, 'f', 6)
+        .arg(leftTargetMps_, 0, 'f', 6)
+        .arg(rightTargetMps_, 0, 'f', 6)
+        .arg(driveAppliedLinearMps_, 0, 'f', 6)
+        .arg(lastImageMs_ < 0 ? -1 : clock_.elapsed() - lastImageMs_)
+        .arg(lastValidDetectionMs_ < 0 ? -1 : clock_.elapsed() - lastValidDetectionMs_)
+        .arg(lastTelemetryMs_ < 0 ? -1 : clock_.elapsed() - lastTelemetryMs_)
+        .arg(stoppedLinearMps, 0, 'f', 6)
+        .arg(stoppedAngularRadps, 0, 'f', 6));
+  }
   currentLinearMps_ = 0.0;
   currentAngularRadps_ = 0.0;
   resetControllerError();

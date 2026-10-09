@@ -27,6 +27,7 @@ private:
 
     crawling::ClampMotorController *m_controller = nullptr;
     crawling::DriveSettings m_settings;
+    QComboBox *m_communicationMode = nullptr;
     QComboBox *m_port = nullptr;
     QComboBox *m_baud = nullptr;
     QComboBox *m_bitrate = nullptr;

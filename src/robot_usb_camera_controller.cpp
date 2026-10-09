@@ -8,6 +8,8 @@
 #include <QCameraFormat>
 #include <QMediaCaptureSession>
 #include <QMediaDevices>
+#include <QMediaPlayer>
+#include <QUrl>
 #include <QSize>
 #include <QVideoFrame>
 #include <QVideoSink>
@@ -132,6 +134,53 @@ void RobotUsbCameraController::connectCamera(int deviceIndex, int fps,
   camera_->start();
 }
 
+void RobotUsbCameraController::connectNetworkCamera(const QString& address) {
+  disconnectCamera();
+  QString value = address.trimmed();
+  if (value.isEmpty()) {
+    emit connectionChanged(false, CRAWLING_TEXT("网络摄像头地址为空"));
+    return;
+  }
+  if (!value.contains(QStringLiteral("://")))
+    value.prepend(QStringLiteral("rtsp://"));
+  const QUrl url(value);
+  if (!url.isValid() || url.host().isEmpty()) {
+    const QString message = CRAWLING_TEXT("网络摄像头地址无效：%1").arg(value);
+    emit connectionChanged(false, message);
+    emit logMessage(message);
+    return;
+  }
+
+  networkPlayer_ = new QMediaPlayer(this);
+  networkVideoSink_ = new QVideoSink(this);
+  networkPlayer_->setVideoOutput(networkVideoSink_);
+  connect(networkVideoSink_, &QVideoSink::videoFrameChanged,
+          this, &RobotUsbCameraController::handleVideoFrame);
+  connect(networkPlayer_, &QMediaPlayer::mediaStatusChanged, this,
+          [this, value](QMediaPlayer::MediaStatus status) {
+    if (status == QMediaPlayer::LoadedMedia ||
+        status == QMediaPlayer::BufferedMedia ||
+        status == QMediaPlayer::BufferingMedia) {
+      emit connectionChanged(true, CRAWLING_TEXT("网络摄像头已连接：%1").arg(value));
+      AppLogger::write(QStringLiteral("USB_CAMERA.CONNECTION"),
+                       QStringLiteral("event=network_connect status=OK address=%1").arg(value));
+    }
+  });
+  connect(networkPlayer_, &QMediaPlayer::errorOccurred, this,
+          [this, value](QMediaPlayer::Error, const QString& errorText) {
+    const QString message = CRAWLING_TEXT("网络摄像头打开失败：%1（%2）")
+                                .arg(value, errorText);
+    emit connectionChanged(false, message);
+    emit logMessage(message);
+    AppLogger::error(QStringLiteral("USB_CAMERA.CONNECTION"),
+                     QStringLiteral("event=network_connect result=FAILED address=%1 error=%2")
+                         .arg(value, errorText));
+  });
+  networkPlayer_->setSource(url);
+  networkPlayer_->play();
+  emit logMessage(CRAWLING_TEXT("正在连接网络摄像头：%1").arg(value));
+}
+
 void RobotUsbCameraController::disconnectCamera() {
   const bool wasConnected = camera_ && camera_->isActive();
   if (camera_)
@@ -147,8 +196,16 @@ void RobotUsbCameraController::disconnectCamera() {
   delete captureSession_;
   captureSession_ = nullptr;
 
+  const bool wasNetworkConnected = networkPlayer_ != nullptr;
+  if (networkPlayer_)
+    networkPlayer_->stop();
+  delete networkPlayer_;
+  networkPlayer_ = nullptr;
+  delete networkVideoSink_;
+  networkVideoSink_ = nullptr;
+
   emit connectionChanged(false, CRAWLING_TEXT("USB 摄像头未连接"));
-  if (wasConnected) {
+  if (wasConnected || wasNetworkConnected) {
     AppLogger::write(QStringLiteral("USB_CAMERA.CONNECTION"),
                      QStringLiteral("event=disconnect_complete result=OK"));
   }

@@ -36,7 +36,6 @@ void RobotProfileView::setPoints(const QVector<QVector3D> &points)
     m_rawPoints = points;
     m_hasDetection = false;
     m_receivedAtEpochMs = 0;
-    m_profileDisplayInitialized = false;
     m_displayRangeInitialized = false;
     m_profileUpdatePending = true;
     update();
@@ -49,31 +48,11 @@ void RobotProfileView::setProfileObservation(
     qint64 receivedAtEpochMs)
 {
     m_rawPoints = points;
-    if (!m_profileDisplayInitialized || m_points.size() != points.size()) {
-        m_points = points;
-        m_profileDisplayInitialized = true;
-    } else {
-        constexpr float displayAlpha = 0.35f;
-        for (int index = 0; index < points.size(); ++index) {
-            const QVector3D &current = points[index];
-            QVector3D &displayed = m_points[index];
-            if (!std::isfinite(current.x()) || !std::isfinite(current.z()) ||
-                current.z() <= 0.0f) {
-                displayed = current;
-                continue;
-            }
-            if (!std::isfinite(displayed.x()) || !std::isfinite(displayed.z()) ||
-                displayed.z() <= 0.0f) {
-                displayed = current;
-                continue;
-            }
-            displayed.setX(current.x());
-            displayed.setY(current.y());
-            displayed.setZ(displayed.z() +
-                           displayAlpha * (current.z() - displayed.z()));
-        }
-    }
+    m_points = points;
     m_detection = detection;
+    if (detection.profileAxisHalfSpanX > 0.0 &&
+        std::isfinite(detection.profileAxisHalfSpanX))
+        m_displayHalfSpanX = detection.profileAxisHalfSpanX;
     m_hasDetection = true;
     m_frameNumber = sourceFrameNumber;
     m_receivedAtEpochMs = receivedAtEpochMs;
@@ -84,10 +63,15 @@ void RobotProfileView::setProfileObservation(
         crawling::AppLogger::write(QStringLiteral("CAMERA.UI"),
             QStringLiteral("event=profile_ui_received frame=%1 samples=%2 age_ms=%3 "
                            "detection_valid=%4 view_mode=%5 visible=%6 widget_size=%7x%8 "
-                           "received_profiles=%9 profile_paints=%10")
+                           "received_profiles=%9 profile_paints=%10 "
+                           "coordinate_basis=sdk_x_zero axis_half_span_x=%11 "
+                           "center_x=%12 center_ratio=%13")
                 .arg(sourceFrameNumber).arg(points.size()).arg(now - receivedAtEpochMs)
                 .arg(detection.valid).arg(static_cast<int>(m_viewMode)).arg(isVisible())
-                .arg(width()).arg(height()).arg(m_receivedProfiles).arg(m_profilePaints));
+                .arg(width()).arg(height()).arg(m_receivedProfiles).arg(m_profilePaints)
+                .arg(m_displayHalfSpanX, 0, 'g', 9)
+                .arg(detection.profileCenterX, 0, 'g', 9)
+                .arg(detection.absoluteCenterRatio, 0, 'f', 6));
     }
     m_profileUpdatePending = true;
     update();
@@ -100,8 +84,8 @@ void RobotProfileView::clear()
     m_hasDetection = false;
     m_frameNumber = 0;
     m_receivedAtEpochMs = 0;
-    m_profileDisplayInitialized = false;
     m_displayRangeInitialized = false;
+    m_displayHalfSpanX = 0.0;
     m_profileUpdatePending = false;
     update();
 }
@@ -227,12 +211,10 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
         }
         if (m_viewMode == ViewMode::XZ && vertical <= 0.0) {
             ++nonpositiveZPoints;
-            continue;
         }
         if (m_viewMode == ViewMode::XZ && !validIndices.isEmpty() &&
             horizontal <= valid.last().x()) {
             ++nonincreasingXPoints;
-            continue;
         }
         if (valid.isEmpty()) {
             minHorizontal = maxHorizontal = horizontal;
@@ -260,7 +242,8 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
                            "filtered_points=%4 age_ms=%5 fresh=%6 view_mode=%7 "
                            "horizontal_range=%8,%9 vertical_range=%10,%11 "
                            "area=%12x%13 reason=%14 received_profiles=%15 profile_paints=%16 "
-                           "nonfinite=%17 nonpositive_z=%18 nonincreasing_x=%19 detection_valid=%20")
+                           "nonfinite=%17 nonpositive_z=%18 nonincreasing_x=%19 detection_valid=%20 "
+                           "display_data=raw_xyz first_plotted_column=%21 last_plotted_column=%22")
                 .arg(m_frameNumber).arg(m_points.size()).arg(valid.size())
                 .arg(m_points.size() - valid.size()).arg(age).arg(fresh)
                 .arg(static_cast<int>(m_viewMode))
@@ -269,7 +252,9 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
                 .arg(area.width()).arg(area.height()).arg(reason)
                 .arg(m_receivedProfiles).arg(m_profilePaints)
                 .arg(nonfinitePoints).arg(nonpositiveZPoints).arg(nonincreasingXPoints)
-                .arg(m_detection.valid));
+                .arg(m_detection.valid)
+                .arg(validIndices.isEmpty() ? -1 : validIndices.front())
+                .arg(validIndices.isEmpty() ? -1 : validIndices.back()));
     }
 
     if (valid.size() < 2) {
@@ -280,6 +265,14 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
     }
 
     if (m_viewMode == ViewMode::XZ) {
+        if (!m_hasDetection || m_detection.profileAxisHalfSpanX <= 0.0)
+            m_displayHalfSpanX = std::max(
+                m_displayHalfSpanX,
+                std::max(std::abs(minHorizontal), std::abs(maxHorizontal)));
+        const double halfSpanX = std::max(m_displayHalfSpanX,
+            std::max(std::abs(minHorizontal), std::abs(maxHorizontal)));
+        minHorizontal = -halfSpanX;
+        maxHorizontal = halfSpanX;
         if (!m_displayRangeInitialized) {
             m_displayMinVertical = minVertical;
             m_displayMaxVertical = maxVertical;
@@ -291,12 +284,12 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
             m_displayMaxVertical +=
                 rangeAlpha * (maxVertical - m_displayMaxVertical);
         }
-        minVertical = m_displayMinVertical;
-        maxVertical = m_displayMaxVertical;
+        minVertical = std::min(minVertical, m_displayMinVertical);
+        maxVertical = std::max(maxVertical, m_displayMaxVertical);
     }
 
-    const double horizontalPadding =
-        std::max(0.001, (maxHorizontal - minHorizontal) * 0.05);
+    const double horizontalPadding = m_viewMode == ViewMode::XZ
+        ? 0.0 : std::max(0.001, (maxHorizontal - minHorizontal) * 0.05);
     const double verticalPadding =
         std::max(0.001, (maxVertical - minVertical) * 0.08);
     minHorizontal -= horizontalPadding;
@@ -329,7 +322,14 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
         painter.drawLine(x, plot.top(), x, plot.bottom());
         painter.drawLine(plot.left(), y, plot.right(), y);
     }
+    if (m_viewMode == ViewMode::XZ) {
+        const double zeroX = mapPoint(QPointF(0.0, minVertical)).x();
+        painter.setPen(QPen(QColor(QStringLiteral("#9aa5af")), 1, Qt::DashLine));
+        painter.drawLine(QPointF(zeroX, plot.top()), QPointF(zeroX, plot.bottom()));
+    }
 
+    painter.save();
+    painter.setClipRect(plot);
     painter.setRenderHint(QPainter::Antialiasing, true);
     const bool located = m_viewMode == ViewMode::XZ && fresh &&
                          m_hasDetection && m_detection.valid &&
@@ -377,7 +377,8 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
     int previousIndex = -2;
     for (int validIndex = 0; validIndex < valid.size(); ++validIndex) {
         const QPointF mapped = mapPoint(valid[validIndex]);
-        if (validIndices[validIndex] == previousIndex + 1) {
+        if (validIndices[validIndex] == previousIndex + 1 &&
+            (m_viewMode != ViewMode::XZ || valid[validIndex].x() > valid[validIndex - 1].x())) {
             const QPointF previous = mapPoint(valid[validIndex - 1]);
             painter.drawLine(previous, mapped);
         }
@@ -393,31 +394,15 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
                 painter.drawLine(QPointF(x, plot.top()),
                                  QPointF(x, plot.bottom()));
         }
-        const double centerIndex =
-            (m_detection.gapStartPx + m_detection.gapEndPx) * 0.5;
-        int left = -1;
-        int right = -1;
-        for (int index : validIndices) {
-            if (index <= centerIndex)
-                left = index;
-            if (index >= centerIndex) {
-                right = index;
-                break;
-            }
-        }
-        if (left >= 0 && right >= 0) {
-            const double fraction =
-                right > left ? (centerIndex - left) / (right - left) : 0.0;
-            const double centerX =
-                m_points[left].x() +
-                fraction * (m_points[right].x() - m_points[left].x());
-            const double x = mapPoint(QPointF(centerX, minVertical)).x();
+        if (std::isfinite(m_detection.profileCenterX)) {
+            const double x = mapPoint(QPointF(m_detection.profileCenterX, minVertical)).x();
             painter.setPen(QPen(QColor(QStringLiteral("#ff668a")), 2,
                                 Qt::DashLine));
             painter.drawLine(QPointF(x, plot.top()),
                              QPointF(x, plot.bottom()));
         }
     }
+    painter.restore();
 
     painter.setPen(QColor(QStringLiteral("#aebed0")));
     const QString state = !fresh

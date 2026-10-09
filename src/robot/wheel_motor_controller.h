@@ -32,7 +32,7 @@ struct WheelMotorConfig {
   int leftDirectionSign = -1;
   int rightDirectionSign = 1;
   double wheelRadiusM = 0.07953;
-  double motorOutputToWheelRatio = 36.0;
+  double motorOutputToWheelRatio = 1.0;
   double maximumWheelSpeedMps = 0.160;
   // The installed left drive tops out near 4,350 dps while the right drive
   // reaches about 14,300 dps. Keep paired motion below the slower drive's
@@ -73,8 +73,8 @@ class WheelMotorController final {
 
   bool isInitialized() const { return initialized_; }
   bool isStopped() const { return !leftRunning_ && !rightRunning_; }
-  int lastLeftCommandDps() const { return lastLeftCommandDps_; }
-  int lastRightCommandDps() const { return lastRightCommandDps_; }
+  double lastLeftCommandDps() const { return lastLeftCommandDps_; }
+  double lastRightCommandDps() const { return lastRightCommandDps_; }
   double lastLeftCommandMps() const;
   double lastRightCommandMps() const;
   double maximumCommandableWheelSpeedMps() const;
@@ -84,8 +84,12 @@ class WheelMotorController final {
   std::int64_t lastRightHoldAngleHundredthDegree() const {
     return lastRightHoldAngleHundredthDegree_;
   }
-  double leftRawFeedbackDps() const { return leftFeedback_.speedDps; }
-  double rightRawFeedbackDps() const { return rightFeedback_.speedDps; }
+  double leftRawFeedbackDps() const {
+    return canMode_ ? leftCanFeedback_.outputSpeedDps : leftFeedback_.speedDps;
+  }
+  double rightRawFeedbackDps() const {
+    return canMode_ ? rightCanFeedback_.outputSpeedDps : rightFeedback_.speedDps;
+  }
   bool setWheelSpeeds(double leftMps, double rightMps);
   bool stop();
   bool reset();
@@ -105,8 +109,8 @@ class WheelMotorController final {
                  int directionSign);
   QSerialPort* serialPortFor(bool leftMotor) const;
   QByteArray& receiveBufferFor(bool leftMotor);
-  int toMotorSpeedDps(double wheelMps, int directionSign) const;
-  double toWheelSpeedMps(int motorSpeedDps, int directionSign) const;
+  double toMotorSpeedDps(double wheelMps, int directionSign) const;
+  double toWheelSpeedMps(double motorSpeedDps, int directionSign) const;
   void setError(QString* errorMessage, const QString& text) const;
 
   WheelMotorConfig config_;
@@ -121,8 +125,8 @@ class WheelMotorController final {
   bool canMode_ = true;
   bool leftRunning_ = false;
   bool rightRunning_ = false;
-  int lastLeftCommandDps_ = 0;
-  int lastRightCommandDps_ = 0;
+  double lastLeftCommandDps_ = 0.0;
+  double lastRightCommandDps_ = 0.0;
   std::int64_t lastLeftHoldAngleHundredthDegree_ = 0;
   std::int64_t lastRightHoldAngleHundredthDegree_ = 0;
   MwdMotorFeedback leftFeedback_;

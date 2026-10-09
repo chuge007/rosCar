@@ -526,9 +526,11 @@ void RobotSensorController::captureCameraFrame() {
           QStringLiteral("event=payload_snapshot frame=%1 callback=%2 raw_size=%3x%4 raw_bytes=%5 "
                          "decoded_size=%6x%7 decoded_bytes=%8 frame_valid=%9 decode_reason=%10 "
                          "scales=%11,%12,%13 offsets=%14,%15,%16 device_timestamp=%17 "
-                         "image_callbacks=%18 profile_callbacks=%19 raw_head_middle_tail_hex=%20 raw_image_type=%21")
+                         "image_callbacks=%18 profile_callbacks=%19 raw_head_middle_tail_hex=%20 raw_image_type=%21 "
+                         "payload_encoding=%22 expected_raw_bytes=%23 rejected_profiles=%24 "
+                         "rejected_profile_size=%25x%26 rejected_profile_bytes=%27 rejected_profile_reason=%28")
               .arg(frame->frame_number)
-              .arg(details.profile_callback ? QStringLiteral("profile_xyz_s16")
+              .arg(details.profile_callback ? QStringLiteral("profile")
                                             : QStringLiteral("image"))
               .arg(details.raw_width).arg(details.raw_height).arg(details.raw_data_bytes)
               .arg(frame->width).arg(frame->height).arg(frame->data.size())
@@ -537,16 +539,26 @@ void RobotSensorController::captureCameraFrame() {
               .arg(frame->z_scale, 0, 'g', 9)
               .arg(frame->x_offset).arg(frame->y_offset).arg(frame->z_offset)
               .arg(frame->timestamp).arg(details.image_callbacks).arg(details.profile_callbacks)
-              .arg(QString::fromLatin1(rawSamples.toHex())).arg(details.raw_image_type));
+              .arg(QString::fromLatin1(rawSamples.toHex())).arg(details.raw_image_type)
+              .arg(QString::fromStdString(details.payload_encoding)).arg(details.expected_raw_bytes)
+              .arg(details.rejected_profiles).arg(details.rejected_profile_width)
+              .arg(details.rejected_profile_height).arg(details.rejected_profile_bytes)
+              .arg(QString::fromStdString(details.rejected_profile_reason)));
     }
     if (!frame->valid) {
       ++cameraInvalidFrameCount_;
       if (!cameraInvalidFrameActive_) {
         cameraInvalidFrameActive_ = true;
         AppLogger::warning(QStringLiteral("CAMERA.ACQUISITION"),
-                           QStringLiteral("event=invalid_frame frame=%1 type=%2 size=%3x%4 data_bytes=%5")
+                           QStringLiteral("event=invalid_frame frame=%1 type=%2 size=%3x%4 data_bytes=%5 "
+                                          "raw_bytes=%6 expected_raw_bytes=%7 reason=%8 source=%9")
                                .arg(frame->frame_number).arg(static_cast<quint32>(frame->type))
-                               .arg(frame->width).arg(frame->height).arg(frame->data.size()));
+                               .arg(frame->width).arg(frame->height).arg(frame->data.size())
+                               .arg(frame->diagnostics.raw_data_bytes)
+                               .arg(frame->diagnostics.expected_raw_bytes)
+                               .arg(QString::fromStdString(frame->diagnostics.decode_reason))
+                               .arg(frame->diagnostics.profile_callback ? QStringLiteral("profile")
+                                                                      : QStringLiteral("image")));
       }
       return;
     }
@@ -586,10 +598,11 @@ void RobotSensorController::captureCameraFrame() {
         frame->type == mv3dlp::FrameType::point_cloud ||
         frame->type == mv3dlp::FrameType::profile_abc32) {
       const auto cloud = camera_->convertDepthToPointCloud(*frame);
+      if (!cloud.valid) throw std::runtime_error("SDK point cloud is marked invalid.");
       pointCount = cloud.points.size();
       if (lastCameraPayloadDiagnosticMs_ == frameReceivedMs &&
           (!correctionProfileMode_ || cloud.width < 32 || cloud.height == 0 ||
-           size_t(cloud.width) * cloud.height > cloud.points.size())) {
+           size_t(cloud.width) * cloud.height != cloud.points.size())) {
         const QString reason = !correctionProfileMode_ ? QStringLiteral("profile_mode_inactive")
             : cloud.width < 32 ? QStringLiteral("too_few_columns")
             : cloud.height == 0 ? QStringLiteral("no_rows")
@@ -603,7 +616,7 @@ void RobotSensorController::captureCameraFrame() {
       // invalid slots and original column order; never concatenate scan rows.
       if (correctionProfileMode_ && frameReceivedMs - lastCorrectionProfileEmitMs_ >= 33 &&
           cloud.width >= 32 && cloud.height > 0 &&
-          size_t(cloud.width) * cloud.height <= cloud.points.size()) {
+          size_t(cloud.width) * cloud.height == cloud.points.size()) {
         QVector<QVector3D> rawProfile;
         rawProfile.reserve(int(cloud.width));
         const std::size_t rowStart = size_t(cloud.height - 1) * cloud.width;
@@ -619,11 +632,39 @@ void RobotSensorController::captureCameraFrame() {
           int validXz = 0;
           int finiteXz = 0;
           int zeroXz = 0;
-          for (const QVector3D& point : rawProfile) {
+          int firstFiniteIndex = -1;
+          int lastFiniteIndex = -1;
+          int invalidRuns = 0;
+          int invalidRunLength = 0;
+          int longestInvalidRun = 0;
+          int nonincreasingX = 0;
+          double minimumX = 0.0;
+          double maximumX = 0.0;
+          double minimumZ = 0.0;
+          double maximumZ = 0.0;
+          for (int index = 0; index < rawProfile.size(); ++index) {
+            const QVector3D& point = rawProfile[index];
             if (std::isfinite(point.x()) && std::isfinite(point.z())) {
+              if (firstFiniteIndex < 0) {
+                firstFiniteIndex = index;
+                minimumX = maximumX = point.x();
+                minimumZ = maximumZ = point.z();
+              } else {
+                minimumX = std::min(minimumX, double(point.x()));
+                maximumX = std::max(maximumX, double(point.x()));
+                minimumZ = std::min(minimumZ, double(point.z()));
+                maximumZ = std::max(maximumZ, double(point.z()));
+                if (lastFiniteIndex == index - 1 && point.x() <= rawProfile[lastFiniteIndex].x())
+                  ++nonincreasingX;
+              }
+              lastFiniteIndex = index;
+              invalidRunLength = 0;
               ++finiteXz;
               if (point.z() > 0.0f) ++validXz;
               if (point.x() == 0.0f && point.z() == 0.0f) ++zeroXz;
+            } else {
+              if (invalidRunLength == 0) ++invalidRuns;
+              longestInvalidRun = std::max(longestInvalidRun, ++invalidRunLength);
             }
           }
           const QString reason = validXz > 0 ? QStringLiteral("OK")
@@ -631,7 +672,10 @@ void RobotSensorController::captureCameraFrame() {
               : finiteXz == 0 ? QStringLiteral("all_nonfinite_xz")
                               : QStringLiteral("no_positive_z");
           AppLogger::write(QStringLiteral("CAMERA.PROFILE"),
-                           QStringLiteral("event=profile_emit frame=%1 width=%2 height=%3 selected_row=%4 valid_xz=%5 samples=%6 finite_xz=%7 zero_xz=%8 reason=%9 head_xz=%10,%11 middle_xz=%12,%13 tail_xz=%14,%15")
+                           QStringLiteral("event=profile_emit frame=%1 width=%2 height=%3 selected_row=%4 valid_xz=%5 samples=%6 finite_xz=%7 zero_xz=%8 reason=%9 head_xz=%10,%11 middle_xz=%12,%13 tail_xz=%14,%15 "
+                                          "row_complete=%16 cloud_points=%17 expected_cloud_points=%18 "
+                                          "x_range=%19,%20 z_range=%21,%22 first_finite_column=%23 last_finite_column=%24 "
+                                          "invalid_runs=%25 longest_invalid_run=%26 nonincreasing_x_pairs=%27 source=%28")
                                .arg(frame->frame_number)
                                .arg(cloud.width)
                                .arg(cloud.height)
@@ -643,7 +687,15 @@ void RobotSensorController::captureCameraFrame() {
                                .arg(rawProfile[rawProfile.size() / 2].x(), 0, 'g', 9)
                                .arg(rawProfile[rawProfile.size() / 2].z(), 0, 'g', 9)
                                .arg(rawProfile.back().x(), 0, 'g', 9)
-                               .arg(rawProfile.back().z(), 0, 'g', 9));
+                               .arg(rawProfile.back().z(), 0, 'g', 9)
+                               .arg(rawProfile.size() == int(cloud.width))
+                               .arg(cloud.points.size()).arg(quint64(cloud.width) * cloud.height)
+                               .arg(minimumX, 0, 'g', 9).arg(maximumX, 0, 'g', 9)
+                               .arg(minimumZ, 0, 'g', 9).arg(maximumZ, 0, 'g', 9)
+                               .arg(firstFiniteIndex).arg(lastFiniteIndex).arg(invalidRuns)
+                               .arg(longestInvalidRun).arg(nonincreasingX)
+                               .arg(frame->diagnostics.profile_callback ? QStringLiteral("profile")
+                                                                      : QStringLiteral("image")));
         }
         if (correctionProfilePreparing_) {
           correctionProfilePreparing_ = false;

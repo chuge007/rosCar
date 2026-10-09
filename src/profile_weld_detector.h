@@ -165,6 +165,20 @@ class ProfileWeldDetector final {
         differences.push_back(p.z() - points[valid.back()].z());
       valid.push_back(i);
     }
+    const double observedHalfSpanX =
+        std::max(std::abs(scanMinimumX), std::abs(scanMaximumX));
+    result.profileAxisHalfSpanX =
+        std::isfinite(config.profileAxisHalfSpanX) && config.profileAxisHalfSpanX > 0.0
+            ? config.profileAxisHalfSpanX : observedHalfSpanX;
+    if (!config.profileAxisLocked)
+      result.profileAxisHalfSpanX =
+          std::max(result.profileAxisHalfSpanX, observedHalfSpanX);
+    if (result.profileAxisHalfSpanX <= 0.0) return result;
+    const auto xRatio = [&result](double x) {
+      return std::clamp(0.5 + x / (2.0 * result.profileAxisHalfSpanX), 0.0, 1.0);
+    };
+    result.profileLineStartRatio = xRatio(scanMinimumX);
+    result.profileLineEndRatio = xRatio(scanMaximumX);
     if (valid.size() < 24 || differences.size() < 12) return result;
     // Suppress isolated SDK height spikes before estimating the parent plane
     // and raised contour. Keep the original scan indices so all detector
@@ -185,8 +199,8 @@ class ProfileWeldDetector final {
     const auto zAt = [&filteredZ](int index) { return filteredZ[index]; };
     const double step = median(differences);
     for (double& d : differences) d = std::abs(d - step);
-    // Units cancel: never assume the exported CSV and SDK share a height unit.
-    double noise = std::max(1e-6, 1.4826 * median(differences) / std::sqrt(2.0));
+    const double differenceNoise =
+        std::max(1e-6, 1.4826 * median(differences) / std::sqrt(2.0));
     const int edgeCount = std::max(6, static_cast<int>(std::ceil(
         valid.size() * std::clamp(config.profileTuning.baselineEdgeRatio, 0.03, 0.30))));
     std::vector<double> leftX, leftZ, rightX, rightZ;
@@ -200,17 +214,14 @@ class ProfileWeldDetector final {
     if (rx <= lx) return result;
     double slope = (median(rightZ) - median(leftZ)) / (rx - lx);
     double offset = median(leftZ) - slope * lx;
-    // Fit only supported parent points, iteratively excluding raised regions
-    // and downward dropouts. Shoulder initialization avoids fitting the peak.
     for (int pass = 0; pass < 4; ++pass) {
       std::vector<double> errors;
-      for (int k = 0; k < edgeCount; ++k) {
-        for (int i : {valid[k],valid[valid.size()-1-k]})
-          errors.push_back(zAt(i)-offset-slope*points[i].x());
-      }
+      errors.reserve(valid.size());
+      for (int index : valid)
+        errors.push_back(zAt(index) - offset - slope * points[index].x());
       const double bias = median(errors);
-      for (double& e : errors) e = std::abs(e-bias);
-      const double parentNoise = std::max(noise,1.4826*median(errors));
+      for (double& error : errors) error = std::abs(error - bias);
+      const double parentNoise = std::max(differenceNoise, 1.4826 * median(errors));
       offset += bias;
       double sx = 0, sz = 0, sxx = 0, sxz = 0, count = 0;
       for (int i : valid) {
@@ -225,11 +236,10 @@ class ProfileWeldDetector final {
       offset = (sz - slope*sx) / count - slope*lx;
     }
     std::vector<double> deviations;
-    for (int k = 0; k < edgeCount; ++k) {
-      for (int i : {valid[k],valid[valid.size()-1-k]})
-        deviations.push_back(std::abs(zAt(i)-offset-slope*points[i].x()));
-    }
-    noise = std::max(noise,1.4826*median(deviations));
+    deviations.reserve(valid.size());
+    for (int index : valid)
+      deviations.push_back(std::abs(zAt(index) - offset - slope * points[index].x()));
+    const double noise = std::max(differenceNoise, 1.4826 * median(deviations));
     result.profileNoise = noise;
     result.profileBaselineSlope = slope;
     result.profileBaselineOffset = offset;
@@ -242,8 +252,9 @@ class ProfileWeldDetector final {
     const int scanLength = std::max(1, valid.back() - valid.front() + 1);
     const int minWidth = std::max(6, static_cast<int>(std::ceil(
         scanLength * std::clamp(config.profileTuning.minimumWidthRatio, 0.001, 0.20))));
-    const int maxHole = std::max(2, static_cast<int>(std::ceil(
-        scanLength * std::clamp(config.profileTuning.maximumCandidateHoleRatio, 0.0, 0.25))));
+    const int maxHole = static_cast<int>(std::floor(
+        scanLength * std::clamp(config.profileTuning.maximumCandidateHoleRatio, 0.0, 0.25)));
+    const int maximumBaselineSamples = std::max(2, smoothingRadius);
     const int shoulder = std::max(4, static_cast<int>(std::ceil(
         scanLength * std::clamp(config.profileTuning.shoulderRatio, 0.002, 0.05))));
     double best = 0, runnerUp = 0;
@@ -260,39 +271,40 @@ class ProfileWeldDetector final {
       if (!(residual[i] > grow)) { ++i; continue; }
       const int start = i;
       int end = i, lastRaised = i, support = 0, seeds = 0, longestHole = 0;
+      int baselineSamples = 0;
       double area = 0;
-      double maximumResidual = 0.0;
       for (; i <= valid.back(); ++i) {
         if (residual[i] > grow) {
           longestHole = std::max(longestHole, i-lastRaised-1);
           lastRaised = end = i;
+          baselineSamples = 0;
           ++support;
           if (residual[i] > seed) ++seeds;
-          maximumResidual = std::max(maximumResidual, residual[i]);
           area += std::min(residual[i], seed*10);
         } else {
+          if (std::isfinite(residual[i]) && ++baselineSamples >= maximumBaselineSamples) break;
           if (i-lastRaised > maxHole) break;
         }
       }
       const int length = end-start+1;
       const double supportRatio = double(support) / std::max(1, length);
-      const bool obviousRaisedRegion =
-          maximumResidual >= noise * 3.0 && supportRatio >= 0.10;
       if (length < minWidth ||
           seeds < std::clamp(config.profileTuning.minimumSeedCount, 1, 32) ||
           supportRatio < std::clamp(config.profileTuning.minimumSupportRatio, 0.05, 0.98) ||
           longestHole > length * std::clamp(config.profileTuning.maximumInternalHoleRatio, 0.0, 0.95)) {
-        if (!obviousRaisedRegion || length < minWidth)
-          continue;
+        continue;
       }
       int left = 0, right = 0;
+      const double shoulderTolerance = std::max(grow, noise * 3.0);
       // Both shoulders must return to the same tilted parent baseline.
       for (int j = 1; j <= shoulder*3; ++j) {
-        if (start-j >= 0 && std::abs(residual[start-j]) <= grow) ++left;
-        if (end+j < n && std::abs(residual[end+j]) <= grow) ++right;
+        if (start-j >= 0 && std::abs(residual[start-j]) <= shoulderTolerance) ++left;
+        if (end+j < n && std::abs(residual[end+j]) <= shoulderTolerance) ++right;
       }
-      if (std::min(left,right) < shoulder && !obviousRaisedRegion) continue;
-      const double center = (start+end)*.5/(n-1);
+      if (std::min(left,right) < shoulder) continue;
+      const double centerX = (double(points[start].x()) + points[end].x()) * 0.5;
+      const double center = xRatio(centerX);
+      const double absoluteWidth = xRatio(points[end].x()) - xRatio(points[start].x());
       // Profile exports can contain invalid slots and zero padding after the
       // last real scan sample. Normalize the raised footprint by the valid
       // scan extent, otherwise padding makes an unchanged weld appear to
@@ -311,7 +323,7 @@ class ProfileWeldDetector final {
       // for ranking candidates, but it must not erase a candidate whose center
       // and two shoulder supports remain continuous.
       const bool widthJump = config.expectedAbsoluteGapWidthRatio > 0 &&
-          std::abs(width-config.expectedAbsoluteGapWidthRatio) >
+          std::abs(absoluteWidth-config.expectedAbsoluteGapWidthRatio) >
               config.maximumTrackingGapWidthJumpRatio;
       double score = area / seed;
       if (widthJump) score *= 0.45;
@@ -346,7 +358,7 @@ class ProfileWeldDetector final {
           matchedTemplateWidthScale = widthScale;
           candidateTemplateMatched = true;
         }
-        if (!candidateTemplateMatched && !obviousRaisedRegion) {
+        if (!candidateTemplateMatched) {
           templateRejected = true;
           continue;
         }
@@ -362,7 +374,11 @@ class ProfileWeldDetector final {
       // Use footprint midpoint, not the highest point: asymmetric peaks must
       // not move the steering target when their height changes.
       result.absoluteCenterRatio = center;
-      result.normalizedCenter = ((start+end)*.5-valid.front())/(valid.back()-valid.front());
+      result.profileCenterX = centerX;
+      result.profileGapStartRatio = xRatio(points[start].x());
+      result.profileGapEndRatio = xRatio(points[end].x());
+      result.normalizedCenter = std::clamp(
+          (centerX - scanMinimumX) / (scanMaximumX - scanMinimumX), 0.0, 1.0);
       result.confidence = result.contourConfidence = .5 + .4*support/length;
       result.supportingSamples = support;
       result.templateEvaluated = templateActive;

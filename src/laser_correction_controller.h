@@ -245,13 +245,17 @@ class LaserCorrectionController final : public QObject {
   double lastObservedGapAbsoluteCenterRatio_ = 0.5;
   bool lastObservedWasContour_ = false;
   qint64 lastTelemetryMs_ = -1;
+  qint64 lastStartupDiagnosticMs_ = -1;
+  qint64 lastInvalidTelemetryDiagnosticMs_ = -1;
   qint64 previousControlMs_ = -1;
   qint64 lastCommandMs_ = -1;
+  qint64 lastPhaseCommandDiagnosticMs_ = -1;
   qint64 lastControlDiagnosticMs_ = -1;
   qint64 lastDetectionDiagnosticMs_ = -1;
   qint64 lastCenterTrendSampleMs_ = -1;
   qint64 lastRawFrameDiagnosticMs_ = -1;
   qint64 lastProfileFrameDiagnosticMs_ = -1;
+  double profileAxisHalfSpanX_ = 0.0;
   qint64 lastRawFrameSaveMs_ = -1;
   bool rawFrameSavePending_ = false;
   bool rawArchiveDisabled_ = false;

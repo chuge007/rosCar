@@ -6,6 +6,7 @@
 
 class QCamera;
 class QMediaCaptureSession;
+class QMediaPlayer;
 class QVideoFrame;
 class QVideoSink;
 
@@ -21,6 +22,7 @@ class RobotUsbCameraController final : public QObject {
  public slots:
   void scanDevices();
   void connectCamera(int deviceIndex, int fps, bool flipHorizontal, bool flipVertical);
+  void connectNetworkCamera(const QString& address);
   void disconnectCamera();
   void shutdown();
 
@@ -37,6 +39,8 @@ class RobotUsbCameraController final : public QObject {
   QCamera* camera_ = nullptr;
   QMediaCaptureSession* captureSession_ = nullptr;
   QVideoSink* videoSink_ = nullptr;
+  QMediaPlayer* networkPlayer_ = nullptr;
+  QVideoSink* networkVideoSink_ = nullptr;
   bool flipHorizontal_ = false;
   bool flipVertical_ = false;
 };

@@ -40,8 +40,9 @@ CanFrame ServoProtocol::speedCommand(std::uint8_t motorId, double outputSpeedDps
   CanFrame frame;
   frame.id = kCommandIdBase + motorId;
   frame.data[0] = kSpeedClosedLoop;
+  // The 0xA2 payload stores a closed-loop output speed in 0.01 deg/s units.
   const double bounded = std::clamp(std::round(std::isfinite(outputSpeedDps)
-                                                    ? outputSpeedDps
+                                                    ? outputSpeedDps * 100.0
                                                     : 0.0),
                                       static_cast<double>(std::numeric_limits<std::int32_t>::min()),
                                       static_cast<double>(std::numeric_limits<std::int32_t>::max()));

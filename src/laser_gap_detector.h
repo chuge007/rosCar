@@ -91,6 +91,8 @@ struct LaserGapDetectorConfig {
   // Once tracking starts, locking the axis prevents a noisy fallback profile
   // from changing the coordinate system between frames.
   int expectedAxis = 0;
+  double profileAxisHalfSpanX = 0.0;
+  bool profileAxisLocked = false;
   ProfileWeldTuning profileTuning;
   QVector<ProfileWeldTemplate> profileTemplates;
 };
@@ -126,6 +128,12 @@ struct LaserGapDetection {
   bool contourFallback = false;
   bool opencvContour = false;
   bool profileContour = false; // SDK X/Z scan; *Px fields denote scan indices.
+  double profileAxisHalfSpanX = 0.0;
+  double profileCenterX = 0.0;
+  double profileGapStartRatio = 0.0;
+  double profileGapEndRatio = 1.0;
+  double profileLineStartRatio = 0.0;
+  double profileLineEndRatio = 1.0;
   double profileNoise = 0.0; // Native Z units, not pixel height or probability.
   double profileBaselineSlope = 0.0;
   double profileBaselineOffset = 0.0;

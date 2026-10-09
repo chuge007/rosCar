@@ -57,8 +57,8 @@ private:
     bool m_hasDetection = false;
     quint32 m_frameNumber = 0;
     qint64 m_receivedAtEpochMs = 0;
-    bool m_profileDisplayInitialized = false;
     bool m_displayRangeInitialized = false;
+    double m_displayHalfSpanX = 0.0;
     double m_displayMinVertical = 0.0;
     double m_displayMaxVertical = 1.0;
     bool m_profileUpdatePending = false;

@@ -196,10 +196,12 @@ private:
     QLineEdit *m_laserSerial = nullptr;
     QComboBox *m_laserDevice = nullptr;
     QComboBox *m_cameraDevice = nullptr;
+    QLineEdit *m_networkCameraUrl = nullptr;
     QSpinBox *m_cameraFps = nullptr;
     QCheckBox *m_cameraAutoConnect = nullptr;
     QCheckBox *m_cameraFlipHorizontal = nullptr;
     QCheckBox *m_cameraFlipVertical = nullptr;
+    QComboBox *m_clampCommunicationMode = nullptr;
     QComboBox *m_clampPort = nullptr;
     QComboBox *m_clampBaud = nullptr;
     QComboBox *m_clampCanBitrate = nullptr;

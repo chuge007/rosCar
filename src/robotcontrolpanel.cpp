@@ -9,6 +9,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QFrame>
 #include <QDateTime>
 #include <QDialog>
@@ -32,6 +33,7 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
+#include <QStackedWidget>
 #include <QSlider>
 #include <QSpinBox>
 #include <QStyle>
@@ -190,6 +192,13 @@ RobotControlPanel::RobotControlPanel(QWidget *parent) : QWidget(parent)
             this, [this](bool ready) {
                 if (!m_autoCorrectionStartPending)
                     return;
+                crawling::AppLogger::write(
+                    QStringLiteral("CORRECTION.START"),
+                    QStringLiteral(
+                        "event=profile_prepare_complete ready=%1 pending=%2 executable=%3")
+                        .arg(ready ? 1 : 0)
+                        .arg(m_autoCorrectionStartPending ? 1 : 0)
+                        .arg(QCoreApplication::applicationFilePath()));
                 if (ready) {
                     m_autoCorrectionStartPending = false;
                     QMetaObject::invokeMethod(
@@ -595,8 +604,14 @@ void RobotControlPanel::buildUi()
     connect(emergency, &QPushButton::clicked, this, &RobotControlPanel::emergencyStop);
     connect(m_autoCorrectionStart, &QPushButton::clicked,
             this, &RobotControlPanel::startAutoCorrection);
-    connect(m_autoCorrectionStop, &QPushButton::clicked,
-            this, &RobotControlPanel::stopAutoCorrection);
+    connect(m_autoCorrectionStop, &QPushButton::clicked, this, [this] {
+        crawling::AppLogger::write(
+            QStringLiteral("CORRECTION.STOP"),
+            QStringLiteral("event=correction_stop_requested source=ui_stop_button active=%1 pending=%2")
+                .arg(m_autoCorrectionActive ? 1 : 0)
+                .arg(m_autoCorrectionStartPending ? 1 : 0));
+        stopAutoCorrection();
+    });
     connect(m_speedSlider, &QSlider::valueChanged, this, [this](int value) {
         m_speedLabel->setText(QStringLiteral("%1%").arg(value));
     });
@@ -728,9 +743,10 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     m_wheelRadius = makeDouble(1.0, 500.0, 1.0, 2, mapping);
     m_trackWidth = makeDouble(10.0, 2000.0, 1.0, 1, mapping);
     m_ratio = makeDouble(0.001, 1000.0, 0.01, 4, mapping);
+    m_ratio->setToolTip(QStringLiteral("只填写输出轴到车轮的外部传动比；直接带轮填 1，不包含电机内部减速比"));
     mappingForm->addRow(QStringLiteral("轮半径 (mm)"), m_wheelRadius);
     mappingForm->addRow(QStringLiteral("轮距 (mm)"), m_trackWidth);
-    mappingForm->addRow(QStringLiteral("电机输出/轮子传动比"), m_ratio);
+    mappingForm->addRow(QStringLiteral("输出轴到车轮传动比"), m_ratio);
     compactGroup(mapping);
     rightColumn->addWidget(mapping);
 
@@ -802,6 +818,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     for (int index = 0; index < 10; ++index)
         m_cameraDevice->addItem(QStringLiteral("设备 %1").arg(index), index);
     m_cameraDevice->setCurrentIndex(-1);
+    m_networkCameraUrl = new QLineEdit(usb);
+    m_networkCameraUrl->setPlaceholderText(QStringLiteral("例如 rtsp://192.168.1.50:554/stream 或 http://192.168.1.50/video"));
     m_cameraFps = new QSpinBox(usb);
     m_cameraFps->setRange(1, 120);
     m_cameraAutoConnect = new QCheckBox(QStringLiteral("参与连接全部接口和启动时自动连接"), usb);
@@ -817,6 +835,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     auto *usbDisconnect = actionButton(QStringLiteral("断开 USB 摄像头"));
     m_usbConfigState = new QLabel(QStringLiteral("未连接"), usb);
     usbForm->addRow(QStringLiteral("设备"), m_cameraDevice);
+    usbForm->addRow(QStringLiteral("网络摄像头地址"), m_networkCameraUrl);
     usbForm->addRow(QStringLiteral("帧率 (fps)"), m_cameraFps);
     usbForm->addRow(QString(), buttonRow({usbScan, usbConnect, usbDisconnect}));
     auto *cameraOptions = new QWidget;
@@ -844,14 +863,23 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     compactGroup(usb);
     leftColumn->addWidget(usb);
 
-    auto *clamp = new QGroupBox(QStringLiteral("夹子电机 CANopen"), page);
+    auto *clamp = new QGroupBox(QStringLiteral("夹子电机通信"), page);
     auto *clampForm = new QFormLayout(clamp);
+    m_clampCommunicationMode = new QComboBox(clamp);
+    m_clampCommunicationMode->addItem(QStringLiteral("TT CANopen CAN"),
+                                       QStringLiteral("tt_canopen"));
+    m_clampCommunicationMode->addItem(QStringLiteral("MWD RS485"),
+                                       QStringLiteral("mwd_rs485"));
+    m_clampCommunicationMode->addItem(QStringLiteral("MWD CAN"),
+                                       QStringLiteral("mwd_can"));
     m_clampPort = new QComboBox(clamp);
     m_clampBaud = new QComboBox(clamp);
-    for (int baud : {115200, 230400, 460800, 921600})
+    for (int baud : {9600, 19200, 38400, 57600, 115200, 230400, 460800,
+                     500000, 921600, 1000000, 1500000, 2000000, 2500000,
+                     4000000})
         m_clampBaud->addItem(QString::number(baud), baud);
     m_clampCanBitrate = new QComboBox(clamp);
-    for (int bitrate : {125000, 250000, 500000, 800000, 1000000})
+    for (int bitrate : {100000, 125000, 250000, 500000, 800000, 1000000})
         m_clampCanBitrate->addItem(QString::number(bitrate), bitrate);
     m_clampNodeId = new QSpinBox(clamp);
     m_clampNodeId->setRange(0, 127);
@@ -867,10 +895,39 @@ QWidget *RobotControlPanel::buildConfigurationPage()
         box->addItem(QStringLiteral("+1 正向"), 1);
         box->addItem(QStringLiteral("-1 反向"), -1);
     }
-    clampForm->addRow(QStringLiteral("SLCAN 串口"), m_clampPort);
-    clampForm->addRow(QStringLiteral("适配器波特率"), m_clampBaud);
-    clampForm->addRow(QStringLiteral("CAN 波特率"), m_clampCanBitrate);
-    clampForm->addRow(QStringLiteral("CANopen 节点 ID"), m_clampNodeId);
+    clampForm->addRow(QStringLiteral("通信方式"), m_clampCommunicationMode);
+    clampForm->addRow(QStringLiteral("通信端口"), m_clampPort);
+    clampForm->addRow(QStringLiteral("串口/适配器波特率"), m_clampBaud);
+    clampForm->addRow(QStringLiteral("CAN 波特率（CAN 模式）"), m_clampCanBitrate);
+    clampForm->addRow(QStringLiteral("TT CANopen 节点 ID"), m_clampNodeId);
+    auto *clampModeOptions = new QStackedWidget(clamp);
+    auto *clampTtCanOptions = new QLabel(
+        QStringLiteral("TT CANopen：使用上方 CAN 波特率和 CANopen 节点 ID"),
+        clampModeOptions);
+    clampTtCanOptions->setWordWrap(true);
+    auto *clampRs485Options = new QLabel(
+        QStringLiteral("MWD RS485 Modbus RTU：速度模式写入 WorkMode=2、T_Velocity=6010"),
+        clampModeOptions);
+    clampRs485Options->setWordWrap(true);
+    auto *clampMwdCanOptions = new QLabel(
+        QStringLiteral("MWD CAN：使用上方 CAN 波特率，电机 ID 范围为 1-32"),
+        clampModeOptions);
+    clampMwdCanOptions->setWordWrap(true);
+    clampModeOptions->addWidget(clampTtCanOptions);
+    clampModeOptions->addWidget(clampRs485Options);
+    clampModeOptions->addWidget(clampMwdCanOptions);
+    clampForm->addRow(QStringLiteral("模式参数"), clampModeOptions);
+    const auto updateClampModeOptions = [clampModeOptions, this](int index) {
+        clampModeOptions->setCurrentIndex(index);
+        const int maximumMotorId = index == 0 ? 127 : 32;
+        for (QSpinBox *box : {m_clampXId, m_clampYId, m_clampZId}) {
+            box->setRange(1, maximumMotorId);
+        }
+    };
+    connect(m_clampCommunicationMode,
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
+            clampModeOptions, updateClampModeOptions);
+    updateClampModeOptions(m_clampCommunicationMode->currentIndex());
     auto addClampAxis = [clamp, clampForm](const QString &name, QSpinBox *id,
                                            QComboBox *sign) {
         auto *row = new QWidget(clamp);
@@ -974,7 +1031,9 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     for (QComboBox *box : {m_wheelCommunicationMode, m_wheelCanPort,
                            m_wheelCanBaud, m_wheelCanBitrate, m_leftPort,
                            m_rightPort, m_leftBaud, m_rightBaud, m_leftSign,
-                           m_rightSign})
+                           m_rightSign, m_clampCommunicationMode, m_clampPort,
+                           m_clampBaud, m_clampCanBitrate, m_clampXSign,
+                           m_clampYSign, m_clampZSign})
         connect(box, QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this, [markDirty](int) { markDirty(); });
     for (QCheckBox *box : {m_cameraAutoConnect, m_cameraFlipHorizontal,
@@ -1204,10 +1263,11 @@ void RobotControlPanel::showProfileTemplateDialog()
     form->addRow(QStringLiteral("去噪强度（越大越平滑）"), smoothingRadius);
     form->addRow(QStringLiteral("低矮拱起灵敏度（越大越敏感）"), sensitivity);
     form->addRow(QStringLiteral("最小拱起宽度 (%)"), minimumWidthRatio);
-    form->addRow(QStringLiteral("允许连续轮廓断开 (%)"), candidateHoleRatio);
+    form->addRow(QStringLiteral("允许连续缺测跨度 (%)"), candidateHoleRatio);
     auto *hint = new QLabel(
         QStringLiteral("识别原理：先估计焊道两侧母材高度，再找高于基线的拱起段。"
-                       "允许断开控制跨过的最大缺口；形状匹配用于排除其他凸起。"), dialog);
+                       "缺测跨度只用于跨过没有数据的区域；轮廓回到母材后分开识别。"
+                       "启用模板后，形状和宽度必须符合模板要求。"), dialog);
     hint->setWordWrap(true);
     layout->addWidget(hint);
     form->addRow(QString(), enabled);
@@ -1464,12 +1524,20 @@ crawling::DriveSettings RobotControlPanel::settingsFromUi() const
     value.laserSerialNumber = m_laserSerial->text().trimmed();
     value.usbCameraDeviceIndex = m_cameraDevice->currentIndex() >= 0
                                      ? m_cameraDevice->currentData().toInt() : -1;
+    value.networkCameraUrl = m_networkCameraUrl->text().trimmed();
     value.usbCameraFps = m_cameraFps->value();
     value.usbCameraAutoConnect = m_cameraAutoConnect->isChecked();
     value.usbCameraFlipHorizontal = m_cameraFlipHorizontal->isChecked();
     value.usbCameraFlipVertical = m_cameraFlipVertical->isChecked();
     value.autoConnectOnStartup = m_autoConnectCheck->isChecked();
     value.manualJogPercent = m_speedSlider->value();
+    const QString clampMode = m_clampCommunicationMode->currentData().toString();
+    value.clampCommunicationMode =
+        clampMode == QStringLiteral("mwd_rs485")
+            ? crawling::ClampCommunicationMode::MwdRs485
+            : clampMode == QStringLiteral("mwd_can")
+                  ? crawling::ClampCommunicationMode::MwdCan
+                  : crawling::ClampCommunicationMode::TtCanopen;
     value.clampSerialPort = comboText(m_clampPort, value.clampSerialPort);
     value.clampSerialBaudRate = comboInt(m_clampBaud, value.clampSerialBaudRate);
     value.clampCanBitrate = comboInt(m_clampCanBitrate, value.clampCanBitrate);
@@ -1529,6 +1597,7 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
     setComboValue(m_imuDivider, settings.imuOutputDivider);
     m_laserSerial->setText(settings.laserSerialNumber);
     setComboValue(m_cameraDevice, settings.usbCameraDeviceIndex);
+    m_networkCameraUrl->setText(settings.networkCameraUrl);
     if (settings.usbCameraDeviceIndex < 0)
         m_cameraDevice->setCurrentIndex(-1);
     m_cameraFps->setValue(settings.usbCameraFps);
@@ -1549,6 +1618,15 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
         persistent.value(QStringLiteral("laserCorrection/kp"), 3.0).toDouble());
     m_correctionKd->setValue(
         persistent.value(QStringLiteral("laserCorrection/kd"), 0.12).toDouble());
+    setComboValue(
+        m_clampCommunicationMode,
+        settings.clampCommunicationMode ==
+                crawling::ClampCommunicationMode::TtCanopen
+            ? QStringLiteral("tt_canopen")
+            : settings.clampCommunicationMode ==
+                  crawling::ClampCommunicationMode::MwdRs485
+                  ? QStringLiteral("mwd_rs485")
+                  : QStringLiteral("mwd_can"));
     setComboText(m_clampPort, settings.clampSerialPort);
     setComboValue(m_clampBaud, settings.clampSerialBaudRate);
     setComboValue(m_clampCanBitrate, settings.clampCanBitrate);
@@ -1706,6 +1784,13 @@ void RobotControlPanel::connectConfiguredUsbCamera()
         appendLog(QStringLiteral("USB 摄像头连接已跳过：未勾选自动连接"));
         return;
     }
+    if (!m_settings.networkCameraUrl.trimmed().isEmpty()) {
+        if (m_usbCameraController)
+            QMetaObject::invokeMethod(m_usbCameraController, "connectNetworkCamera",
+                                      Qt::QueuedConnection,
+                                      Q_ARG(QString, m_settings.networkCameraUrl));
+        return;
+    }
     if (m_settings.usbCameraDeviceIndex < 0) {
         appendLog(QStringLiteral("USB 摄像头连接已跳过：未配置设备"));
         return;
@@ -1760,6 +1845,11 @@ void RobotControlPanel::requestEnable(bool enabled)
 
 void RobotControlPanel::emergencyStop()
 {
+    crawling::AppLogger::write(
+        QStringLiteral("CORRECTION.STOP"),
+        QStringLiteral("event=correction_stop_requested source=emergency_stop active=%1 pending=%2")
+            .arg(m_autoCorrectionActive ? 1 : 0)
+            .arg(m_autoCorrectionStartPending ? 1 : 0));
     stopAutoCorrection();
     m_forward = m_reverse = m_left = m_right = false;
     if (m_controller)
@@ -1769,6 +1859,11 @@ void RobotControlPanel::emergencyStop()
 
 void RobotControlPanel::stopMotion()
 {
+    crawling::AppLogger::write(
+        QStringLiteral("CORRECTION.STOP"),
+        QStringLiteral("event=correction_stop_requested source=stop_motion active=%1 pending=%2")
+            .arg(m_autoCorrectionActive ? 1 : 0)
+            .arg(m_autoCorrectionStartPending ? 1 : 0));
     stopAutoCorrection();
     m_forward = m_reverse = m_left = m_right = false;
     if (m_controller) {
@@ -1973,7 +2068,34 @@ void RobotControlPanel::startAutoCorrection()
         return;
     }
 
+    crawling::AppLogger::write(
+        QStringLiteral("CORRECTION.START"),
+        QStringLiteral(
+            "event=start_request state=%1 laser_connected=%2 ui_speed_mmps=%3 "
+            "target_speed_mps=%4 segment_mm=%5 kp=%6 kd=%7 speed_limit_mps=%8 "
+            "drive_linear_accel_mps2=%9 executable=%10")
+            .arg(crawling::driveStateText(m_state))
+            .arg(m_laserConnected ? 1 : 0)
+            .arg(m_correctionSpeed->value(), 0, 'f', 1)
+            .arg(settings.targetSpeedMps, 0, 'f', 6)
+            .arg(m_correctionSegment->value(), 0, 'f', 1)
+            .arg(settings.proportionalGain, 0, 'f', 3)
+            .arg(settings.derivativeGain, 0, 'f', 3)
+            .arg(speedLimit, 0, 'f', 6)
+            .arg(m_settings.maximumLinearAccelerationMps2, 0, 'f', 4)
+            .arg(QCoreApplication::applicationFilePath()));
+
     m_forward = m_reverse = m_left = m_right = false;
+    const bool prestartStopQueued = QMetaObject::invokeMethod(
+        m_controller, "setInputCommand", Qt::QueuedConnection,
+        Q_ARG(double, 0.0), Q_ARG(double, 0.0));
+    crawling::AppLogger::write(
+        QStringLiteral("CORRECTION.START"),
+        QStringLiteral("event=correction_prestart_stop result=%1 "
+                       "reason=clear_previous_manual_motion target_thread=%2")
+            .arg(prestartStopQueued ? QStringLiteral("QUEUED")
+                                     : QStringLiteral("REJECTED"))
+            .arg(reinterpret_cast<quintptr>(m_controller->thread()), 0, 16));
     m_autoCorrectionActive = true;
     m_autoCorrectionStartPending = true;
     m_autoCorrectionStart->setEnabled(false);
@@ -1995,7 +2117,8 @@ void RobotControlPanel::startAutoCorrection()
     persistent.sync();
     QMetaObject::invokeMethod(m_sensorController, "prepareCorrectionProfile",
                               Qt::QueuedConnection);
-    appendLog(QStringLiteral("已请求启动自动纠偏，等待激光轮廓流"));
+    appendLog(QStringLiteral("已请求启动自动纠偏（速度 %1 mm/s，A2 速度闭环），等待激光轮廓流")
+                  .arg(m_correctionSpeed->value(), 0, 'f', 1));
 }
 
 void RobotControlPanel::stopAutoCorrection()
@@ -2024,6 +2147,23 @@ void RobotControlPanel::updateCorrectionStatus(
     if (!m_correctionStatus)
         return;
     if (!status.active) {
+        const bool wasRunning = m_autoCorrectionActive || m_autoCorrectionStartPending;
+        m_autoCorrectionActive = false;
+        m_autoCorrectionStartPending = false;
+        m_autoCorrectionStart->setEnabled(true);
+        m_autoCorrectionStop->setEnabled(false);
+        if (m_sensorController)
+            QMetaObject::invokeMethod(m_sensorController, "restoreOriginalPreview",
+                                      Qt::QueuedConnection);
+        if (wasRunning) {
+            crawling::AppLogger::write(
+                QStringLiteral("CORRECTION.START"),
+                QStringLiteral("event=controller_stopped reason=%1")
+                    .arg(status.reason));
+            appendLog(QStringLiteral("自动纠偏结束：%1").arg(
+                status.reason.isEmpty() ? QStringLiteral("控制器未给出原因")
+                                        : status.reason));
+        }
         m_correctionStatus->setText(status.reason.isEmpty()
                                          ? QStringLiteral("未启动")
                                          : status.reason);
@@ -2237,8 +2377,17 @@ void RobotControlPanel::changeEvent(QEvent *event)
          event->type() != QEvent::ApplicationDeactivate)) {
         return;
     }
-    if (m_autoCorrectionActive)
+    if (m_autoCorrectionActive) {
+        const QString source = event->type() == QEvent::WindowDeactivate
+                                   ? QStringLiteral("window_deactivate")
+                                   : QStringLiteral("application_deactivate");
+        crawling::AppLogger::write(
+            QStringLiteral("CORRECTION.STOP"),
+            QStringLiteral("event=correction_stop_requested source=%1 active=1 pending=%2")
+                .arg(source)
+                .arg(m_autoCorrectionStartPending ? 1 : 0));
         stopAutoCorrection();
+    }
     const bool wasJogging = m_forward || m_reverse || m_left || m_right;
     m_forward = m_reverse = m_left = m_right = false;
     if (wasJogging)

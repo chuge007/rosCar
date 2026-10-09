@@ -287,23 +287,24 @@ bool WheelMotorController::setWheelSpeeds(double leftMps, double rightMps) {
 
 bool WheelMotorController::sendSpeed(bool leftMotor, std::uint8_t motorId,
                                      double wheelMps, int directionSign) {
-  const int speedDps = toMotorSpeedDps(wheelMps, directionSign);
+  const double speedDps = toMotorSpeedDps(wheelMps, directionSign);
   bool* running = leftMotor ? &leftRunning_ : &rightRunning_;
-  int* lastCommandDps = leftMotor ? &lastLeftCommandDps_
-                                  : &lastRightCommandDps_;
-  *lastCommandDps = speedDps;
+  double* lastCommandDps = leftMotor ? &lastLeftCommandDps_
+                                    : &lastRightCommandDps_;
+  const double encodedSpeedDps = canMode_ ? speedDps : std::round(speedDps);
   bool sent = false;
   if (canMode_) {
-    sent = sendCanFrame(
-        ServoProtocol::speedCommand(motorId, static_cast<double>(speedDps)));
+    sent = sendCanFrame(ServoProtocol::speedCommand(motorId, encodedSpeedDps));
   } else {
-    const QByteArray speedFrame = MwdRs485Protocol::speedCommand(motorId, speedDps);
+    const QByteArray speedFrame = MwdRs485Protocol::speedCommand(
+        motorId, static_cast<int>(encodedSpeedDps));
     sent = !speedFrame.isEmpty() &&
            sendCommand(leftMotor, MwdRs485Protocol::kSpeedClosedLoop, motorId,
                        speedFrame.mid(4, 7));
   }
   if (sent) {
     *running = true;
+    *lastCommandDps = encodedSpeedDps;
   }
   return sent;
 }
@@ -799,18 +800,18 @@ double WheelMotorController::maximumCommandableWheelSpeedMps() const {
   return std::min(config_.maximumWheelSpeedMps, motorLimitMps);
 }
 
-int WheelMotorController::toMotorSpeedDps(double wheelMps, int directionSign) const {
+double WheelMotorController::toMotorSpeedDps(double wheelMps, int directionSign) const {
   const double bounded = std::clamp(std::isfinite(wheelMps) ? wheelMps : 0.0,
                                    -config_.maximumWheelSpeedMps,
                                    config_.maximumWheelSpeedMps);
   const double dps = bounded / config_.wheelRadiusM * 180.0 / kPi *
                      config_.motorOutputToWheelRatio * directionSign;
-  return static_cast<int>(std::clamp(std::round(dps),
-                                     -config_.maximumMotorSpeedDps,
-                                     config_.maximumMotorSpeedDps));
+  const double limitedDps = std::clamp(dps, -config_.maximumMotorSpeedDps,
+                                      config_.maximumMotorSpeedDps);
+  return std::round(limitedDps * 100.0) / 100.0;
 }
 
-double WheelMotorController::toWheelSpeedMps(int motorSpeedDps,
+double WheelMotorController::toWheelSpeedMps(double motorSpeedDps,
                                              int directionSign) const {
   return motorSpeedDps * config_.wheelRadiusM * kPi / 180.0 /
          config_.motorOutputToWheelRatio * directionSign;

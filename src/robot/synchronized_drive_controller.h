@@ -90,6 +90,8 @@ class SynchronizedDriveController final : public QObject {
   double lastLeftCommandScale_ = 1.0;
   double lastRightCommandScale_ = 1.0;
   bool lastCorrectionSteeringLimited_ = false;
+  qint64 lastDriveFeedbackDiagnosticMs_ = -1;
+  bool correctionCommandActive_ = false;
 };
 
 }  // namespace crawling

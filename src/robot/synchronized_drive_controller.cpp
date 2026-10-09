@@ -1,5 +1,6 @@
 #include "synchronized_drive_controller.h"
 
+#include "robot_app_logger.h"
 #include "utf8_compat.h"
 
 #include <algorithm>
@@ -198,6 +199,7 @@ void SynchronizedDriveController::setInputCommand(double linearMps, double angul
   input_.receivedAtMs = nowMs();
   input_.valid = true;
   input_.preserveLinearSpeed = false;
+  correctionCommandActive_ = false;
 }
 
 void SynchronizedDriveController::setCorrectionCommand(double linearMps,
@@ -228,11 +230,28 @@ void SynchronizedDriveController::setCorrectionCommand(double linearMps,
         .arg(maximumCorrectionSpeedMps * 1000.0, 0, 'f', 2));
     return;
   }
+  if (!correctionCommandActive_) {
+    const QString message = QStringLiteral(
+        "event=correction_motor_mode result=ACTIVE mode=%1 "
+        "reason=continuous_laser_tracking requested_linear_mps=%2 "
+        "requested_angular_radps=%3 speed_limit_mps=%4 "
+        "software_linear_accel_mps2=%5")
+        .arg(settings_.wheelCommunicationMode == WheelCommunicationMode::Can
+                 ? QStringLiteral("CAN_0xA2_SPEED_CLOSED_LOOP")
+                 : QStringLiteral("RS485_0xA2_SPEED_CLOSED_LOOP"))
+        .arg(linearMps, 0, 'f', 6)
+        .arg(angularRadps, 0, 'f', 6)
+        .arg(maximumCorrectionSpeedMps, 0, 'f', 6)
+        .arg(settings_.maximumLinearAccelerationMps2, 0, 'f', 6);
+    AppLogger::write(QStringLiteral("DRIVE.MOTOR"), message);
+    emit logMessage(message);
+  }
   input_.linearMps = linearMps;
   input_.angularRadps = angularRadps;
   input_.receivedAtMs = nowMs();
   input_.valid = true;
   input_.preserveLinearSpeed = true;
+  correctionCommandActive_ = true;
 }
 
 void SynchronizedDriveController::requestEnable(bool enabled) {
@@ -353,6 +372,55 @@ void SynchronizedDriveController::controlTick() {
       rightFeedback_.temperatureC = feedback.rightTemperatureC;
       rightFeedback_.receivedAtMs = now;
       rightSpeedFeedbackMs_ = now;
+    }
+    if (state_ == DriveState::Enabled &&
+        (lastDriveFeedbackDiagnosticMs_ < 0 ||
+         now - lastDriveFeedbackDiagnosticMs_ >= 500)) {
+      lastDriveFeedbackDiagnosticMs_ = now;
+      AppLogger::write(
+          QStringLiteral("DRIVE.FEEDBACK"),
+          QStringLiteral(
+              "event=drive_feedback_snapshot state=%1 input_linear_mps=%2 "
+              "input_angular_radps=%3 preserve_linear_speed=%4 "
+              "motion_output_stopped=%5 left_valid=%6 right_valid=%7 "
+              "left_updated=%8 right_updated=%9 left_speed_mps=%10 "
+              "right_speed_mps=%11 left_position_rad=%12 right_position_rad=%13 "
+              "left_raw_feedback_dps=%14 right_raw_feedback_dps=%15 "
+              "left_motor_speed_dps=%16 right_motor_speed_dps=%17 "
+              "left_motor_control=%18 right_motor_control=%19 "
+              "left_temperature_c=%20 right_temperature_c=%21 "
+              "left_feedback_age_ms=%22 right_feedback_age_ms=%23 "
+              "feedback_fresh=%24 applied_linear_mps=%25 "
+              "applied_angular_radps=%26 motor_control_mode=%27")
+              .arg(driveStateText(state_))
+              .arg(input_.linearMps, 0, 'f', 6)
+              .arg(input_.angularRadps, 0, 'f', 6)
+              .arg(input_.preserveLinearSpeed ? 1 : 0)
+              .arg(motionOutputStopped_ ? 1 : 0)
+              .arg(leftFeedback_.valid ? 1 : 0)
+              .arg(rightFeedback_.valid ? 1 : 0)
+              .arg(feedback.leftUpdated ? 1 : 0)
+              .arg(feedback.rightUpdated ? 1 : 0)
+              .arg(leftFeedback_.wheelSpeedMps, 0, 'f', 6)
+              .arg(rightFeedback_.wheelSpeedMps, 0, 'f', 6)
+              .arg(leftFeedback_.wheelPositionRad, 0, 'f', 6)
+              .arg(rightFeedback_.wheelPositionRad, 0, 'f', 6)
+              .arg(wheelMotors_.leftRawFeedbackDps(), 0, 'f', 1)
+              .arg(wheelMotors_.rightRawFeedbackDps(), 0, 'f', 1)
+              .arg(leftFeedback_.motorSpeedDps, 0, 'f', 1)
+              .arg(rightFeedback_.motorSpeedDps, 0, 'f', 1)
+              .arg(leftFeedback_.motorControlValue, 0, 'f', 3)
+              .arg(rightFeedback_.motorControlValue, 0, 'f', 3)
+              .arg(leftFeedback_.temperatureC)
+              .arg(rightFeedback_.temperatureC)
+              .arg(leftFeedback_.valid ? now - leftFeedback_.receivedAtMs : -1)
+              .arg(rightFeedback_.valid ? now - rightFeedback_.receivedAtMs : -1)
+              .arg(feedbackFresh(now) ? 1 : 0)
+              .arg(appliedLinearMps_, 0, 'f', 6)
+              .arg(appliedAngularRadps_, 0, 'f', 6)
+              .arg(settings_.wheelCommunicationMode == WheelCommunicationMode::Can
+                       ? QStringLiteral("CAN_0x9C")
+                       : QStringLiteral("RS485_STATUS2")));
     }
   }
   if (!kMotorOutputEnabled) {
@@ -633,17 +701,21 @@ void SynchronizedDriveController::sendSpeedPair(double leftMps, double rightMps,
     emit logMessage(QStringLiteral("event=wheel_command_write_recovered result=OK module=DRIVE.MOTOR"));
   }
   if (sent) {
-    emit logMessage(QStringLiteral(
+    const QString message = QStringLiteral(
         "event=wheel_speed_write result=OK module=DRIVE.MOTOR "
         "input_linear_mps=%1 input_angular_radps=%2 "
         "left_target_mps=%3 right_target_mps=%4 "
         "left_feedback_mps=%5 right_feedback_mps=%6 "
         "left_motor_command_dps=%7 right_motor_command_dps=%8 "
         "left_motor_feedback_raw_dps=%9 right_motor_feedback_raw_dps=%10 "
-        "left_sign=%11 right_sign=%12 effective_limit_mps=%13 "
-        "sync_left_response=%14 sync_right_response=%15 "
-        "sync_left_scale=%16 sync_right_scale=%17 "
-        "constant_speed_correction=%18 output_mean_mps=%19 correction_steering_limited=%20")
+        "left_motor_feedback_dps=%11 right_motor_feedback_dps=%12 "
+        "left_motor_control=%13 right_motor_control=%14 "
+        "left_temperature_c=%15 right_temperature_c=%16 "
+        "left_sign=%17 right_sign=%18 effective_limit_mps=%19 "
+        "sync_left_response=%20 sync_right_response=%21 "
+        "sync_left_scale=%22 sync_right_scale=%23 "
+        "constant_speed_correction=%24 output_mean_mps=%25 correction_steering_limited=%26 "
+        "motor_control_mode=%27")
                         .arg(input_.linearMps, 0, 'f', 4)
                         .arg(input_.angularRadps, 0, 'f', 4)
                         .arg(leftMps, 0, 'f', 4)
@@ -654,6 +726,12 @@ void SynchronizedDriveController::sendSpeedPair(double leftMps, double rightMps,
                         .arg(wheelMotors_.lastRightCommandDps())
                         .arg(wheelMotors_.leftRawFeedbackDps(), 0, 'f', 1)
                         .arg(wheelMotors_.rightRawFeedbackDps(), 0, 'f', 1)
+                        .arg(leftFeedback_.motorSpeedDps, 0, 'f', 1)
+                        .arg(rightFeedback_.motorSpeedDps, 0, 'f', 1)
+                        .arg(leftFeedback_.motorControlValue, 0, 'f', 3)
+                        .arg(rightFeedback_.motorControlValue, 0, 'f', 3)
+                        .arg(leftFeedback_.temperatureC)
+                        .arg(rightFeedback_.temperatureC)
                         .arg(settings_.leftMotorSign)
                         .arg(settings_.rightMotorSign)
                         .arg(wheelMotors_.maximumCommandableWheelSpeedMps(),
@@ -664,7 +742,12 @@ void SynchronizedDriveController::sendSpeedPair(double leftMps, double rightMps,
                         .arg(lastRightCommandScale_, 0, 'f', 3)
                         .arg(input_.preserveLinearSpeed ? 1 : 0)
                         .arg((leftMps + rightMps) * 0.5, 0, 'f', 6)
-                        .arg(lastCorrectionSteeringLimited_ ? 1 : 0));
+                        .arg(lastCorrectionSteeringLimited_ ? 1 : 0)
+                        .arg(settings_.wheelCommunicationMode == WheelCommunicationMode::Can
+                                 ? QStringLiteral("CAN_0xA2")
+                                 : QStringLiteral("RS485_0xA2"));
+    AppLogger::write(QStringLiteral("DRIVE.MOTOR"), message);
+    emit logMessage(message);
   }
 }
 
@@ -703,6 +786,7 @@ void SynchronizedDriveController::resetMotionState() {
   lastLeftCommandScale_ = 1.0;
   lastRightCommandScale_ = 1.0;
   lastCorrectionSteeringLimited_ = false;
+  correctionCommandActive_ = false;
   synchronizer_.reset();
   input_ = {};
 }

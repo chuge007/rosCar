@@ -81,6 +81,57 @@ void captureRawSamples(FrameDiagnostics& diagnostics, const std::uint8_t* data,
     diagnostics.raw_sample_bytes = static_cast<std::uint32_t>(sample_bytes * 3);
 }
 
+bool validateGeometryPayload(Frame& frame, const std::uint8_t* data,
+                             std::uint32_t data_bytes, std::size_t point_bytes) {
+    const std::uint64_t point_count = std::uint64_t(frame.width) * frame.height;
+    if (point_count > std::numeric_limits<std::uint32_t>::max() / point_bytes) {
+        frame.valid = false;
+        frame.diagnostics.decode_reason = "dimensions_exceed_payload_limit";
+        return false;
+    }
+    frame.diagnostics.expected_raw_bytes = point_count * point_bytes;
+    if (data == nullptr || point_count == 0 || data_bytes == 0) {
+        frame.valid = false;
+        frame.diagnostics.decode_reason = "missing_payload_or_dimensions";
+        return false;
+    }
+    if (data_bytes != frame.diagnostics.expected_raw_bytes) {
+        frame.valid = false;
+        frame.diagnostics.decode_reason = "payload_size_mismatch";
+        return false;
+    }
+    return true;
+}
+
+template <typename Coordinate>
+void decodeProfileCoordinates(Frame& frame, const std::uint8_t* data,
+                              std::uint32_t data_bytes) {
+    frame.type = FrameType::point_cloud;
+    constexpr std::size_t coordinate_bytes = sizeof(Coordinate) * 3u;
+    if (!validateGeometryPayload(frame, data, data_bytes, coordinate_bytes)) return;
+    const std::size_t point_count = std::size_t(frame.width) * frame.height;
+    frame.data.resize(point_count * sizeof(float) * 3u);
+    const float scales[] = {frame.x_scale, frame.y_scale, frame.z_scale};
+    const std::int32_t offsets[] = {frame.x_offset, frame.y_offset, frame.z_offset};
+    for (std::size_t index = 0; index < point_count; ++index) {
+        Coordinate coordinates[3]{};
+        std::memcpy(coordinates, data + index * coordinate_bytes, coordinate_bytes);
+        float values[3]{};
+        if (coordinates[0] == std::numeric_limits<Coordinate>::min() ||
+            coordinates[1] == std::numeric_limits<Coordinate>::min() ||
+            coordinates[2] == std::numeric_limits<Coordinate>::min()) {
+            values[0] = values[1] = values[2] = std::numeric_limits<float>::quiet_NaN();
+        } else {
+            for (int axis = 0; axis < 3; ++axis) {
+                values[axis] = std::isfinite(scales[axis]) && scales[axis] != 0.0F
+                    ? (coordinates[axis] * scales[axis] + offsets[axis]) / 1000.0F
+                    : static_cast<float>(coordinates[axis]);
+            }
+        }
+        std::memcpy(frame.data.data() + index * sizeof(values), values, sizeof(values));
+    }
+}
+
 Frame copyFrame(const vendor::ImageDataRaw& raw) {
     Frame frame;
     frame.type = toFrameType(raw.enImageType);
@@ -101,7 +152,21 @@ Frame copyFrame(const vendor::ImageDataRaw& raw) {
     frame.diagnostics.decode_reason = frame.valid ? "OK" : "sdk_invalid";
     captureRawSamples(frame.diagnostics, raw.pData, raw.nDataLen);
 
-    if (raw.pData != nullptr && raw.nDataLen > 0) {
+    const auto image_type = static_cast<std::uint32_t>(raw.enImageType);
+    if (image_type == vendor::kImageTypeProfile) {
+        frame.diagnostics.payload_encoding = "xyz_s16";
+        decodeProfileCoordinates<std::int16_t>(frame, raw.pData, raw.nDataLen);
+    } else if (image_type == vendor::kImageTypeProfileAbc32) {
+        frame.diagnostics.payload_encoding = "xyz_s32";
+        decodeProfileCoordinates<std::int32_t>(frame, raw.pData, raw.nDataLen);
+    } else if (frame.type == FrameType::point_cloud || frame.type == FrameType::depth) {
+        const std::size_t point_bytes = frame.type == FrameType::depth
+            ? sizeof(std::int16_t) : sizeof(float) * 3u;
+        frame.diagnostics.payload_encoding = frame.type == FrameType::depth
+            ? "depth_s16" : "xyz_f32";
+        if (validateGeometryPayload(frame, raw.pData, raw.nDataLen, point_bytes))
+            frame.data.assign(raw.pData, raw.pData + raw.nDataLen);
+    } else if (raw.pData != nullptr && raw.nDataLen > 0) {
         frame.data.assign(raw.pData, raw.pData + raw.nDataLen);
     }
 
@@ -114,7 +179,7 @@ Frame copyFrame(const vendor::ImageDataRaw& raw) {
 
 Frame copyProfileFrame(const vendor::ProfileDataRaw& raw) {
     Frame frame;
-    frame.type = FrameType::profile_abc32;
+    frame.type = FrameType::point_cloud;
     frame.width = raw.nLinePntNum;
     frame.height = raw.nProfileCnt;
     frame.frame_number = raw.nFrameNum;
@@ -129,55 +194,10 @@ Frame copyProfileFrame(const vendor::ProfileDataRaw& raw) {
     frame.diagnostics.profile_callback = true;
     frame.diagnostics.raw_width = raw.nLinePntNum;
     frame.diagnostics.raw_height = raw.nProfileCnt;
+    frame.diagnostics.payload_encoding = "xyz_s16";
     frame.diagnostics.decode_reason = frame.valid ? "OK" : "sdk_invalid";
     captureRawSamples(frame.diagnostics, raw.pData, raw.nDataLen);
-
-    constexpr std::size_t kRawCoordinateSize = sizeof(std::int16_t) * 3u;
-    constexpr float kMicrometersPerMillimeter = 1000.0F;
-    const std::size_t declared_point_count =
-        static_cast<std::size_t>(raw.nLinePntNum) * static_cast<std::size_t>(raw.nProfileCnt);
-    if (raw.pData == nullptr || declared_point_count == 0u || raw.nDataLen == 0u) {
-        frame.diagnostics.decode_reason = "missing_payload_or_dimensions";
-        return frame;
-    }
-
-    if (raw.nDataLen % kRawCoordinateSize != 0u) {
-        frame.valid = false;
-        frame.diagnostics.decode_reason = "payload_not_xyz_s16_aligned";
-        return frame;
-    }
-    const std::size_t available_point_count = raw.nDataLen / kRawCoordinateSize;
-    if (available_point_count % raw.nProfileCnt != 0u ||
-        available_point_count > declared_point_count) {
-        frame.valid = false;
-        frame.diagnostics.decode_reason = "incomplete_rows_or_exceeds_capacity";
-        return frame;
-    }
-    const std::size_t point_count = available_point_count;
-    frame.width = static_cast<std::uint32_t>(point_count / raw.nProfileCnt);
-    frame.data.resize(point_count * sizeof(float) * 3u);
-
-    for (std::size_t index = 0; index < point_count; ++index) {
-        std::int16_t coordinates[3]{};
-        std::memcpy(coordinates, raw.pData + index * kRawCoordinateSize, kRawCoordinateSize);
-
-        float values[3]{};
-        if (coordinates[0] == std::numeric_limits<std::int16_t>::min() ||
-            coordinates[1] == std::numeric_limits<std::int16_t>::min() ||
-            coordinates[2] == std::numeric_limits<std::int16_t>::min()) {
-            values[0] = values[1] = values[2] = std::numeric_limits<float>::quiet_NaN();
-        } else {
-            const float scales[] = {raw.fXScale, raw.fYScale, raw.fZScale};
-            const std::int32_t offsets[] = {raw.nXOffset, raw.nYOffset, raw.nZOffset};
-            for (int axis = 0; axis < 3; ++axis) {
-                values[axis] = std::isfinite(scales[axis]) && scales[axis] != 0.0F
-                    ? (coordinates[axis] * scales[axis] + offsets[axis]) / kMicrometersPerMillimeter
-                    : static_cast<float>(coordinates[axis]);
-            }
-        }
-        std::memcpy(frame.data.data() + index * sizeof(values), values, sizeof(values));
-    }
-
+    decodeProfileCoordinates<std::int16_t>(frame, raw.pData, raw.nDataLen);
     return frame;
 }
 
@@ -215,18 +235,20 @@ PointCloudFrame copyPointCloud(const vendor::ImageDataRaw& raw) {
         return result;
     }
 
-    if (raw.nDataLen % (sizeof(float) * 3u) != 0u) {
-        throw std::runtime_error("Unexpected point cloud byte size from vendor SDK.");
+    const std::uint64_t declared_points = std::uint64_t(raw.nWidth) * raw.nHeight;
+    if (declared_points > std::numeric_limits<std::uint32_t>::max() / (sizeof(float) * 3u) ||
+        raw.nDataLen != declared_points * sizeof(float) * 3u) {
+        throw std::runtime_error("Point cloud payload does not match declared dimensions.");
     }
 
     const std::size_t point_count = raw.nDataLen / (sizeof(float) * 3u);
-    const float* values = reinterpret_cast<const float*>(raw.pData);
-
     result.points.resize(point_count);
     for (std::size_t index = 0; index < point_count; ++index) {
-        result.points[index].x = values[index * 3u + 0u];
-        result.points[index].y = values[index * 3u + 1u];
-        result.points[index].z = values[index * 3u + 2u];
+        float values[3]{};
+        std::memcpy(values, raw.pData + index * sizeof(values), sizeof(values));
+        result.points[index].x = values[0];
+        result.points[index].y = values[1];
+        result.points[index].z = values[2];
     }
 
     return result;
@@ -411,9 +433,22 @@ public:
         } catch (...) {
             return;
         }
-        if (frame.valid && !frame.data.empty()) {
-            profile_callback_seen.store(true, std::memory_order_release);
+        if (!frame.valid || frame.data.empty()) {
+            profile_callback_seen.store(false, std::memory_order_release);
+            bool report_change = false;
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                ++rejected_profile_count;
+                report_change = last_rejected_profile.decode_reason != frame.diagnostics.decode_reason ||
+                    last_rejected_profile.raw_width != frame.diagnostics.raw_width ||
+                    last_rejected_profile.raw_height != frame.diagnostics.raw_height ||
+                    last_rejected_profile.raw_data_bytes != frame.diagnostics.raw_data_bytes;
+                last_rejected_profile = frame.diagnostics;
+            }
+            if (report_change) enqueueFrame(std::move(frame));
+            return;
         }
+        profile_callback_seen.store(true, std::memory_order_release);
         enqueueFrame(std::move(frame));
     }
 
@@ -450,6 +485,8 @@ public:
     std::atomic<bool> profile_callback_seen{false};
     std::atomic<std::uint64_t> image_callback_count{0};
     std::atomic<std::uint64_t> profile_callback_count{0};
+    std::uint64_t rejected_profile_count = 0;
+    FrameDiagnostics last_rejected_profile;
     std::function<void(std::string)> exception_handler;
     std::deque<Frame> image_queue;
     std::condition_variable image_condition;
@@ -775,6 +812,12 @@ std::optional<Frame> Driver::tryFetchFrame(std::chrono::milliseconds timeout) {
     impl_->image_queue.pop_front();
     frame.diagnostics.image_callbacks = impl_->image_callback_count.load(std::memory_order_relaxed);
     frame.diagnostics.profile_callbacks = impl_->profile_callback_count.load(std::memory_order_relaxed);
+    frame.diagnostics.rejected_profiles = impl_->rejected_profile_count;
+    frame.diagnostics.rejected_profile_width = impl_->last_rejected_profile.raw_width;
+    frame.diagnostics.rejected_profile_height = impl_->last_rejected_profile.raw_height;
+    frame.diagnostics.rejected_profile_bytes = impl_->last_rejected_profile.raw_data_bytes;
+    frame.diagnostics.rejected_profile_reason = impl_->rejected_profile_count == 0
+        ? "none" : impl_->last_rejected_profile.decode_reason;
     return frame;
 }
 

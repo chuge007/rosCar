@@ -13,6 +13,7 @@
 #include <QSerialPortInfo>
 #include <QSettings>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QVBoxLayout>
 
 ProbeAdjustmentPanel::ProbeAdjustmentPanel(QWidget *parent) : QWidget(parent)
@@ -40,6 +41,14 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(QWidget *parent) : QWidget(parent)
     auto *connection = new QGroupBox(QStringLiteral("夹具控制器"));
     auto *form = new QFormLayout(connection);
     auto *portRow = new QHBoxLayout;
+    m_communicationMode = new QComboBox;
+    m_communicationMode->addItem(QStringLiteral("TT CANopen CAN"),
+                                 QStringLiteral("tt_canopen"));
+    m_communicationMode->addItem(QStringLiteral("MWD RS485"),
+                                 QStringLiteral("mwd_rs485"));
+    m_communicationMode->addItem(QStringLiteral("MWD CAN"),
+                                 QStringLiteral("mwd_can"));
+    form->addRow(QStringLiteral("通信方式"), m_communicationMode);
     m_port = new QComboBox;
     m_port->setEditable(true);
     auto *refresh = new QPushButton(QStringLiteral("刷新"));
@@ -47,16 +56,45 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(QWidget *parent) : QWidget(parent)
     portRow->addWidget(refresh);
     form->addRow(QStringLiteral("串口"), portRow);
     m_baud = new QComboBox;
-    for (int baud : {115200, 500000, 1000000, 1500000, 2500000})
+    for (int baud : {9600, 19200, 38400, 57600, 115200, 230400, 460800,
+                     500000, 921600, 1000000, 1500000, 2000000, 2500000,
+                     4000000})
         m_baud->addItem(QString::number(baud), baud);
-    form->addRow(QStringLiteral("串口波特率"), m_baud);
+    form->addRow(QStringLiteral("串口/适配器波特率"), m_baud);
     m_bitrate = new QComboBox;
-    for (int bitrate : {125000, 250000, 500000, 800000, 1000000})
+    for (int bitrate : {100000, 125000, 250000, 500000, 800000, 1000000})
         m_bitrate->addItem(QString::number(bitrate), bitrate);
-    form->addRow(QStringLiteral("CAN 波特率"), m_bitrate);
     m_nodeId = new QSpinBox;
     m_nodeId->setRange(0, 127);
-    form->addRow(QStringLiteral("节点 ID"), m_nodeId);
+    form->addRow(QStringLiteral("CAN 波特率（CAN 模式）"), m_bitrate);
+    form->addRow(QStringLiteral("TT CANopen 节点 ID"), m_nodeId);
+    auto *modeOptions = new QStackedWidget(connection);
+    auto *ttCanOptions = new QLabel(
+        QStringLiteral("TT CANopen：使用上方 CAN 波特率和 CANopen 节点 ID"),
+        modeOptions);
+    ttCanOptions->setWordWrap(true);
+    auto *rs485Options = new QLabel(
+        QStringLiteral("MWD RS485 Modbus RTU：速度模式写入 WorkMode=2、T_Velocity=6010"),
+        modeOptions);
+    rs485Options->setWordWrap(true);
+    auto *mwdCanOptions = new QLabel(
+        QStringLiteral("MWD CAN：使用上方 CAN 波特率，电机 ID 范围为 1-32"),
+        modeOptions);
+    mwdCanOptions->setWordWrap(true);
+    modeOptions->addWidget(ttCanOptions);
+    modeOptions->addWidget(rs485Options);
+    modeOptions->addWidget(mwdCanOptions);
+    form->addRow(QStringLiteral("模式参数"), modeOptions);
+    const auto updateModeOptions = [modeOptions, this](int index) {
+        modeOptions->setCurrentIndex(index);
+        const int maximumMotorId = index == 0 ? 127 : 32;
+        for (QSpinBox *box : {m_xId, m_yId, m_zId}) {
+            box->setRange(1, maximumMotorId);
+        }
+    };
+    connect(m_communicationMode,
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
+            modeOptions, updateModeOptions);
     layout->addWidget(connection);
 
     auto *axes = new QGroupBox(QStringLiteral("探头手动微调"));
@@ -67,6 +105,7 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(QWidget *parent) : QWidget(parent)
     grid->addWidget(new QLabel(QStringLiteral("正向")), 0, 3);
     m_xId = new QSpinBox; m_yId = new QSpinBox; m_zId = new QSpinBox;
     for (QSpinBox *id : {m_xId, m_yId, m_zId}) id->setRange(1, 127);
+    updateModeOptions(m_communicationMode->currentIndex());
     const QStringList names = {QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("Z")};
     QSpinBox *ids[] = {m_xId, m_yId, m_zId};
     for (int row = 0; row < 3; ++row) {
@@ -138,6 +177,15 @@ void ProbeAdjustmentPanel::loadSettings()
 {
     QSettings store(crawling::DriveSettings::persistentFilePath(), QSettings::IniFormat);
     m_settings = crawling::DriveSettings::load(store);
+    m_communicationMode->setCurrentIndex(qMax(
+        0, m_communicationMode->findData(
+               m_settings.clampCommunicationMode ==
+                       crawling::ClampCommunicationMode::TtCanopen
+                   ? QStringLiteral("tt_canopen")
+                   : m_settings.clampCommunicationMode ==
+                         crawling::ClampCommunicationMode::MwdRs485
+                         ? QStringLiteral("mwd_rs485")
+                         : QStringLiteral("mwd_can"))));
     if (!m_settings.clampSerialPort.isEmpty()) {
         if (m_port->findText(m_settings.clampSerialPort) < 0)
             m_port->addItem(m_settings.clampSerialPort);
@@ -154,6 +202,13 @@ void ProbeAdjustmentPanel::loadSettings()
 
 void ProbeAdjustmentPanel::applySettings()
 {
+    const QString mode = m_communicationMode->currentData().toString();
+    m_settings.clampCommunicationMode =
+        mode == QStringLiteral("mwd_rs485")
+            ? crawling::ClampCommunicationMode::MwdRs485
+            : mode == QStringLiteral("mwd_can")
+                  ? crawling::ClampCommunicationMode::MwdCan
+                  : crawling::ClampCommunicationMode::TtCanopen;
     m_settings.clampSerialPort = m_port->currentText().trimmed();
     m_settings.clampSerialBaudRate = m_baud->currentData().toInt();
     m_settings.clampCanBitrate = m_bitrate->currentData().toInt();
@@ -171,6 +226,7 @@ void ProbeAdjustmentPanel::saveSettings()
     // 小车页和探头页共享同一份现场配置。保存探头参数时重新加载磁盘
     // 最新值，只覆盖夹具字段，避免把小车页刚保存的底盘参数写回旧值。
     crawling::DriveSettings latest = crawling::DriveSettings::load(store);
+    latest.clampCommunicationMode = m_settings.clampCommunicationMode;
     latest.clampSerialPort = m_settings.clampSerialPort;
     latest.clampSerialBaudRate = m_settings.clampSerialBaudRate;
     latest.clampCanBitrate = m_settings.clampCanBitrate;

@@ -47,6 +47,13 @@ struct FrameDiagnostics {
     std::uint32_t raw_sample_bytes = 0;
     std::uint64_t image_callbacks = 0;
     std::uint64_t profile_callbacks = 0;
+    std::uint64_t expected_raw_bytes = 0;
+    std::string payload_encoding;
+    std::uint64_t rejected_profiles = 0;
+    std::uint32_t rejected_profile_width = 0;
+    std::uint32_t rejected_profile_height = 0;
+    std::uint32_t rejected_profile_bytes = 0;
+    std::string rejected_profile_reason;
     std::string decode_reason = "OK";
 };
 

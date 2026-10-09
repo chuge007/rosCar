@@ -14,9 +14,15 @@ enum class WheelCommunicationMode {
   Rs485,
 };
 
+enum class ClampCommunicationMode {
+  TtCanopen,
+  MwdRs485,
+  MwdCan,
+};
+
 struct DriveSettings {
   static constexpr int kMinimumFeedbackTimeoutMs = 800;
-  static constexpr int kCurrentSettingsSchemaVersion = 7;
+  static constexpr int kCurrentSettingsSchemaVersion = 10;
 
   // Legacy shared-port fields are retained for loading older settings files.
   QString serialPort;
@@ -28,6 +34,7 @@ struct DriveSettings {
   int imuOutputDivider = 10;
   QString laserSerialNumber;
   int usbCameraDeviceIndex = -1;
+  QString networkCameraUrl;
   int usbCameraFps = 30;
   bool usbCameraAutoConnect = true;
   bool usbCameraFlipHorizontal = false;
@@ -35,6 +42,8 @@ struct DriveSettings {
   bool autoConnectOnStartup = true;
   int manualJogPercent = 30;
 
+  ClampCommunicationMode clampCommunicationMode =
+      ClampCommunicationMode::TtCanopen;
   QString clampSerialPort;
   int clampSerialBaudRate = 115200;
   int clampCanBitrate = 500000;
@@ -64,12 +73,8 @@ struct DriveSettings {
   // Measured PA1664 chassis geometry.
   double wheelRadiusM = 0.07953;
   double trackWidthM = 0.1473;
-  // Motor-shaft revolutions per one wheel revolution. The installed MWD
-  // gearbox is 36:1 and the motor output shaft is coupled 1:1 to the wheel.
-  double motorOutputToWheelRatio = 36.0;
+  double motorOutputToWheelRatio = 1.0;
 
-  // The paired motor ceiling is 4300 dps. With this wheel geometry it is
-  // about 166 mm/s, so leave a small margin in the default command limit.
   double maximumWheelSpeedMps = 0.160;
   double maximumLinearSpeedMps = 0.120;
   double maximumAngularSpeedRadps = 0.8726646259971648; // 50 deg/s
