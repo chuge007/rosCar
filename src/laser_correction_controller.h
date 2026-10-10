@@ -11,6 +11,7 @@
 #include <QTimer>
 #include <QVector>
 #include <QVector3D>
+#include <QStringList>
 
 namespace crawling {
 
@@ -134,6 +135,7 @@ class LaserCorrectionController final : public QObject {
   void setProfileTemplates(
       const QVector<crawling::ProfileWeldTemplate>& templates);
   void setProfileTuning(const crawling::ProfileWeldTuning& tuning);
+  void setProfileDetectionTraceEnabled(bool enabled);
   void setEnabled(bool enabled);
   void shutdown();
   void processCameraImage(const QImage& image);
@@ -155,6 +157,7 @@ class LaserCorrectionController final : public QObject {
   // High-rate structured diagnostics are written to disk but intentionally
   // kept out of the operator console.
   void diagnosticLogMessage(const QString& message);
+  void profileDetectionTraceBatch(const QStringList& messages);
   void rawFrameReady(quint64 sessionId, quint64 frameSequence,
                       const QImage& image, const QString& metadataJson);
   void cameraObservationReady(const QImage& image,
@@ -173,7 +176,9 @@ class LaserCorrectionController final : public QObject {
   void watchdogTick();
 
  private:
-  void processObservation(const QImage& image, const QVector<QVector3D>* profile);
+  void processObservation(const QImage& image,
+                          const QVector<QVector3D>* profile,
+                          ProfileWeldDetectionTrace* profileTrace = nullptr);
   enum class Phase {
     Idle,
     AwaitingInputs,
@@ -232,6 +237,8 @@ class LaserCorrectionController final : public QObject {
   void commandImmediateStop(const QString& reason);
   void stop(const QString& reason);
   void publishStatus();
+  void emitProfileDetectionTrace(
+      crawling::ProfileWeldDetectionTrace& trace);
 
   LaserCorrectionSettings settings_;
   LaserCorrectionStatus status_;
@@ -270,6 +277,7 @@ class LaserCorrectionController final : public QObject {
   qint64 lastFrameQueueAgeMs_ = -1;
   qint64 lastWatchdogTickMs_ = -1;
   qint64 lastGuidanceFitMs_ = -1;
+  bool profileDetectionTraceEnabled_ = false;
 
   bool haveTelemetry_ = false;
   double yawRad_ = 0.0;

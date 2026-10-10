@@ -37,6 +37,7 @@ namespace crawling {
 class SynchronizedDriveController;
 class RobotSensorController;
 class RobotUsbCameraController;
+class ProfileDetectionLogWriter;
 }
 
 class RobotControlPanel final : public QWidget
@@ -122,6 +123,8 @@ private:
     QThread *m_usbCameraThread = nullptr;
     crawling::LaserCorrectionController *m_correctionController = nullptr;
     QThread *m_correctionThread = nullptr;
+    crawling::ProfileDetectionLogWriter *m_profileDetectionLogWriter = nullptr;
+    QThread *m_profileDetectionLogThread = nullptr;
     crawling::LaserTrajectoryWriter *m_trajectoryWriter = nullptr;
     QThread *m_trajectoryThread = nullptr;
     QTimer *m_commandTimer = nullptr;
@@ -148,6 +151,7 @@ private:
     QPushButton *m_enableButton = nullptr;
     QPushButton *m_connectAllButton = nullptr;
     QCheckBox *m_autoConnectCheck = nullptr;
+    QCheckBox *m_profileDetectionLogCheck = nullptr;
     QTabWidget *m_tabs = nullptr;
     QLabel *m_laserConfigState = nullptr;
     QLabel *m_laserFrameState = nullptr;

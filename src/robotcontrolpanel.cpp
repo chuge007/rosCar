@@ -178,6 +178,22 @@ RobotControlPanel::RobotControlPanel(QWidget *parent) : QWidget(parent)
     m_correctionController->moveToThread(m_correctionThread);
     connect(m_correctionThread, &QThread::finished, m_correctionController,
             &QObject::deleteLater);
+    m_profileDetectionLogThread = new QThread(this);
+    m_profileDetectionLogWriter = new crawling::ProfileDetectionLogWriter;
+    m_profileDetectionLogWriter->moveToThread(m_profileDetectionLogThread);
+    connect(m_profileDetectionLogThread, &QThread::finished,
+            m_profileDetectionLogWriter, &QObject::deleteLater);
+    connect(m_correctionController,
+            &crawling::LaserCorrectionController::profileDetectionTraceBatch,
+            m_profileDetectionLogWriter,
+            &crawling::ProfileDetectionLogWriter::appendBatch,
+            Qt::QueuedConnection);
+    m_profileDetectionLogThread->start();
+    QMetaObject::invokeMethod(
+        m_correctionController, "setProfileDetectionTraceEnabled",
+        Qt::QueuedConnection,
+        Q_ARG(bool, m_profileDetectionLogCheck &&
+                         m_profileDetectionLogCheck->isChecked()));
     connect(m_sensorController,
             &crawling::RobotSensorController::correctionProfileFrameReady,
             m_correctionController,
@@ -318,6 +334,10 @@ RobotControlPanel::~RobotControlPanel()
     if (m_correctionThread) {
         m_correctionThread->quit();
         m_correctionThread->wait();
+    }
+    if (m_profileDetectionLogThread) {
+        m_profileDetectionLogThread->quit();
+        m_profileDetectionLogThread->wait();
     }
     if (m_sensorController)
         QMetaObject::invokeMethod(m_sensorController, "shutdown",
@@ -533,6 +553,29 @@ void RobotControlPanel::buildUi()
     auto *templateButton = actionButton(QStringLiteral("建立/管理模板"));
     templateButton->setMinimumHeight(30);
     profileModeRow->addWidget(templateButton);
+    m_profileDetectionLogCheck = new QCheckBox(
+        QStringLiteral("记录检测计算日志"), profileGroup);
+    m_profileDetectionLogCheck->setToolTip(
+        QStringLiteral("记录轮廓点、基线、阈值、候选区域和淘汰原因到独立日志；"
+                       "关闭时不记录点位数据。"));
+    profileModeRow->addWidget(m_profileDetectionLogCheck);
+    connect(m_profileDetectionLogCheck, &QCheckBox::toggled,
+            this, [this](bool enabled) {
+                QSettings persistent(crawling::DriveSettings::persistentFilePath(),
+                                     QSettings::IniFormat);
+                persistent.setValue(QStringLiteral(
+                    "laserProfileTuning/profileDetectionTraceEnabled"), enabled);
+                persistent.sync();
+                if (m_correctionController) {
+                    QMetaObject::invokeMethod(
+                        m_correctionController,
+                        "setProfileDetectionTraceEnabled",
+                        Qt::QueuedConnection, Q_ARG(bool, enabled));
+                }
+                appendLog(enabled
+                              ? QStringLiteral("已开启焊道检测计算日志：logs/profile_weld_detection.log")
+                              : QStringLiteral("已关闭焊道检测计算日志"));
+            });
     profileModeRow->addStretch();
     profileLayout->addLayout(profileModeRow);
     m_laserView = new RobotProfileView;
@@ -1068,6 +1111,12 @@ void RobotControlPanel::loadProfileWeldTuning()
         m_profileWeldTuning = crawling::ProfileWeldTuning{};
         persistent.setValue(QStringLiteral("laserProfileTuning/version"), 3);
         persistent.sync();
+        if (m_profileDetectionLogCheck) {
+            QSignalBlocker blocker(m_profileDetectionLogCheck);
+            m_profileDetectionLogCheck->setChecked(persistent.value(
+                QStringLiteral("laserProfileTuning/profileDetectionTraceEnabled"),
+                false).toBool());
+        }
         return;
     }
     m_profileWeldTuning.smoothingRadius = persistent.value(
@@ -1090,6 +1139,14 @@ void RobotControlPanel::loadProfileWeldTuning()
         QStringLiteral("laserProfileTuning/maximumInternalHoleRatio"), 0.70).toDouble();
     m_profileWeldTuning.shoulderRatio = persistent.value(
         QStringLiteral("laserProfileTuning/shoulderRatio"), 0.002).toDouble();
+    m_profileWeldTuning.maximumWidthRatio = persistent.value(
+        QStringLiteral("laserProfileTuning/maximumWidthRatio"), 0.60).toDouble();
+    if (m_profileDetectionLogCheck) {
+        QSignalBlocker blocker(m_profileDetectionLogCheck);
+        m_profileDetectionLogCheck->setChecked(persistent.value(
+            QStringLiteral("laserProfileTuning/profileDetectionTraceEnabled"),
+            false).toBool());
+    }
 }
 
 void RobotControlPanel::persistProfileWeldTuning()
@@ -1117,6 +1174,8 @@ void RobotControlPanel::persistProfileWeldTuning()
                         m_profileWeldTuning.maximumInternalHoleRatio);
     persistent.setValue(QStringLiteral("laserProfileTuning/shoulderRatio"),
                         m_profileWeldTuning.shoulderRatio);
+    persistent.setValue(QStringLiteral("laserProfileTuning/maximumWidthRatio"),
+                        m_profileWeldTuning.maximumWidthRatio);
     persistent.sync();
 }
 
@@ -1256,6 +1315,8 @@ void RobotControlPanel::showProfileTemplateDialog()
         int((6.5 - m_profileWeldTuning.growNoiseSigma) * 10), 1, 0.1);
     auto *minimumWidthRatio = slider(1, 100, int(m_profileWeldTuning.minimumWidthRatio * 10000), 2, 0.01);
     auto *candidateHoleRatio = slider(0, 25, int(m_profileWeldTuning.maximumCandidateHoleRatio * 100), 0, 1.0);
+    auto *maximumWidthRatio = slider(10, 90,
+        int(m_profileWeldTuning.maximumWidthRatio * 100), 0, 1.0);
     auto *enabled = new QCheckBox(QStringLiteral("匹配时启用此模板"), dialog);
     form->addRow(QStringLiteral("模板名称"), name);
     form->addRow(QStringLiteral("形状匹配严格度 (%)"), minimumSimilarity);
@@ -1264,10 +1325,12 @@ void RobotControlPanel::showProfileTemplateDialog()
     form->addRow(QStringLiteral("低矮拱起灵敏度（越大越敏感）"), sensitivity);
     form->addRow(QStringLiteral("最小拱起宽度 (%)"), minimumWidthRatio);
     form->addRow(QStringLiteral("允许连续缺测跨度 (%)"), candidateHoleRatio);
+    form->addRow(QStringLiteral("最大拱起宽度 (%)"), maximumWidthRatio);
     auto *hint = new QLabel(
-        QStringLiteral("识别原理：先估计焊道两侧母材高度，再找高于基线的拱起段。"
+        QStringLiteral("识别原理：先估计焊道两侧母材高度，再找高于基线的拱起段；"
+                       "窄尖峰、宽斜坡、台阶或不连续拱起都会在某个尺度上显著，取最大的异常凸起区域。"
                        "缺测跨度只用于跨过没有数据的区域；轮廓回到母材后分开识别。"
-                       "启用模板后，形状和宽度必须符合模板要求。"), dialog);
+                       "模板只给相似候选少量加权，不会拒绝其它形状的拱起。"), dialog);
     hint->setWordWrap(true);
     layout->addWidget(hint);
     form->addRow(QString(), enabled);
@@ -1294,12 +1357,14 @@ void RobotControlPanel::showProfileTemplateDialog()
     layout->addWidget(close);
 
     const auto applyTuning = [this, smoothingRadius, sensitivity,
-                              minimumWidthRatio, candidateHoleRatio] {
+                              minimumWidthRatio, candidateHoleRatio,
+                              maximumWidthRatio] {
         m_profileWeldTuning.smoothingRadius = smoothingRadius->value();
         m_profileWeldTuning.growNoiseSigma = 6.5 - sensitivity->value() / 10.0;
         m_profileWeldTuning.seedNoiseSigma = m_profileWeldTuning.growNoiseSigma * 1.5;
         m_profileWeldTuning.minimumWidthRatio = minimumWidthRatio->value() / 10000.0;
         m_profileWeldTuning.maximumCandidateHoleRatio = candidateHoleRatio->value() / 100.0;
+        m_profileWeldTuning.maximumWidthRatio = maximumWidthRatio->value() / 100.0;
         m_profileWeldTuning.baselineEdgeRatio = 0.10;
         m_profileWeldTuning.minimumSeedCount = 2;
         m_profileWeldTuning.minimumSupportRatio = 0.20;
@@ -1310,12 +1375,14 @@ void RobotControlPanel::showProfileTemplateDialog()
     };
     const auto fillTemplate = [this, selector, name, minimumSimilarity,
                                widthTolerance, smoothingRadius, sensitivity,
-                               minimumWidthRatio, candidateHoleRatio, enabled, status] {
+                               minimumWidthRatio, candidateHoleRatio,
+                               maximumWidthRatio, enabled, status] {
         const int index = selector->currentData().toInt();
         smoothingRadius->setValue(m_profileWeldTuning.smoothingRadius);
         sensitivity->setValue(int((6.5 - m_profileWeldTuning.growNoiseSigma) * 10));
         minimumWidthRatio->setValue(int(m_profileWeldTuning.minimumWidthRatio * 10000));
         candidateHoleRatio->setValue(int(m_profileWeldTuning.maximumCandidateHoleRatio * 100));
+        maximumWidthRatio->setValue(int(m_profileWeldTuning.maximumWidthRatio * 100));
         if (index < 0 || index >= m_profileTemplates.size()) {
             name->setText(QStringLiteral("焊道模板 %1").arg(m_profileTemplates.size() + 1));
             minimumSimilarity->setValue(50);
@@ -1332,26 +1399,28 @@ void RobotControlPanel::showProfileTemplateDialog()
                          profileTemplate.maximumWidthScale - 1.0) * 100), 10, 90));
         enabled->setChecked(profileTemplate.enabled);
         status->setText(QStringLiteral("特征点 %1；基准宽度占扫描 %2；启用=%3。"
-                                       "低于相似度或超出宽度范围的候选将被拒绝。")
+                                       "匹配候选会获得少量排序加权，不匹配不会被拒绝。")
                             .arg(profileTemplate.normalizedShape.size())
                             .arg(profileTemplate.widthRatio, 0, 'f', 3)
                             .arg(profileTemplate.enabled ? QStringLiteral("是")
                                                          : QStringLiteral("否")));
     };
     for (QSlider *control : {smoothingRadius, sensitivity, minimumWidthRatio,
-                             candidateHoleRatio}) {
+                             candidateHoleRatio, maximumWidthRatio}) {
         connect(control, &QSlider::valueChanged, dialog,
                 [applyTuning](int) { applyTuning(); });
     }
     connect(reset, &QPushButton::clicked, dialog,
             [minimumSimilarity, widthTolerance, smoothingRadius, sensitivity,
-             minimumWidthRatio, candidateHoleRatio, enabled, applyTuning] {
+             minimumWidthRatio, candidateHoleRatio, maximumWidthRatio,
+             enabled, applyTuning] {
                 minimumSimilarity->setValue(50);
                 widthTolerance->setValue(50);
                 smoothingRadius->setValue(2);
                 sensitivity->setValue(45);
                 minimumWidthRatio->setValue(50);
                 candidateHoleRatio->setValue(12);
+                maximumWidthRatio->setValue(60);
                 enabled->setChecked(true);
                 applyTuning();
             });

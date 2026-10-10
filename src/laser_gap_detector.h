@@ -3,6 +3,7 @@
 #include <QImage>
 #include <QMetaType>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace crawling {
@@ -13,6 +14,10 @@ struct ProfileWeldTuning {
   double growNoiseSigma = 2.0;
   double seedNoiseSigma = 3.0;
   double minimumWidthRatio = 0.005;
+  // Upper bound for what still counts as a weld hump. Very wide raised
+  // regions (approaching the whole scan) are usually a tilted fixture or
+  // plate edge, not the seam.
+  double maximumWidthRatio = 0.60;
   int minimumSeedCount = 2;
   double minimumSupportRatio = 0.20;
   double maximumCandidateHoleRatio = 0.12;
@@ -28,6 +33,15 @@ struct ProfileWeldTemplate {
   double maximumWidthScale = 5.00;
   double minimumSimilarity = 0.72;
   bool enabled = true;
+};
+
+struct ProfileWeldDetectionTrace {
+  bool enabled = false;
+  QStringList lines;
+
+  void append(const QString& line) {
+    if (enabled) lines.append(line);
+  }
 };
 
 struct LaserGapDetectorConfig {
@@ -93,6 +107,7 @@ struct LaserGapDetectorConfig {
   int expectedAxis = 0;
   double profileAxisHalfSpanX = 0.0;
   bool profileAxisLocked = false;
+  ProfileWeldDetectionTrace* profileDetectionTrace = nullptr;
   ProfileWeldTuning profileTuning;
   QVector<ProfileWeldTemplate> profileTemplates;
 };

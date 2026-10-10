@@ -4,6 +4,7 @@
 #include <QVector3D>
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <limits>
 #include <vector>
 
@@ -138,7 +139,15 @@ class ProfileWeldDetector final {
     LaserGapDetection result;
     result.profileContour = true;
     const int n = points.size();
-    if (n < 32) return result;
+    ProfileWeldDetectionTrace* trace = config.profileDetectionTrace;
+    if (trace && trace->enabled)
+      trace->append(QStringLiteral("event=detector_begin samples=%1").arg(n));
+    if (n < 32) {
+      if (trace && trace->enabled)
+        trace->append(QStringLiteral(
+            "event=detector_exit reason=too_few_samples samples=%1").arg(n));
+      return result;
+    }
     const auto median = [](std::vector<double> values) {
       if (values.empty()) return 0.0;
       const auto middle = values.begin() + values.size() / 2;
@@ -173,18 +182,39 @@ class ProfileWeldDetector final {
     if (!config.profileAxisLocked)
       result.profileAxisHalfSpanX =
           std::max(result.profileAxisHalfSpanX, observedHalfSpanX);
-    if (result.profileAxisHalfSpanX <= 0.0) return result;
+    if (trace && trace->enabled)
+      trace->append(QStringLiteral(
+          "event=scan_summary valid=%1 differences=%2 x_min=%3 x_max=%4")
+                       .arg(valid.size())
+                       .arg(differences.size())
+                       .arg(scanMinimumX, 0, 'g', 10)
+                       .arg(scanMaximumX, 0, 'g', 10));
+    if (result.profileAxisHalfSpanX <= 0.0) {
+      if (trace && trace->enabled)
+        trace->append(QStringLiteral(
+            "event=detector_exit reason=invalid_axis_half_span"));
+      return result;
+    }
     const auto xRatio = [&result](double x) {
       return std::clamp(0.5 + x / (2.0 * result.profileAxisHalfSpanX), 0.0, 1.0);
     };
     result.profileLineStartRatio = xRatio(scanMinimumX);
     result.profileLineEndRatio = xRatio(scanMaximumX);
-    if (valid.size() < 24 || differences.size() < 12) return result;
+    if (valid.size() < 24 || differences.size() < 12) {
+      if (trace && trace->enabled)
+        trace->append(QStringLiteral(
+            "event=detector_exit reason=insufficient_valid_scan valid=%1 differences=%2")
+                         .arg(valid.size())
+                         .arg(differences.size()));
+      return result;
+    }
     // Suppress isolated SDK height spikes before estimating the parent plane
     // and raised contour. Keep the original scan indices so all detector
     // coordinates remain compatible with the control and preview layers.
     const int smoothingRadius = std::clamp(
         config.profileTuning.smoothingRadius, 1, 5);
+    // Smooth only across nearby SDK slots. The valid-point list is sparse, so
+    // using position distance alone would mix both sides of a long dropout.
     std::vector<double> filteredZ(n, std::numeric_limits<double>::quiet_NaN());
     for (std::size_t position = 0; position < valid.size(); ++position) {
       std::vector<double> neighborhood;
@@ -192,9 +222,14 @@ class ProfileWeldDetector final {
       const int first = std::max<int>(0, static_cast<int>(position) - smoothingRadius);
       const int last = std::min<int>(static_cast<int>(valid.size()) - 1,
                                      static_cast<int>(position) + smoothingRadius);
-      for (int neighbor = first; neighbor <= last; ++neighbor)
-        neighborhood.push_back(points[valid[neighbor]].z());
-      filteredZ[valid[position]] = median(neighborhood);
+      for (int neighbor = first; neighbor <= last; ++neighbor) {
+        if (std::abs(valid[neighbor] - valid[position]) > smoothingRadius)
+          continue;
+        const float z = points[valid[neighbor]].z();
+        if (z > 0.0F) neighborhood.push_back(z);
+      }
+      if (!neighborhood.empty())
+        filteredZ[valid[position]] = median(neighborhood);
     }
     const auto zAt = [&filteredZ](int index) { return filteredZ[index]; };
     const double step = median(differences);
@@ -211,14 +246,27 @@ class ProfileWeldDetector final {
       rightX.push_back(r.x()); rightZ.push_back(zAt(valid[valid.size() - 1 - k]));
     }
     const double lx = median(leftX), rx = median(rightX);
-    if (rx <= lx) return result;
+    if (rx <= lx) {
+      if (trace && trace->enabled)
+        trace->append(QStringLiteral(
+            "event=detector_exit reason=invalid_baseline_span left_x=%1 right_x=%2")
+                         .arg(lx, 0, 'g', 10)
+                         .arg(rx, 0, 'g', 10));
+      return result;
+    }
     double slope = (median(rightZ) - median(leftZ)) / (rx - lx);
     double offset = median(leftZ) - slope * lx;
     for (int pass = 0; pass < 4; ++pass) {
       std::vector<double> errors;
-      errors.reserve(valid.size());
-      for (int index : valid)
-        errors.push_back(zAt(index) - offset - slope * points[index].x());
+      errors.reserve(edgeCount * 2);
+      for (int k = 0; k < edgeCount; ++k) {
+        const int leftIndex = valid[k];
+        const int rightIndex = valid[valid.size() - 1 - k];
+        errors.push_back(zAt(leftIndex) - offset -
+                         slope * points[leftIndex].x());
+        errors.push_back(zAt(rightIndex) - offset -
+                         slope * points[rightIndex].x());
+      }
       const double bias = median(errors);
       for (double& error : errors) error = std::abs(error - bias);
       const double parentNoise = std::max(differenceNoise, 1.4826 * median(errors));
@@ -236,9 +284,15 @@ class ProfileWeldDetector final {
       offset = (sz - slope*sx) / count - slope*lx;
     }
     std::vector<double> deviations;
-    deviations.reserve(valid.size());
-    for (int index : valid)
-      deviations.push_back(std::abs(zAt(index) - offset - slope * points[index].x()));
+    deviations.reserve(edgeCount * 2);
+    for (int k = 0; k < edgeCount; ++k) {
+      const int leftIndex = valid[k];
+      const int rightIndex = valid[valid.size() - 1 - k];
+      deviations.push_back(std::abs(
+          zAt(leftIndex) - offset - slope * points[leftIndex].x()));
+      deviations.push_back(std::abs(
+          zAt(rightIndex) - offset - slope * points[rightIndex].x()));
+    }
     const double noise = std::max(differenceNoise, 1.4826 * median(deviations));
     result.profileNoise = noise;
     result.profileBaselineSlope = slope;
@@ -248,18 +302,43 @@ class ProfileWeldDetector final {
         std::clamp(config.profileTuning.seedNoiseSigma, 0.75, 16.0),
         std::clamp(config.profileTuning.growNoiseSigma, 0.5, 12.0));
     std::vector<double> residual(n, std::numeric_limits<double>::quiet_NaN());
-    for (int i : valid) residual[i] = zAt(i) - offset - slope*points[i].x();
+    for (int i : valid) {
+      if (!std::isfinite(zAt(i))) continue;
+      residual[i] = zAt(i) - offset - slope*points[i].x();
+    }
     const int scanLength = std::max(1, valid.back() - valid.front() + 1);
     const int minWidth = std::max(6, static_cast<int>(std::ceil(
         scanLength * std::clamp(config.profileTuning.minimumWidthRatio, 0.001, 0.20))));
+    const int maxWidth = std::max(
+        minWidth, 1 + static_cast<int>(std::ceil(
+            std::max(0, scanLength - 1) * std::clamp(
+                config.profileTuning.maximumWidthRatio, 0.05, 0.95))));
     const int maxHole = static_cast<int>(std::floor(
         scanLength * std::clamp(config.profileTuning.maximumCandidateHoleRatio, 0.0, 0.25)));
     const int maximumBaselineSamples = std::max(2, smoothingRadius);
     const int shoulder = std::max(4, static_cast<int>(std::ceil(
         scanLength * std::clamp(config.profileTuning.shoulderRatio, 0.002, 0.05))));
+    if (trace && trace->enabled) {
+      trace->append(QStringLiteral(
+          "event=baseline noise=%1 difference_noise=%2 slope=%3 offset=%4 "
+          "grow=%5 seed=%6 scan_length=%7 min_width=%8 max_width=%9 "
+          "max_hole=%10 shoulder=%11")
+                        .arg(noise, 0, 'g', 10)
+                        .arg(differenceNoise, 0, 'g', 10)
+                        .arg(slope, 0, 'g', 10)
+                        .arg(offset, 0, 'g', 10)
+                        .arg(grow, 0, 'g', 10)
+                        .arg(seed, 0, 'g', 10)
+                        .arg(scanLength)
+                        .arg(minWidth)
+                        .arg(maxWidth)
+                        .arg(maxHole)
+                        .arg(shoulder));
+      appendTraceSeries(trace, QStringLiteral("event=residual_data"),
+                        residual, valid);
+    }
     double best = 0, runnerUp = 0;
     bool templateActive = false;
-    bool templateRejected = false;
     for (const ProfileWeldTemplate& profileTemplate : config.profileTemplates) {
       if (profileTemplate.enabled &&
           profileTemplate.normalizedShape.size() >= kTemplateSamples) {
@@ -267,41 +346,120 @@ class ProfileWeldDetector final {
         break;
       }
     }
+    // Candidate saliency combines height above the robust parent baseline
+    // with a multi-scale top-hat response. The first term preserves a whole
+    // raised plateau; the second reveals narrower peaks and slope changes.
+    // Their maximum covers spikes, ramps, steps, plateaus and disconnected
+    // raised pieces without selecting only a plateau edge.
+    std::vector<double> saliency;
+    buildMultiScaleTopHat(residual, valid, noise, saliency);
+    if (trace && trace->enabled)
+      appendTraceSeries(trace, QStringLiteral("event=saliency_data"),
+                        saliency, valid);
+    std::vector<std::pair<int, int>> candidateSpans;
     for (int i = valid.front(); i <= valid.back();) {
-      if (!(residual[i] > grow)) { ++i; continue; }
-      const int start = i;
-      int end = i, lastRaised = i, support = 0, seeds = 0, longestHole = 0;
+      if (!(saliency[i] > grow)) { ++i; continue; }
+      const int spanStart = i;
+      int end = i, lastRaised = i;
       int baselineSamples = 0;
-      double area = 0;
       for (; i <= valid.back(); ++i) {
-        if (residual[i] > grow) {
-          longestHole = std::max(longestHole, i-lastRaised-1);
+        if (saliency[i] > grow) {
           lastRaised = end = i;
           baselineSamples = 0;
-          ++support;
-          if (residual[i] > seed) ++seeds;
-          area += std::min(residual[i], seed*10);
         } else {
-          if (std::isfinite(residual[i]) && ++baselineSamples >= maximumBaselineSamples) break;
+          if (std::isfinite(saliency[i]) && ++baselineSamples >= maximumBaselineSamples) break;
           if (i-lastRaised > maxHole) break;
+        }
+      }
+      candidateSpans.emplace_back(spanStart, end);
+    }
+    if (trace && trace->enabled)
+      trace->append(QStringLiteral("event=candidate_spans count=%1")
+                        .arg(candidateSpans.size()));
+    for (const auto& span : candidateSpans) {
+      const int start = span.first;
+      const int end = span.second;
+      int support = 0, seeds = 0, longestHole = 0, lastRaised = start;
+      double area = 0, peak = 0;
+      for (int i = start; i <= end; ++i) {
+        if (saliency[i] > grow) {
+          longestHole = std::max(longestHole, i-lastRaised-1);
+          lastRaised = i;
+          ++support;
+          if (saliency[i] > seed) ++seeds;
+          peak = std::max(peak, saliency[i]);
+          area += std::min(saliency[i], seed*10);
         }
       }
       const int length = end-start+1;
       const double supportRatio = double(support) / std::max(1, length);
-      if (length < minWidth ||
-          seeds < std::clamp(config.profileTuning.minimumSeedCount, 1, 32) ||
-          supportRatio < std::clamp(config.profileTuning.minimumSupportRatio, 0.05, 0.98) ||
-          longestHole > length * std::clamp(config.profileTuning.maximumInternalHoleRatio, 0.0, 0.95)) {
+      const int minimumSeeds =
+          std::clamp(config.profileTuning.minimumSeedCount, 1, 32);
+      const double minimumSupport =
+          std::clamp(config.profileTuning.minimumSupportRatio, 0.05, 0.98);
+      const double maximumHoleRatio =
+          std::clamp(config.profileTuning.maximumInternalHoleRatio, 0.0, 0.95);
+      QString rejectReason;
+      if (length < minWidth) rejectReason = QStringLiteral("too_narrow");
+      else if (length > maxWidth) rejectReason = QStringLiteral("too_wide");
+      else if (seeds < minimumSeeds) rejectReason = QStringLiteral("too_few_seeds");
+      else if (supportRatio < minimumSupport)
+        rejectReason = QStringLiteral("low_support");
+      else if (longestHole > length * maximumHoleRatio)
+        rejectReason = QStringLiteral("internal_hole");
+      if (!rejectReason.isEmpty()) {
+        if (trace && trace->enabled)
+          trace->append(QStringLiteral(
+              "event=candidate frame_start=%1 frame_end=%2 length=%3 support=%4 "
+              "support_ratio=%5 seeds=%6 longest_hole=%7 area=%8 peak=%9 "
+              "x_start=%10 x_end=%11 rejected=%12")
+                            .arg(span.first)
+                            .arg(span.second)
+                            .arg(length)
+                            .arg(support)
+                            .arg(supportRatio, 0, 'g', 8)
+                            .arg(seeds)
+                            .arg(longestHole)
+                            .arg(area, 0, 'g', 10)
+                            .arg(peak, 0, 'g', 10)
+                            .arg(points[start].x(), 0, 'g', 10)
+                            .arg(points[end].x(), 0, 'g', 10)
+                            .arg(rejectReason));
         continue;
       }
       int left = 0, right = 0;
       const double shoulderTolerance = std::max(grow, noise * 3.0);
-      // Both shoulders must return to the same tilted parent baseline.
-      for (int j = 1; j <= shoulder*3; ++j) {
-        if (start-j >= 0 && std::abs(residual[start-j]) <= shoulderTolerance) ++left;
-        if (end+j < n && std::abs(residual[end+j]) <= shoulderTolerance) ++right;
+      // Search across the same missing-data span that candidate growth may
+      // bridge. This keeps a detached weld island eligible when its nearest
+      // measured parent-surface samples are separated by a dropout.
+      const int shoulderSearch = std::max(shoulder * 3, maxHole);
+      for (int j = 1; j <= shoulderSearch; ++j) {
+        if (start-j >= 0 && std::isfinite(saliency[start-j]) &&
+            saliency[start-j] <= shoulderTolerance) ++left;
+        if (end+j < n && std::isfinite(saliency[end+j]) &&
+            saliency[end+j] <= shoulderTolerance) ++right;
+        if (left >= shoulder && right >= shoulder) break;
       }
-      if (std::min(left,right) < shoulder) continue;
+      if (std::min(left,right) < shoulder) {
+        if (trace && trace->enabled)
+          trace->append(QStringLiteral(
+              "event=candidate frame_start=%1 frame_end=%2 length=%3 support=%4 "
+              "support_ratio=%5 seeds=%6 left_shoulder=%7 right_shoulder=%8 "
+              "area=%9 peak=%10 x_start=%11 x_end=%12 rejected=shoulder")
+                            .arg(span.first)
+                            .arg(span.second)
+                            .arg(length)
+                            .arg(support)
+                            .arg(supportRatio, 0, 'g', 8)
+                            .arg(seeds)
+                            .arg(left)
+                            .arg(right)
+                            .arg(area, 0, 'g', 10)
+                            .arg(peak, 0, 'g', 10)
+                            .arg(points[start].x(), 0, 'g', 10)
+                            .arg(points[end].x(), 0, 'g', 10));
+        continue;
+      }
       const double centerX = (double(points[start].x()) + points[end].x()) * 0.5;
       const double center = xRatio(centerX);
       const double absoluteWidth = xRatio(points[end].x()) - xRatio(points[start].x());
@@ -316,7 +474,15 @@ class ProfileWeldDetector final {
            std::abs(center-config.expectedAbsoluteCenterRatio) > config.maximumAbsoluteCenterJumpRatio) ||
           (config.referenceAbsoluteCenterRatio >= 0 &&
            std::abs(center-config.referenceAbsoluteCenterRatio) > config.maximumReferenceCenterDriftRatio)) {
-        result.continuityRejected = true; continue;
+        result.continuityRejected = true;
+        if (trace && trace->enabled)
+          trace->append(QStringLiteral(
+              "event=candidate frame_start=%1 frame_end=%2 center_ratio=%3 "
+              "rejected=continuity")
+                            .arg(span.first)
+                            .arg(span.second)
+                            .arg(center, 0, 'g', 8));
+        continue;
       }
       // Raised weld shoulders can change apparent width as the raw profile
       // crosses a sloped seam or contains invalid scan slots. Width is useful
@@ -325,7 +491,7 @@ class ProfileWeldDetector final {
       const bool widthJump = config.expectedAbsoluteGapWidthRatio > 0 &&
           std::abs(absoluteWidth-config.expectedAbsoluteGapWidthRatio) >
               config.maximumTrackingGapWidthJumpRatio;
-      double score = area / seed;
+      double score = area / noise;
       if (widthJump) score *= 0.45;
       if (config.expectedAbsoluteCenterRatio >= 0)
         score /= 1 + 12*std::abs(center-config.expectedAbsoluteCenterRatio);
@@ -358,15 +524,50 @@ class ProfileWeldDetector final {
           matchedTemplateWidthScale = widthScale;
           candidateTemplateMatched = true;
         }
-        if (!candidateTemplateMatched) {
-          templateRejected = true;
-          continue;
+        if (candidateTemplateMatched) {
+          score *= 1.0 + 0.10 * matchedTemplateSimilarity;
+        } else if (trace && trace->enabled) {
+          trace->append(QStringLiteral(
+              "event=candidate frame_start=%1 frame_end=%2 center_ratio=%3 "
+              "template_match=none")
+                            .arg(span.first)
+                            .arg(span.second)
+                            .arg(center, 0, 'g', 8));
         }
-        if (candidateTemplateMatched)
-          score *= 0.50 + 0.50 * matchedTemplateSimilarity;
       }
-      if (score <= best) { runnerUp = std::max(runnerUp,score); continue; }
+      if (score <= best) {
+        runnerUp = std::max(runnerUp, score);
+        if (trace && trace->enabled)
+          trace->append(QStringLiteral(
+              "event=candidate frame_start=%1 frame_end=%2 length=%3 area_score=%4 "
+              "width_ratio=%5 center_ratio=%6 x_start=%7 x_end=%8 "
+              "peak=%9 accepted=runner_up")
+                            .arg(span.first)
+                            .arg(span.second)
+                            .arg(length)
+                            .arg(score, 0, 'g', 10)
+                            .arg(width, 0, 'g', 8)
+                            .arg(center, 0, 'g', 8)
+                            .arg(points[start].x(), 0, 'g', 10)
+                            .arg(points[end].x(), 0, 'g', 10)
+                            .arg(peak, 0, 'g', 10));
+        continue;
+      }
       runnerUp = best; best = score;
+      if (trace && trace->enabled)
+        trace->append(QStringLiteral(
+            "event=candidate frame_start=%1 frame_end=%2 length=%3 area_score=%4 "
+            "width_ratio=%5 center_ratio=%6 x_start=%7 x_end=%8 peak=%9 "
+            "accepted=best")
+                          .arg(span.first)
+                          .arg(span.second)
+                          .arg(length)
+                          .arg(score, 0, 'g', 10)
+                          .arg(width, 0, 'g', 8)
+                          .arg(center, 0, 'g', 8)
+                          .arg(points[start].x(), 0, 'g', 10)
+                          .arg(points[end].x(), 0, 'g', 10)
+                          .arg(peak, 0, 'g', 10));
       result.valid = result.baselineSupported = result.contourSupported = true;
       result.gapStartPx = result.contourStartPx = start;
       result.gapEndPx = result.contourEndPx = end;
@@ -388,15 +589,154 @@ class ProfileWeldDetector final {
       result.templateSimilarity = matchedTemplateSimilarity;
       result.templateWidthScale = matchedTemplateWidthScale;
     }
-    if (best > 0 && runnerUp > best*.85) result.valid = false;
     result.templateEvaluated = templateActive;
-    result.templateRejected = templateActive && !result.valid && templateRejected;
+    result.templateRejected = false;
     if (result.valid) result.continuityRejected = result.widthRejected = false;
+    if (trace && trace->enabled)
+      trace->append(QStringLiteral(
+          "event=detector_result valid=%1 start=%2 end=%3 center_x=%4 "
+          "center_ratio=%5 confidence=%6 best_score=%7 runner_up=%8 "
+          "x_start=%9 x_end=%10")
+                        .arg(result.valid)
+                        .arg(result.gapStartPx)
+                        .arg(result.gapEndPx)
+                        .arg(result.profileCenterX, 0, 'g', 10)
+                        .arg(result.absoluteCenterRatio, 0, 'g', 10)
+                        .arg(result.confidence, 0, 'g', 10)
+                        .arg(best, 0, 'g', 10)
+                        .arg(runnerUp, 0, 'g', 10)
+                        .arg(result.valid ? points[result.gapStartPx].x() : 0.0F,
+                             0, 'g', 10)
+                        .arg(result.valid ? points[result.gapEndPx].x() : 0.0F,
+                             0, 'g', 10));
     return result;
   }
 
  private:
   static constexpr int kTemplateSamples = 41;
+
+  static void appendTraceSeries(ProfileWeldDetectionTrace* trace,
+                                const QString& event,
+                                const std::vector<double>& values,
+                                const std::vector<int>& valid) {
+    if (!trace || !trace->enabled) return;
+    constexpr int kChunkSize = 128;
+    QString chunk;
+    chunk.reserve(4096);
+    int chunkNumber = 0;
+    for (int position = 0; position < static_cast<int>(valid.size());
+         ++position) {
+      const int index = valid[position];
+      const double value = values[index];
+      chunk += QStringLiteral("%1:%2;")
+                   .arg(index)
+                   .arg(std::isfinite(value)
+                            ? QString::number(value, 'g', 10)
+                            : QStringLiteral("nan"));
+      if ((position + 1) % kChunkSize == 0 ||
+          position + 1 == static_cast<int>(valid.size())) {
+        trace->append(QStringLiteral("%1 chunk=%2 data=%3")
+                          .arg(event)
+                          .arg(++chunkNumber)
+                          .arg(chunk));
+        chunk.clear();
+      }
+    }
+  }
+
+  // Sliding-window extreme (monotonic deque) over one finite run. Running
+  // it once for the minimum and once for the maximum gives erosion and
+  // dilation, so opening = dilate(erode(x)). Linear in the run length.
+  static void slidingExtreme(const std::vector<double>& samples, int radius,
+                             bool maximum, std::vector<double>& output) {
+    output.assign(samples.size(), 0.0);
+    if (samples.empty()) return;
+    std::deque<int> deque;
+    const auto push = [&](int index, int first) {
+      while (!deque.empty() && deque.front() < first)
+        deque.pop_front();
+      while (!deque.empty() &&
+             (maximum ? samples[deque.back()] <= samples[index]
+                      : samples[deque.back()] >= samples[index]))
+        deque.pop_back();
+      deque.push_back(index);
+    };
+    for (int right = 0; right < static_cast<int>(samples.size()); ++right) {
+      const int first = std::max(0, right - radius * 2);
+      push(right, first);
+      const int center = right - radius;
+      if (center >= 0)
+        output[center] = samples[deque.front()];
+    }
+    const int firstTailCenter = std::max(
+        0, static_cast<int>(samples.size()) - radius);
+    for (int center = firstTailCenter;
+         center < static_cast<int>(samples.size()); ++center) {
+      const int first = std::max(0, center - radius);
+      while (!deque.empty() && deque.front() < first)
+        deque.pop_front();
+      if (!deque.empty())
+        output[center] = samples[deque.front()];
+    }
+  }
+
+  // Combine positive height above the fitted parent surface with multi-scale
+  // morphological white top-hat responses over each finite run.
+  static void buildMultiScaleTopHat(const std::vector<double>& residual,
+                                    const std::vector<int>& valid,
+                                    double noise,
+                                    std::vector<double>& saliency) {
+    saliency.assign(residual.size(), std::numeric_limits<double>::quiet_NaN());
+    Q_UNUSED(noise);
+    const int validCount = static_cast<int>(valid.size());
+    if (validCount < 8) return;
+    // Invalid slots split the profile into finite runs. Each run is
+    // processed on its own so a dropout cannot leak a fabricated baseline
+    // into the neighbouring run.
+    std::vector<std::pair<int, int>> runs;
+    int runStart = 0;
+    for (int position = 0; position < validCount; ++position) {
+      const bool invalid = !std::isfinite(residual[valid[position]]);
+      const bool indexGap = position > runStart &&
+          valid[position] != valid[position - 1] + 1;
+      if (invalid || indexGap) {
+        if (position > runStart) runs.emplace_back(runStart, position);
+        runStart = invalid ? position + 1 : position;
+      }
+    }
+    if (validCount > runStart) runs.emplace_back(runStart, validCount);
+    std::vector<double> samples;
+    std::vector<double> eroded;
+    std::vector<double> opened;
+    for (const auto& run : runs) {
+      const int length = run.second - run.first;
+      if (length <= 0) continue;
+      samples.clear();
+      samples.reserve(length);
+      for (int position = run.first; position < run.second; ++position) {
+        const double value = residual[valid[position]];
+        saliency[valid[position]] = std::max(0.0, value);
+        samples.push_back(value);
+      }
+      const int maximumScale = std::max(4, length / 4);
+      if (length < 9) {
+        // Too short for any structuring element: the global parent fit
+        // already marks these points as raised, so keep their full residual.
+        continue;
+      }
+      for (int scale = 4; scale <= maximumScale; scale *= 2) {
+        if (2 * scale + 1 > length) break;
+        slidingExtreme(samples, scale, false, eroded);
+        slidingExtreme(eroded, scale, true, opened);
+        for (int offset = 0; offset < length; ++offset) {
+          const int index = valid[run.first + offset];
+          const double response = samples[offset] - opened[offset];
+          if (response > saliency[index])
+            saliency[index] = response;
+        }
+      }
+    }
+  }
 
   static QVector<float> normalizedRaisedShape(const std::vector<double>& residual,
                                               int start, int end) {
@@ -415,12 +755,18 @@ class ProfileWeldDetector final {
       if (std::isfinite(value) && right != left && std::isfinite(residual[right])) {
         value += (residual[right] - value) * (position - left);
       }
-      value = std::isfinite(value) ? std::max(0.0, value) : 0.0;
-      maximum = std::max(maximum, value);
-      output.append(static_cast<float>(value));
+      if (std::isfinite(value)) {
+        value = std::max(0.0, value);
+        maximum = std::max(maximum, value);
+        output.append(static_cast<float>(value));
+      } else {
+        output.append(std::numeric_limits<float>::quiet_NaN());
+      }
     }
     if (maximum <= 1e-9) return {};
-    for (float& value : output) value = static_cast<float>(value / maximum);
+    for (float& value : output) {
+      if (std::isfinite(value)) value = static_cast<float>(value / maximum);
+    }
     return output;
   }
 
@@ -428,11 +774,20 @@ class ProfileWeldDetector final {
                                    const QVector<float>& observed) {
     if (expected.size() != observed.size() || expected.isEmpty()) return 0.0;
     double squaredError = 0.0;
+    int compared = 0;
     for (int index = 0; index < expected.size(); ++index) {
+      if (!std::isfinite(observed[index])) continue;
       const double difference = expected[index] - observed[index];
       squaredError += difference * difference;
+      ++compared;
     }
-    return std::max(0.0, 1.0 - std::sqrt(squaredError / expected.size()));
+    if (compared == 0) return 0.0;
+    // Sparse candidates get a mild coverage penalty so a mostly-missing
+    // shape cannot outrank a well-supported one, but a few dropouts no
+    // longer zero the whole comparison.
+    const double coverage = double(compared) / expected.size();
+    return std::max(0.0, 1.0 - std::sqrt(squaredError / compared)) *
+           (0.6 + 0.4 * coverage);
   }
 };
 }

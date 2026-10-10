@@ -239,6 +239,16 @@ void LaserCorrectionController::setProfileTuning(
   settings_.detector.profileTuning = tuning;
 }
 
+void LaserCorrectionController::setProfileDetectionTraceEnabled(bool enabled) {
+  profileDetectionTraceEnabled_ = enabled;
+}
+
+void LaserCorrectionController::emitProfileDetectionTrace(
+    ProfileWeldDetectionTrace& trace) {
+  if (!profileDetectionTraceEnabled_ || trace.lines.isEmpty()) return;
+  emit profileDetectionTraceBatch(trace.lines);
+}
+
 void LaserCorrectionController::setEnabled(bool enabled) {
   if (!enabled) {
     stop(CRAWLING_TEXT("自动纠偏已停止"));
@@ -396,6 +406,39 @@ void LaserCorrectionController::processProfileFrame(
     const QVector<QVector3D>& points, quint32 sourceFrameNumber, qint64 receivedAtEpochMs) {
   const qint64 age = QDateTime::currentMSecsSinceEpoch() - receivedAtEpochMs;
   const qint64 now = clock_.elapsed();
+  ProfileWeldDetectionTrace trace;
+  trace.enabled = profileDetectionTraceEnabled_;
+  if (trace.enabled) {
+    trace.append(QStringLiteral(
+        "event=profile_input frame=%1 samples=%2 received_epoch_ms=%3 age_ms=%4")
+                     .arg(sourceFrameNumber)
+                     .arg(points.size())
+                     .arg(receivedAtEpochMs)
+                     .arg(age));
+    QStringList pointChunks;
+    pointChunks.reserve((points.size() + 127) / 128);
+    QString chunk;
+    chunk.reserve(4096);
+    for (int index = 0; index < points.size(); ++index) {
+      const QVector3D& point = points[index];
+      chunk += QStringLiteral("%1:%2,%3,%4;")
+                   .arg(index)
+                   .arg(point.x(), 0, 'g', 10)
+                   .arg(point.y(), 0, 'g', 10)
+                   .arg(point.z(), 0, 'g', 10);
+      if ((index + 1) % 128 == 0 || index + 1 == points.size()) {
+        pointChunks.append(chunk);
+        chunk.clear();
+      }
+    }
+    for (int index = 0; index < pointChunks.size(); ++index) {
+      trace.append(QStringLiteral("event=profile_points frame=%1 chunk=%2/%3 data=%4")
+                       .arg(sourceFrameNumber)
+                       .arg(index + 1)
+                       .arg(pointChunks.size())
+                       .arg(pointChunks[index]));
+    }
+  }
   if (lastProfileFrameDiagnosticMs_ < 0 ||
       now - lastProfileFrameDiagnosticMs_ >= 1000) {
     lastProfileFrameDiagnosticMs_ = now;
@@ -448,6 +491,12 @@ void LaserCorrectionController::processProfileFrame(
             .arg(maxZ, 0, 'f', 3));
   }
   if (points.size() < 32 || age < 0 || age > settings_.imageTimeoutMs) {
+    if (trace.enabled)
+      trace.append(QStringLiteral(
+          "event=profile_input_rejected frame=%1 reason=%2")
+                      .arg(sourceFrameNumber)
+                      .arg(points.size() < 32 ? QStringLiteral("too_few_samples")
+                                              : QStringLiteral("stale_or_invalid_age")));
     if (lastProfileFrameDiagnosticMs_ == now)
       emit diagnosticLogMessage(
           QStringLiteral("event=laser_profile_dropped sdk_frame=%1 reason=%2")
@@ -455,6 +504,7 @@ void LaserCorrectionController::processProfileFrame(
               .arg(points.size() < 32
                        ? QStringLiteral("too_few_samples")
                        : QStringLiteral("stale_or_invalid_age")));
+    emitProfileDetectionTrace(trace);
     return;
   }
   if (!status_.active || boundaryStopLatched_) {
@@ -466,6 +516,7 @@ void LaserCorrectionController::processProfileFrame(
     config.expectedAbsoluteCenterRatio = -1;
     config.expectedAbsoluteGapWidthRatio = -1;
     config.referenceAbsoluteCenterRatio = -1;
+    config.profileDetectionTrace = trace.enabled ? &trace : nullptr;
     QElapsedTimer detectorTimer;
     detectorTimer.start();
     const LaserGapDetection detection = ProfileWeldDetector::detect(points, config);
@@ -496,20 +547,65 @@ void LaserCorrectionController::processProfileFrame(
               .arg(detection.absoluteCenterRatio, 0, 'f', 6));
     }
     emit profileObservationReady(points, detection, sourceFrameNumber, receivedAtEpochMs);
+    if (trace.enabled) {
+      trace.append(QStringLiteral(
+          "event=profile_result frame=%1 valid=%2 start=%3 end=%4 "
+          "center_x=%5 confidence=%6 detector_ms=%7")
+                       .arg(sourceFrameNumber)
+                       .arg(detection.valid)
+                       .arg(detection.gapStartPx)
+                       .arg(detection.gapEndPx)
+                       .arg(detection.profileCenterX, 0, 'g', 10)
+                       .arg(detection.confidence, 0, 'g', 10)
+                       .arg(detectorTimer.elapsed()));
+    }
+    emitProfileDetectionTrace(trace);
     return;
   }
-  if (sourceFrameNumberValid_ && sourceFrameNumber == sourceFrameNumber_) return;
+  if (sourceFrameNumberValid_ && sourceFrameNumber == sourceFrameNumber_) {
+    if (trace.enabled)
+      trace.append(QStringLiteral(
+          "event=profile_input_rejected frame=%1 reason=duplicate_frame")
+                      .arg(sourceFrameNumber));
+    emitProfileDetectionTrace(trace);
+    return;
+  }
   sourceFrameNumber_ = sourceFrameNumber;
   sourceFrameNumberValid_ = true;
   sourceReceivedAtEpochMs_ = receivedAtEpochMs;
   processingSourceFrame_ = true;
-  processObservation(QImage(), &points);
+  processObservation(QImage(), &points, &trace);
   processingSourceFrame_ = false;
+  if (trace.enabled) {
+    trace.append(QStringLiteral(
+        "event=profile_processing_complete frame=%1 status_gap_valid=%2 "
+        "status_start=%3 status_end=%4 status_center_ratio=%5 "
+        "status_confidence=%6 detection_held=%7 detector_ms=%8 reason=%9")
+                     .arg(sourceFrameNumber)
+                     .arg(status_.gapValid)
+                     .arg(status_.gapStartPx)
+                     .arg(status_.gapEndPx)
+                     .arg(status_.gapAbsoluteCenterRatio, 0, 'g', 10)
+                     .arg(status_.confidence, 0, 'g', 10)
+                     .arg(status_.detectionHeld)
+                     .arg(lastDetectorDurationMs_)
+                     .arg(status_.reason));
+  }
+  emitProfileDetectionTrace(trace);
 }
 
 void LaserCorrectionController::processObservation(
-    const QImage& image, const QVector<QVector3D>* profile) {
-  if ((!profile && image.isNull()) || boundaryStopLatched_) return;
+    const QImage& image, const QVector<QVector3D>* profile,
+    ProfileWeldDetectionTrace* profileTrace) {
+  if ((!profile && image.isNull()) || boundaryStopLatched_) {
+    if (profileTrace && profileTrace->enabled)
+      profileTrace->append(QStringLiteral(
+          "event=profile_input_rejected reason=%1")
+                               .arg((!profile && image.isNull())
+                                        ? QStringLiteral("empty_observation")
+                                        : QStringLiteral("boundary_stop_latched")));
+    return;
+  }
   const int observationWidth = profile ? profile->size() : image.width();
   const int observationHeight = profile ? 1 : image.height();
   boundaryObservationReliable_ = false;
@@ -537,6 +633,8 @@ void LaserCorrectionController::processObservation(
     beginSeamReacquisition(CRAWLING_TEXT("真实双边缘持续缺失，解除旧候选锁定"));
   }
   LaserGapDetectorConfig detectorConfig = settings_.detector;
+  detectorConfig.profileDetectionTrace =
+      profileTrace && profileTrace->enabled ? profileTrace : nullptr;
   detectorConfig.profileAxisHalfSpanX = profileAxisHalfSpanX_;
   detectorConfig.profileAxisLocked = status_.active;
   // Re-localization broadens the local search while preserving the last
@@ -636,6 +734,32 @@ void LaserCorrectionController::processObservation(
     detectorConfig.maximumAbsoluteCenterJumpRatio = std::max(
         detectorConfig.maximumAbsoluteCenterJumpRatio,
         seamPrediction_.uncertaintyRatio);
+  }
+  if (profileTrace && profileTrace->enabled) {
+    profileTrace->append(QStringLiteral(
+        "event=detector_config active=%1 boundary_stop=%2 axis_locked=%3 "
+        "expected_center=%4 expected_absolute_center=%5 expected_width=%6 "
+        "reference_center=%7 max_center_jump=%8 max_reference_drift=%9 "
+        "minimum_width_ratio=%10 maximum_width_ratio=%11 grow_sigma=%12 "
+        "seed_sigma=%13 support_ratio=%14 candidate_hole_ratio=%15 "
+        "internal_hole_ratio=%16 smoothing_radius=%17")
+                             .arg(status_.active)
+                             .arg(boundaryStopLatched_)
+                             .arg(detectorConfig.profileAxisLocked)
+                             .arg(detectorConfig.expectedCenterRatio, 0, 'g', 10)
+                             .arg(detectorConfig.expectedAbsoluteCenterRatio, 0, 'g', 10)
+                             .arg(detectorConfig.expectedAbsoluteGapWidthRatio, 0, 'g', 10)
+                             .arg(detectorConfig.referenceAbsoluteCenterRatio, 0, 'g', 10)
+                             .arg(detectorConfig.maximumAbsoluteCenterJumpRatio, 0, 'g', 10)
+                             .arg(detectorConfig.maximumReferenceCenterDriftRatio, 0, 'g', 10)
+                             .arg(detectorConfig.profileTuning.minimumWidthRatio, 0, 'g', 10)
+                             .arg(detectorConfig.profileTuning.maximumWidthRatio, 0, 'g', 10)
+                             .arg(detectorConfig.profileTuning.growNoiseSigma, 0, 'g', 10)
+                             .arg(detectorConfig.profileTuning.seedNoiseSigma, 0, 'g', 10)
+                             .arg(detectorConfig.profileTuning.minimumSupportRatio, 0, 'g', 10)
+                             .arg(detectorConfig.profileTuning.maximumCandidateHoleRatio, 0, 'g', 10)
+                             .arg(detectorConfig.profileTuning.maximumInternalHoleRatio, 0, 'g', 10)
+                             .arg(detectorConfig.profileTuning.smoothingRadius));
   }
   LaserRawFrameDiagnostic rawFrameDiagnostic;
   LaserRawFrameDiagnostic* rawFrameDiagnosticOutput =

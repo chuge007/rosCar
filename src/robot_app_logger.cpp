@@ -17,12 +17,24 @@ namespace {
 // rotating away its initial survey after only a few minutes.
 constexpr qint64 kMaximumBytes = 16 * 1024 * 1024;
 constexpr qint64 kRetainedBytes = 12 * 1024 * 1024;
+constexpr qint64 kProfileDetectionMaximumBytes = 64 * 1024 * 1024;
+constexpr qint64 kProfileDetectionRetainedBytes = 48 * 1024 * 1024;
 QMutex& loggerMutex() { static QMutex mutex; return mutex; }
+QMutex& profileDetectionLoggerMutex() { static QMutex mutex; return mutex; }
 quint64& logSequence() { static quint64 sequence = 0; return sequence; }
+quint64& profileDetectionLogSequence() {
+  static quint64 sequence = 0;
+  return sequence;
+}
 }
 
 QString AppLogger::filePath() {
   return QDir(QCoreApplication::applicationDirPath()).filePath(CRAWLING_TEXT("logs/robot_console.log"));
+}
+
+QString AppLogger::profileDetectionFilePath() {
+  return QDir(QCoreApplication::applicationDirPath())
+      .filePath(CRAWLING_TEXT("logs/profile_weld_detection.log"));
 }
 
 void AppLogger::initialize() {
@@ -32,6 +44,20 @@ void AppLogger::initialize() {
 
 void AppLogger::write(const QString& category, const QString& message) {
   writeLine(QStringLiteral("INFO"), category, message);
+}
+
+void AppLogger::writeProfileDetection(const QString& message) {
+  writeProfileDetectionBatch(QStringList{message});
+}
+
+void AppLogger::writeProfileDetectionBatch(const QStringList& messages) {
+  if (messages.isEmpty()) return;
+  writeLinesToFile(profileDetectionFilePath(), QStringLiteral("TRACE"),
+                   QStringLiteral("LASER.PROFILE"), messages,
+                   kProfileDetectionMaximumBytes,
+                   kProfileDetectionRetainedBytes,
+                   profileDetectionLoggerMutex(),
+                   profileDetectionLogSequence());
 }
 
 void AppLogger::warning(const QString& category, const QString& message) {
@@ -44,12 +70,30 @@ void AppLogger::error(const QString& category, const QString& message) {
 
 void AppLogger::writeLine(const QString& level, const QString& category,
                           const QString& message) {
-  QMutexLocker lock(&loggerMutex());
-  QDir().mkpath(QFileInfo(filePath()).dir().absolutePath());
-  QFile file(filePath());
+  writeLineToFile(filePath(), level, category, message, kMaximumBytes,
+                  kRetainedBytes, loggerMutex(), logSequence());
+}
+
+void AppLogger::writeLineToFile(const QString& path, const QString& level,
+                                const QString& category,
+                                const QString& message,
+                                qint64 maximumBytes, qint64 retainedBytes,
+                                QMutex& mutex, quint64& sequence) {
+  writeLinesToFile(path, level, category, QStringList{message},
+                   maximumBytes, retainedBytes, mutex, sequence);
+}
+
+void AppLogger::writeLinesToFile(const QString& path, const QString& level,
+                                 const QString& category,
+                                 const QStringList& messages,
+                                 qint64 maximumBytes, qint64 retainedBytes,
+                                 QMutex& mutex, quint64& sequence) {
+  QMutexLocker lock(&mutex);
+  QDir().mkpath(QFileInfo(path).dir().absolutePath());
+  QFile file(path);
   if (!file.open(QIODevice::ReadWrite | QIODevice::Text)) return;
-  if (file.size() >= kMaximumBytes) {
-    file.seek(qMax<qint64>(0, file.size() - kRetainedBytes));
+  if (file.size() >= maximumBytes) {
+    file.seek(qMax<qint64>(0, file.size() - retainedBytes));
     QByteArray retained = file.readAll();
     const int firstLine = retained.indexOf('\n');
     if (firstLine >= 0) retained.remove(0, firstLine + 1);
@@ -57,14 +101,24 @@ void AppLogger::writeLine(const QString& level, const QString& category,
     file.write(retained);
   }
   file.seek(file.size());
-  const QString line = CRAWLING_TEXT("%1 #%2 [T%3] [P%4] [%5] [%6] %7\n")
-      .arg(QDateTime::currentDateTime().toString(CRAWLING_TEXT("yyyy-MM-dd HH:mm:ss.zzz")))
-      .arg(++logSequence(), 8, 10, QLatin1Char('0'))
-      .arg(reinterpret_cast<quintptr>(QThread::currentThreadId()), 0, 16)
-      .arg(QCoreApplication::applicationPid())
-      .arg(level, category, message);
-  file.write(line.toUtf8());
+  for (const QString& message : messages) {
+    const QString line = CRAWLING_TEXT("%1 #%2 [T%3] [P%4] [%5] [%6] %7\n")
+        .arg(QDateTime::currentDateTime().toString(CRAWLING_TEXT("yyyy-MM-dd HH:mm:ss.zzz")))
+        .arg(++sequence, 8, 10, QLatin1Char('0'))
+        .arg(reinterpret_cast<quintptr>(QThread::currentThreadId()), 0, 16)
+        .arg(QCoreApplication::applicationPid())
+        .arg(level, category, message);
+    file.write(line.toUtf8());
+  }
   file.flush();
+}
+
+void ProfileDetectionLogWriter::append(const QString& message) {
+  AppLogger::writeProfileDetection(message);
+}
+
+void ProfileDetectionLogWriter::appendBatch(const QStringList& messages) {
+  AppLogger::writeProfileDetectionBatch(messages);
 }
 }  // namespace crawling
 
