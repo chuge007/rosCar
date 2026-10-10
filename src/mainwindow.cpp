@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 
 #include "client.h"
+#include "clamp_motor_controller.h"
 #include "devicecontroller.h"
 #include "framerecorder.h"
 #include "framedecoderworker.h"
@@ -319,14 +320,15 @@ void MainWindow::buildUi()
     m_workspace->setObjectName(QStringLiteral("workspaceTabs"));
     m_workspace->setDocumentMode(true);
     m_workspace->addTab(central, QStringLiteral("超声检测"));
-    m_robotPanel = new RobotControlPanel;
+    m_clampController = new crawling::ClampMotorController(m_workspace);
+    m_robotPanel = new RobotControlPanel(m_clampController, nullptr);
     m_workspace->addTab(m_robotPanel, QStringLiteral("小车控制"));
     setCentralWidget(m_workspace);
 
     // ===== 右侧浮动面板（分区页：连接/状态/超声/数据） =====
     m_parameters = new ParameterPanel;
     m_parameters->setMinimumWidth(370);
-    auto *probeAdjust = new ProbeAdjustmentPanel;
+    auto *probeAdjust = new ProbeAdjustmentPanel(m_clampController, nullptr);
 
     m_panelPages = new QStackedWidget;
 

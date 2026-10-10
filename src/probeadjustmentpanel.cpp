@@ -16,10 +16,17 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
-ProbeAdjustmentPanel::ProbeAdjustmentPanel(QWidget *parent) : QWidget(parent)
+ProbeAdjustmentPanel::ProbeAdjustmentPanel(QWidget *parent)
+    : ProbeAdjustmentPanel(nullptr, parent)
 {
-    m_controller = new crawling::ClampMotorController(this);
+}
 
+ProbeAdjustmentPanel::ProbeAdjustmentPanel(crawling::ClampMotorController *controller,
+                                           QWidget *parent)
+    : QWidget(parent), m_controller(controller)
+{
+    if (!m_controller)
+        m_controller = new crawling::ClampMotorController(this);
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(4, 4, 4, 4);
     auto *scroll = new QScrollArea;
@@ -150,6 +157,13 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(QWidget *parent) : QWidget(parent)
     connect(stop, &QPushButton::clicked, m_controller, &crawling::ClampMotorController::stop);
     connect(m_controller, &crawling::ClampMotorController::statusChanged,
             m_status, &QLabel::setText);
+    connect(m_controller, &crawling::ClampMotorController::connectionChanged,
+            this, [this](bool connected, const QString &message) {
+                m_status->setText(message.isEmpty()
+                                      ? (connected ? QStringLiteral("夹子电机已连接")
+                                                   : QStringLiteral("夹子电机未连接"))
+                                      : message);
+            });
 
     refreshPorts();
     loadSettings();

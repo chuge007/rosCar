@@ -17,6 +17,8 @@ class ProbeAdjustmentPanel final : public QWidget
     Q_OBJECT
 public:
     explicit ProbeAdjustmentPanel(QWidget *parent = nullptr);
+    ProbeAdjustmentPanel(crawling::ClampMotorController *controller,
+                         QWidget *parent);
     ~ProbeAdjustmentPanel() override;
 
 private:

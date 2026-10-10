@@ -245,7 +245,7 @@ void LaserCorrectionController::setProfileDetectionTraceEnabled(bool enabled) {
 
 void LaserCorrectionController::emitProfileDetectionTrace(
     ProfileWeldDetectionTrace& trace) {
-  if (!profileDetectionTraceEnabled_ || trace.lines.isEmpty()) return;
+  if (!trace.enabled || trace.lines.isEmpty()) return;
   emit profileDetectionTraceBatch(trace.lines);
 }
 
@@ -3897,6 +3897,7 @@ void LaserCorrectionController::stop(const QString& reason) {
   phase_ = Phase::Idle;
   status_.phase = phaseName(phase_);
   status_.reason = reason;
+  profileDetectionTraceEnabled_ = false;
   emit commandChanged(0.0, 0.0);
   lastCommandMs_ = clock_.elapsed();
   if (wasActive || reason != CRAWLING_TEXT("自动纠偏已停止")) {

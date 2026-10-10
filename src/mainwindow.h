@@ -28,6 +28,7 @@ class QToolBar;
 class ParameterPanel;
 class RemoteControlServer;
 class RobotControlPanel;
+namespace crawling { class ClampMotorController; }
 
 class MainWindow : public QMainWindow
 {
@@ -75,6 +76,7 @@ private:
     RemoteControlServer *m_remoteControl = nullptr;
     QProcess *m_remoteDesktopProcess = nullptr;
     RobotControlPanel *m_robotPanel = nullptr;
+    crawling::ClampMotorController *m_clampController = nullptr;
     QTabWidget *m_workspace = nullptr;
     ParameterPanel *m_parameters = nullptr;
     AScanWidget *m_aScan = nullptr;

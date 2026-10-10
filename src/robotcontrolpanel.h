@@ -34,6 +34,7 @@ class QTimer;
 class RobotProfileView;
 
 namespace crawling {
+class ClampMotorController;
 class SynchronizedDriveController;
 class RobotSensorController;
 class RobotUsbCameraController;
@@ -45,6 +46,8 @@ class RobotControlPanel final : public QWidget
     Q_OBJECT
 public:
     explicit RobotControlPanel(QWidget *parent = nullptr);
+    RobotControlPanel(crawling::ClampMotorController *clampController,
+                      QWidget *parent);
     ~RobotControlPanel() override;
 
     void showInformationDialog(QWidget *parent = nullptr);
@@ -69,6 +72,7 @@ private slots:
     void connectConfiguredImu();
     void connectConfiguredLaser();
     void connectConfiguredUsbCamera();
+    void connectConfiguredClampMotor();
     void saveSettings();
     void restoreSettings();
     void sendMotionCommand();
@@ -86,6 +90,7 @@ private slots:
     void stopAutoCorrection();
     void updateUsbDevices(const QStringList &devices);
     void updateUsbConnection(bool connected, const QString &message);
+    void updateClampConnection(bool connected, const QString &message);
     void appendLog(const QString &message);
 
 signals:
@@ -114,8 +119,11 @@ private:
     void loadProfileWeldTuning();
     void persistProfileWeldTuning();
     void applyProfileWeldTuning();
+    bool beginProfileDetectionLogSession();
+    void finishProfileDetectionLogSession(const QString &reason);
 
     crawling::SynchronizedDriveController *m_controller = nullptr;
+    crawling::ClampMotorController *m_clampController = nullptr;
     QThread *m_driveThread = nullptr;
     crawling::RobotSensorController *m_sensorController = nullptr;
     QThread *m_sensorThread = nullptr;
@@ -140,6 +148,7 @@ private:
     bool m_usbConnected = false;
     bool m_autoCorrectionActive = false;
     bool m_autoCorrectionStartPending = false;
+    bool m_profileDetectionLogSessionActive = false;
 
     QLabel *m_stateLabel = nullptr;
     QLabel *m_connectionLabel = nullptr;
@@ -157,6 +166,7 @@ private:
     QLabel *m_laserFrameState = nullptr;
     QLabel *m_imuConfigState = nullptr;
     QLabel *m_usbConfigState = nullptr;
+    QLabel *m_clampConfigState = nullptr;
     QLabel *m_imuStatus = nullptr;
     QLabel *m_laserStatus = nullptr;
     QLabel *m_usbStatus = nullptr;

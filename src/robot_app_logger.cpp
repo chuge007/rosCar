@@ -46,6 +46,19 @@ void AppLogger::write(const QString& category, const QString& message) {
   writeLine(QStringLiteral("INFO"), category, message);
 }
 
+bool AppLogger::resetProfileDetection() {
+  QMutexLocker lock(&profileDetectionLoggerMutex());
+  const QString path = profileDetectionFilePath();
+  QDir().mkpath(QFileInfo(path).dir().absolutePath());
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate |
+                 QIODevice::Text)) {
+    return false;
+  }
+  profileDetectionLogSequence() = 0;
+  return true;
+}
+
 void AppLogger::writeProfileDetection(const QString& message) {
   writeProfileDetectionBatch(QStringList{message});
 }
@@ -113,11 +126,31 @@ void AppLogger::writeLinesToFile(const QString& path, const QString& level,
   file.flush();
 }
 
+bool ProfileDetectionLogWriter::beginSession() {
+  sessionActive_ = AppLogger::resetProfileDetection();
+  if (sessionActive_)
+    AppLogger::writeProfileDetection(QStringLiteral("event=session_begin"));
+  return sessionActive_;
+}
+
+void ProfileDetectionLogWriter::endSession(const QString& reason) {
+  if (!sessionActive_) return;
+  QString singleLineReason = reason;
+  singleLineReason.replace(QLatin1Char('\r'), QLatin1Char(' '));
+  singleLineReason.replace(QLatin1Char('\n'), QLatin1Char(' '));
+  AppLogger::writeProfileDetection(
+      QStringLiteral("event=session_end reason=\"%1\"")
+          .arg(singleLineReason));
+  sessionActive_ = false;
+}
+
 void ProfileDetectionLogWriter::append(const QString& message) {
+  if (!sessionActive_) return;
   AppLogger::writeProfileDetection(message);
 }
 
 void ProfileDetectionLogWriter::appendBatch(const QStringList& messages) {
+  if (!sessionActive_) return;
   AppLogger::writeProfileDetectionBatch(messages);
 }
 }  // namespace crawling

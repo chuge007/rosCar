@@ -5,6 +5,7 @@
 #include "profile_weld_detector.h"
 #include "robot_sensor_controller.h"
 #include "robot_usb_camera_controller.h"
+#include "clamp_motor_controller.h"
 #include "synchronized_drive_controller.h"
 
 #include <QCheckBox>
@@ -113,7 +114,14 @@ void setComboText(QComboBox *box, const QString &value)
 
 } // namespace
 
-RobotControlPanel::RobotControlPanel(QWidget *parent) : QWidget(parent)
+RobotControlPanel::RobotControlPanel(QWidget *parent)
+    : RobotControlPanel(nullptr, parent)
+{
+}
+
+RobotControlPanel::RobotControlPanel(crawling::ClampMotorController *clampController,
+                                     QWidget *parent)
+    : QWidget(parent), m_clampController(clampController)
 {
     qRegisterMetaType<crawling::DriveSettings>("crawling::DriveSettings");
     qRegisterMetaType<crawling::DriveState>("crawling::DriveState");
@@ -126,6 +134,13 @@ RobotControlPanel::RobotControlPanel(QWidget *parent) : QWidget(parent)
         "crawling::LaserCorrectionSettings");
     qRegisterMetaType<crawling::LaserCorrectionStatus>(
         "crawling::LaserCorrectionStatus");
+
+    if (!m_clampController)
+        m_clampController = new crawling::ClampMotorController(this);
+    connect(m_clampController,
+            &crawling::ClampMotorController::connectionChanged,
+            this, &RobotControlPanel::updateClampConnection,
+            Qt::QueuedConnection);
 
     buildUi();
     loadSettings();
@@ -191,9 +206,7 @@ RobotControlPanel::RobotControlPanel(QWidget *parent) : QWidget(parent)
     m_profileDetectionLogThread->start();
     QMetaObject::invokeMethod(
         m_correctionController, "setProfileDetectionTraceEnabled",
-        Qt::QueuedConnection,
-        Q_ARG(bool, m_profileDetectionLogCheck &&
-                         m_profileDetectionLogCheck->isChecked()));
+        Qt::QueuedConnection, Q_ARG(bool, false));
     connect(m_sensorController,
             &crawling::RobotSensorController::correctionProfileFrameReady,
             m_correctionController,
@@ -224,6 +237,8 @@ RobotControlPanel::RobotControlPanel(QWidget *parent) : QWidget(parent)
                 } else {
                     m_autoCorrectionStartPending = false;
                     m_autoCorrectionActive = false;
+                    finishProfileDetectionLogSession(
+                        QStringLiteral("profile_prepare_failed"));
                     m_autoCorrectionStart->setEnabled(true);
                     m_autoCorrectionStop->setEnabled(false);
                     appendLog(QStringLiteral("激光轮廓流准备失败，自动纠偏未启动"));
@@ -318,6 +333,7 @@ RobotControlPanel::~RobotControlPanel()
 {
     if (m_commandTimer)
         m_commandTimer->stop();
+    finishProfileDetectionLogSession(QStringLiteral("application_shutdown"));
     if (m_correctionController) {
         QMetaObject::invokeMethod(m_correctionController, "setEnabled",
                                   Qt::BlockingQueuedConnection, Q_ARG(bool, false));
@@ -397,6 +413,16 @@ void RobotControlPanel::buildUi()
                                      font-weight: 700; font-size: 16px; }
         QPushButton[kind="danger"]:hover { background: #a91e1e; }
         QPushButton[kind="jog"] { font-size: 18px; font-weight: 700; min-width: 92px; min-height: 52px; }
+        #robotBody QGroupBox { margin-top: 12px; padding-top: 8px; }
+        #robotBody QGroupBox::title { left: 9px; padding: 1px 5px; }
+        #robotBody QPushButton[kind="jog"] { font-size: 16px; min-width: 76px; min-height: 38px;
+                                               padding: 4px 8px; }
+        QSlider#clampMotorSpeed::groove:horizontal { height: 6px; background: #d7e2ee;
+                                                      border-radius: 3px; }
+        QSlider#clampMotorSpeed::handle:horizontal { width: 14px; margin: -5px 0;
+                                                      background: #1769aa; border-radius: 7px;
+                                                      border: 1px solid #0e4d7c; }
+        QSlider#clampMotorSpeed::handle:horizontal:hover { background: #2586c8; }
         QPushButton:disabled { color: #607286; background: #e7edf3; border-color: #cbd5df; }
         QLabel#robotMetric { color: #0b4f6c; font-family: Consolas, monospace; }
         QPlainTextEdit { background: #101a26; color: #c7d4e3; border: 1px solid #26384d;
@@ -471,9 +497,10 @@ void RobotControlPanel::buildUi()
     auto *controlScroll = new QScrollArea;
     controlScroll->setWidgetResizable(true);
     controlScroll->setFrameShape(QFrame::NoFrame);
+    controlScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto *body = new QWidget;
     body->setObjectName(QStringLiteral("robotBody"));
-    body->setMinimumHeight(760);
+    body->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto *columns = new QHBoxLayout(body);
     columns->setContentsMargins(4, 4, 4, 8);
     columns->setSpacing(12);
@@ -510,33 +537,82 @@ void RobotControlPanel::buildUi()
     driveGrid->addWidget(emergency, 1, 0, 1, 2);
     manualLayout->addLayout(driveGrid);
 
-    auto *correctionGroup = new QGroupBox(QStringLiteral("激光自动纠偏"));
-    auto *correctionLayout = new QVBoxLayout(correctionGroup);
-    auto *correctionForm = new QFormLayout;
-    m_correctionSpeed = makeDouble(1.0, 150.0, 1.0, 1, correctionGroup);
-    m_correctionSpeed->setValue(5.0);
-    m_correctionSegment = makeDouble(20.0, 500.0, 10.0, 1, correctionGroup);
-    m_correctionSegment->setValue(100.0);
-    m_correctionKp = makeDouble(0.0, 20.0, 0.1, 2, correctionGroup);
-    m_correctionKp->setValue(3.0);
-    m_correctionKd = makeDouble(0.0, 5.0, 0.01, 2, correctionGroup);
-    m_correctionKd->setValue(0.12);
-    correctionForm->addRow(QStringLiteral("纠偏速度 (mm/s)"), m_correctionSpeed);
-    correctionForm->addRow(QStringLiteral("分段长度 (mm)"), m_correctionSegment);
-    correctionForm->addRow(QStringLiteral("Kp"), m_correctionKp);
-    correctionForm->addRow(QStringLiteral("Kd"), m_correctionKd);
-    correctionLayout->addLayout(correctionForm);
+    auto *clampGroup = new QGroupBox(QStringLiteral("夹子电机手动控制"));
+    auto *clampGrid = new QGridLayout(clampGroup);
+    clampGrid->setContentsMargins(8, 6, 8, 6);
+    clampGrid->setHorizontalSpacing(8);
+    clampGrid->setVerticalSpacing(2);
+    clampGrid->setColumnStretch(2, 1);
+    clampGrid->addWidget(new QLabel(QStringLiteral("轴")), 0, 0);
+    clampGrid->addWidget(new QLabel(QStringLiteral("← 负向")), 0, 1);
+    clampGrid->addWidget(new QLabel(QStringLiteral("速度（松开回中）")), 0, 2,
+                         Qt::AlignCenter);
+    clampGrid->addWidget(new QLabel(QStringLiteral("正向 →")), 0, 3);
+    const QStringList clampAxes = {QStringLiteral("X"), QStringLiteral("Y"),
+                                   QStringLiteral("Z")};
+    for (int row = 0; row < clampAxes.size(); ++row) {
+        auto *slider = new QSlider(Qt::Horizontal, clampGroup);
+        slider->setObjectName(QStringLiteral("clampMotorSpeed"));
+        slider->setRange(-100, 100);
+        slider->setValue(0);
+        slider->setSingleStep(5);
+        slider->setPageStep(25);
+        slider->setTickPosition(QSlider::TicksBelow);
+        slider->setTickInterval(25);
+        slider->setMinimumHeight(24);
+        slider->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        slider->setToolTip(QStringLiteral("向左为负向，向右为正向；偏移越大速度越快，松开后自动回中"));
+        clampGrid->addWidget(new QLabel(clampAxes.at(row)), row + 1, 0);
+        clampGrid->addWidget(new QLabel(QStringLiteral("−")), row + 1, 1,
+                             Qt::AlignRight | Qt::AlignVCenter);
+        clampGrid->addWidget(slider, row + 1, 2);
+        clampGrid->addWidget(new QLabel(QStringLiteral("＋")), row + 1, 3,
+                             Qt::AlignLeft | Qt::AlignVCenter);
+        const auto applyClampSettings = [this] {
+            if (m_clampController)
+                m_clampController->setSettings(settingsFromUi());
+        };
+        connect(slider, &QSlider::sliderPressed, this, applyClampSettings);
+        connect(slider, &QSlider::valueChanged, this, [this, row,
+                                                        applyClampSettings](int value) {
+            if (!m_clampController)
+                return;
+            if (value != 0)
+                applyClampSettings();
+            if (row == 0) m_clampController->setXSpeed(value);
+            else if (row == 1) m_clampController->setYSpeed(value);
+            else m_clampController->setZSpeed(value);
+        });
+        connect(slider, &QSlider::sliderReleased, this, [this, row, slider] {
+            {
+                const QSignalBlocker blocker(slider);
+                slider->setValue(0);
+            }
+            if (!m_clampController)
+                return;
+            if (row == 0) m_clampController->stopX();
+            else if (row == 1) m_clampController->stopY();
+            else m_clampController->stopZ();
+        });
+    }
+
+    auto *correctionControls = new QGroupBox(QStringLiteral("激光自动纠偏"));
+    auto *correctionControlsLayout = new QVBoxLayout(correctionControls);
+    auto *correctionHint = new QLabel(QStringLiteral("纠偏参数请在“小车配置”中设置。"));
+    correctionHint->setWordWrap(true);
+    correctionControlsLayout->addWidget(correctionHint);
     auto *correctionButtons = new QHBoxLayout;
     m_autoCorrectionStart = actionButton(QStringLiteral("启动自动纠偏"), "primary");
     m_autoCorrectionStop = actionButton(QStringLiteral("停止自动纠偏"));
     m_autoCorrectionStop->setEnabled(false);
     correctionButtons->addWidget(m_autoCorrectionStart);
     correctionButtons->addWidget(m_autoCorrectionStop);
-    correctionLayout->addLayout(correctionButtons);
-    m_correctionStatus = new QLabel(QStringLiteral("未启动"));
+    correctionControlsLayout->addLayout(correctionButtons);
+    m_correctionStatus = new QLabel(QStringLiteral("未启动"), correctionControls);
     m_correctionStatus->setWordWrap(true);
-    correctionLayout->addWidget(m_correctionStatus);
-    manualLayout->insertWidget(manualLayout->count() - 1, correctionGroup);
+    correctionControlsLayout->addWidget(m_correctionStatus);
+    manualLayout->addWidget(correctionControls);
+    manualLayout->addWidget(clampGroup);
     manualLayout->addStretch();
 
     auto *profileGroup = new QGroupBox(QStringLiteral("SDK 实时轮廓与焊道定位"));
@@ -556,8 +632,8 @@ void RobotControlPanel::buildUi()
     m_profileDetectionLogCheck = new QCheckBox(
         QStringLiteral("记录检测计算日志"), profileGroup);
     m_profileDetectionLogCheck->setToolTip(
-        QStringLiteral("记录轮廓点、基线、阈值、候选区域和淘汰原因到独立日志；"
-                       "关闭时不记录点位数据。"));
+        QStringLiteral("勾选后，每次点击开始都会覆盖旧日志，只记录本次自动纠偏"
+                       "从开始到结束的轮廓点、基线、阈值、候选区域和淘汰原因。"));
     profileModeRow->addWidget(m_profileDetectionLogCheck);
     connect(m_profileDetectionLogCheck, &QCheckBox::toggled,
             this, [this](bool enabled) {
@@ -566,19 +642,14 @@ void RobotControlPanel::buildUi()
                 persistent.setValue(QStringLiteral(
                     "laserProfileTuning/profileDetectionTraceEnabled"), enabled);
                 persistent.sync();
-                if (m_correctionController) {
-                    QMetaObject::invokeMethod(
-                        m_correctionController,
-                        "setProfileDetectionTraceEnabled",
-                        Qt::QueuedConnection, Q_ARG(bool, enabled));
-                }
                 appendLog(enabled
-                              ? QStringLiteral("已开启焊道检测计算日志：logs/profile_weld_detection.log")
-                              : QStringLiteral("已关闭焊道检测计算日志"));
+                              ? QStringLiteral("已启用焊道检测计算日志；下次点击开始时覆盖旧日志")
+                              : QStringLiteral("已关闭焊道检测计算日志；自动纠偏时不记录"));
             });
     profileModeRow->addStretch();
     profileLayout->addLayout(profileModeRow);
     m_laserView = new RobotProfileView;
+    m_laserView->setMinimumSize(220, 100);
     connect(profileMode,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
             m_laserView, &RobotProfileView::setViewMode);
@@ -619,7 +690,7 @@ void RobotControlPanel::buildUi()
     auto *usbLayout = new QVBoxLayout(usbGroup);
     m_usbView = new QLabel(QStringLiteral("USB 摄像头未连接"));
     m_usbView->setAlignment(Qt::AlignCenter);
-    m_usbView->setMinimumSize(300, 180);
+    m_usbView->setMinimumSize(220, 110);
     usbLayout->addWidget(m_usbView);
     rightColumn->addWidget(usbGroup, 1);
     rightColumn->addWidget(status);
@@ -705,6 +776,25 @@ QWidget *RobotControlPanel::buildConfigurationPage()
             rowLayout->addWidget(button, 1);
         return row;
     };
+
+    auto *correctionGroup = new QGroupBox(QStringLiteral("激光自动纠偏"), page);
+    auto *correctionLayout = new QVBoxLayout(correctionGroup);
+    auto *correctionForm = new QFormLayout;
+    m_correctionSpeed = makeDouble(1.0, 150.0, 1.0, 1, correctionGroup);
+    m_correctionSpeed->setValue(5.0);
+    m_correctionSegment = makeDouble(20.0, 500.0, 10.0, 1, correctionGroup);
+    m_correctionSegment->setValue(100.0);
+    m_correctionKp = makeDouble(0.0, 20.0, 0.1, 2, correctionGroup);
+    m_correctionKp->setValue(3.0);
+    m_correctionKd = makeDouble(0.0, 5.0, 0.01, 2, correctionGroup);
+    m_correctionKd->setValue(0.12);
+    correctionForm->addRow(QStringLiteral("纠偏速度 (mm/s)"), m_correctionSpeed);
+    correctionForm->addRow(QStringLiteral("分段长度 (mm)"), m_correctionSegment);
+    correctionForm->addRow(QStringLiteral("Kp"), m_correctionKp);
+    correctionForm->addRow(QStringLiteral("Kd"), m_correctionKd);
+    correctionLayout->addLayout(correctionForm);
+    compactGroup(correctionGroup);
+    rightColumn->addWidget(correctionGroup);
 
     auto *adapter = new QGroupBox(QStringLiteral("MWD RS485 适配器"), page);
     auto *adapterForm = new QFormLayout(adapter);
@@ -983,7 +1073,19 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     addClampAxis(QStringLiteral("X 电机 ID / 方向"), m_clampXId, m_clampXSign);
     addClampAxis(QStringLiteral("Y 电机 ID / 方向"), m_clampYId, m_clampYSign);
     addClampAxis(QStringLiteral("Z 电机 ID / 方向"), m_clampZId, m_clampZSign);
+    auto *clampConnect = actionButton(QStringLiteral("连接夹子电机"), "primary");
+    auto *clampDisconnect = actionButton(QStringLiteral("断开夹子电机"));
+    m_clampConfigState = new QLabel(QStringLiteral("未连接"), clamp);
+    clampForm->addRow(QString(), buttonRow({clampConnect, clampDisconnect}));
+    clampForm->addRow(QStringLiteral("连接状态"), m_clampConfigState);
     clampForm->addRow(QStringLiteral("检测状态"), metricLabel(clamp));
+    connect(clampConnect, &QPushButton::clicked,
+            this, &RobotControlPanel::connectConfiguredClampMotor);
+    connect(clampDisconnect, &QPushButton::clicked, this, [this] {
+        if (m_clampController)
+            QMetaObject::invokeMethod(m_clampController, "disconnectDevice",
+                                      Qt::QueuedConnection);
+    });
     compactGroup(clamp);
     rightColumn->addWidget(clamp);
 
@@ -1551,6 +1653,14 @@ void RobotControlPanel::saveSettings()
     QSettings persistent(crawling::DriveSettings::persistentFilePath(),
                          QSettings::IniFormat);
     m_settings.save(persistent);
+    persistent.setValue(QStringLiteral("laserCorrection/speed"),
+                        m_correctionSpeed->value() / kMillimetersPerMeter);
+    persistent.setValue(QStringLiteral("laserCorrection/segmentLength"),
+                        m_correctionSegment->value() / kMillimetersPerMeter);
+    persistent.setValue(QStringLiteral("laserCorrection/kp"),
+                        m_correctionKp->value());
+    persistent.setValue(QStringLiteral("laserCorrection/kd"),
+                        m_correctionKd->value());
     persistent.sync();
     appendLog(QStringLiteral("小车配置已保存"));
 }
@@ -1804,6 +1914,7 @@ void RobotControlPanel::connectConfiguredDevices()
     connectConfiguredImu();
     connectConfiguredLaser();
     connectConfiguredUsbCamera();
+    connectConfiguredClampMotor();
 }
 
 void RobotControlPanel::connectConfiguredImu()
@@ -1873,9 +1984,27 @@ void RobotControlPanel::connectConfiguredUsbCamera()
                                   Q_ARG(bool, m_settings.usbCameraFlipVertical));
 }
 
+void RobotControlPanel::connectConfiguredClampMotor()
+{
+    m_settings = settingsFromUi();
+    saveSettings();
+    if (m_settings.clampSerialPort.trimmed().isEmpty()) {
+        appendLog(QStringLiteral("夹子电机连接已跳过：未配置通信端口"));
+        return;
+    }
+    if (m_clampController) {
+        m_clampController->setSettings(m_settings);
+        QMetaObject::invokeMethod(m_clampController, "connectDevice",
+                                  Qt::QueuedConnection);
+    }
+}
+
 void RobotControlPanel::disconnectAllDevices()
 {
     disconnectDrive();
+    if (m_clampController)
+        QMetaObject::invokeMethod(m_clampController, "disconnectDevice",
+                                  Qt::QueuedConnection);
     if (m_sensorController) {
         QMetaObject::invokeMethod(m_sensorController, "disconnectImu",
                                   Qt::QueuedConnection);
@@ -1885,7 +2014,7 @@ void RobotControlPanel::disconnectAllDevices()
     if (m_usbCameraController)
         QMetaObject::invokeMethod(m_usbCameraController, "disconnectCamera",
                                   Qt::QueuedConnection);
-    appendLog(QStringLiteral("已请求断开底盘、IMU、激光相机和 USB 摄像头"));
+    appendLog(QStringLiteral("已请求断开底盘、夹子电机、IMU、激光相机和 USB 摄像头"));
 }
 
 void RobotControlPanel::persistAutoConnectSetting(bool enabled)
@@ -1921,6 +2050,12 @@ void RobotControlPanel::emergencyStop()
             .arg(m_autoCorrectionStartPending ? 1 : 0));
     stopAutoCorrection();
     m_forward = m_reverse = m_left = m_right = false;
+    for (QSlider *slider : findChildren<QSlider *>(QStringLiteral("clampMotorSpeed"))) {
+        const QSignalBlocker blocker(slider);
+        slider->setValue(0);
+    }
+    if (m_clampController)
+        m_clampController->stop();
     if (m_controller)
         QMetaObject::invokeMethod(m_controller, "emergencyStop",
                                   Qt::QueuedConnection);
@@ -1935,6 +2070,12 @@ void RobotControlPanel::stopMotion()
             .arg(m_autoCorrectionStartPending ? 1 : 0));
     stopAutoCorrection();
     m_forward = m_reverse = m_left = m_right = false;
+    for (QSlider *slider : findChildren<QSlider *>(QStringLiteral("clampMotorSpeed"))) {
+        const QSignalBlocker blocker(slider);
+        slider->setValue(0);
+    }
+    if (m_clampController)
+        m_clampController->stop();
     if (m_controller) {
         QMetaObject::invokeMethod(m_controller, "setInputCommand",
                                   Qt::QueuedConnection, Q_ARG(double, 0.0),
@@ -2100,6 +2241,81 @@ void RobotControlPanel::updateLaserFrame(quint32 frame, quint32 width,
                                    .arg(frame).arg(width).arg(height).arg(points));
 }
 
+bool RobotControlPanel::beginProfileDetectionLogSession()
+{
+    if (m_profileDetectionLogCheck)
+        m_profileDetectionLogCheck->setEnabled(false);
+
+    if (m_correctionController) {
+        QMetaObject::invokeMethod(
+            m_correctionController, "setProfileDetectionTraceEnabled",
+            Qt::BlockingQueuedConnection, Q_ARG(bool, false));
+    }
+
+    m_profileDetectionLogSessionActive = false;
+    if (!m_profileDetectionLogCheck ||
+        !m_profileDetectionLogCheck->isChecked()) {
+        return false;
+    }
+
+    bool writerStarted = false;
+    const bool invoked = m_profileDetectionLogWriter &&
+        QMetaObject::invokeMethod(
+            m_profileDetectionLogWriter,
+            [this, &writerStarted] {
+                writerStarted = m_profileDetectionLogWriter->beginSession();
+            },
+            Qt::BlockingQueuedConnection);
+    if (!invoked || !writerStarted) {
+        appendLog(QStringLiteral(
+            "焊道检测计算日志创建失败，本次自动纠偏继续运行但不记录日志"));
+        return false;
+    }
+
+    const bool traceEnabled = QMetaObject::invokeMethod(
+        m_correctionController, "setProfileDetectionTraceEnabled",
+        Qt::BlockingQueuedConnection, Q_ARG(bool, true));
+    if (!traceEnabled) {
+        QMetaObject::invokeMethod(
+            m_profileDetectionLogWriter,
+            [this] {
+                m_profileDetectionLogWriter->endSession(
+                    QStringLiteral("trace_enable_failed"));
+            },
+            Qt::BlockingQueuedConnection);
+        appendLog(QStringLiteral(
+            "焊道检测计算日志启动失败，本次自动纠偏继续运行但不记录日志"));
+        return false;
+    }
+
+    m_profileDetectionLogSessionActive = true;
+    appendLog(QStringLiteral(
+        "焊道检测计算日志已覆盖并开始记录：logs/profile_weld_detection.log"));
+    return true;
+}
+
+void RobotControlPanel::finishProfileDetectionLogSession(const QString &reason)
+{
+    if (m_correctionController && m_correctionThread &&
+        m_correctionThread->isRunning()) {
+        QMetaObject::invokeMethod(
+            m_correctionController, "setProfileDetectionTraceEnabled",
+            Qt::BlockingQueuedConnection, Q_ARG(bool, false));
+    }
+    if (m_profileDetectionLogSessionActive && m_profileDetectionLogWriter &&
+        m_profileDetectionLogThread && m_profileDetectionLogThread->isRunning()) {
+        QMetaObject::invokeMethod(
+            m_profileDetectionLogWriter,
+            [this, reason] {
+                m_profileDetectionLogWriter->endSession(reason);
+            },
+            Qt::BlockingQueuedConnection);
+    }
+    m_profileDetectionLogSessionActive = false;
+    if (m_profileDetectionLogCheck)
+        m_profileDetectionLogCheck->setEnabled(true);
+}
+
 void RobotControlPanel::startAutoCorrection()
 {
     if (!m_correctionController || !m_sensorController)
@@ -2137,6 +2353,7 @@ void RobotControlPanel::startAutoCorrection()
         return;
     }
 
+    beginProfileDetectionLogSession();
     crawling::AppLogger::write(
         QStringLiteral("CORRECTION.START"),
         QStringLiteral(
@@ -2197,6 +2414,7 @@ void RobotControlPanel::stopAutoCorrection()
     m_autoCorrectionStartPending = false;
     const bool wasActive = m_autoCorrectionActive;
     m_autoCorrectionActive = false;
+    finishProfileDetectionLogSession(QStringLiteral("operator_stop"));
     m_autoCorrectionStart->setEnabled(true);
     m_autoCorrectionStop->setEnabled(false);
     QMetaObject::invokeMethod(m_correctionController, "setEnabled",
@@ -2217,6 +2435,10 @@ void RobotControlPanel::updateCorrectionStatus(
         return;
     if (!status.active) {
         const bool wasRunning = m_autoCorrectionActive || m_autoCorrectionStartPending;
+        if (wasRunning || m_profileDetectionLogSessionActive)
+            finishProfileDetectionLogSession(
+                status.reason.isEmpty() ? QStringLiteral("controller_stopped")
+                                        : status.reason);
         m_autoCorrectionActive = false;
         m_autoCorrectionStartPending = false;
         m_autoCorrectionStart->setEnabled(true);
@@ -2277,6 +2499,15 @@ void RobotControlPanel::updateUsbConnection(bool connected, const QString &messa
         m_usbView->setText(QStringLiteral("USB 摄像头未连接"));
     }
     updateInformationDialog();
+}
+
+void RobotControlPanel::updateClampConnection(bool connected, const QString &message)
+{
+    if (m_clampConfigState)
+        m_clampConfigState->setText(message.isEmpty()
+                                        ? (connected ? QStringLiteral("已连接")
+                                                     : QStringLiteral("未连接"))
+                                        : message);
 }
 
 void RobotControlPanel::appendLog(const QString &message)
@@ -2461,4 +2692,10 @@ void RobotControlPanel::changeEvent(QEvent *event)
     m_forward = m_reverse = m_left = m_right = false;
     if (wasJogging)
         sendMotionCommand();
+    for (QSlider *slider : findChildren<QSlider *>(QStringLiteral("clampMotorSpeed"))) {
+        const QSignalBlocker blocker(slider);
+        slider->setValue(0);
+    }
+    if (m_clampController)
+        m_clampController->stop();
 }
