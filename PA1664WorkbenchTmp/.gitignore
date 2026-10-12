@@ -1,0 +1,23 @@
+# Local Qt, IDE, and analysis state
+.qtc_clangd/
+.qtcreator/
+.gitnexus/
+*.pro.user*
+
+# Local runtime, build products, and merge backups
+bin/
+build/
+debug/
+release/
+runtime/
+tmp/
+config_backups/
+Makefile*
+*.qmake.stash
+*.dll
+*.exe
+*.lib
+*.obj
+*.pdb
+*.log
+
