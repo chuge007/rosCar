@@ -20,6 +20,7 @@ class QCamera;
 class QCheckBox;
 class QDialog;
 class QDoubleSpinBox;
+class QComboBox;
 class QEvent;
 class QLabel;
 class QLineEdit;
@@ -161,6 +162,7 @@ private:
     QPushButton *m_connectAllButton = nullptr;
     QCheckBox *m_autoConnectCheck = nullptr;
     QCheckBox *m_profileDetectionLogCheck = nullptr;
+    QComboBox *m_profileDetectionMode = nullptr;
     QTabWidget *m_tabs = nullptr;
     QLabel *m_laserConfigState = nullptr;
     QLabel *m_laserFrameState = nullptr;
@@ -204,6 +206,7 @@ private:
     QSpinBox *m_commandTimeout = nullptr;
     QSpinBox *m_feedbackTimeout = nullptr;
     QSpinBox *m_armingTimeout = nullptr;
+    QSpinBox *m_laserInputTimeout = nullptr;
     QComboBox *m_imuPort = nullptr;
     QComboBox *m_imuBaud = nullptr;
     QComboBox *m_imuDivider = nullptr;

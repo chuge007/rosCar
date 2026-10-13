@@ -22,12 +22,18 @@ RobotProfileView::RobotProfileView(QWidget *parent) : QWidget(parent)
                                ? QDateTime::currentMSecsSinceEpoch() - m_receivedAtEpochMs
                                : 0;
         if (m_profileUpdatePending ||
-            (m_receivedAtEpochMs > 0 && age >= 180)) {
+            (m_receivedAtEpochMs > 0 && age >= m_inputTimeoutMs)) {
             m_profileUpdatePending = false;
             update();
         }
     });
     freshnessTimer->start(150);
+}
+
+void RobotProfileView::setInputTimeoutMs(int timeoutMs)
+{
+    m_inputTimeoutMs = std::clamp(timeoutMs, 50, 5000);
+    update();
 }
 
 void RobotProfileView::setPoints(const QVector<QVector3D> &points)
@@ -65,13 +71,20 @@ void RobotProfileView::setProfileObservation(
                            "detection_valid=%4 view_mode=%5 visible=%6 widget_size=%7x%8 "
                            "received_profiles=%9 profile_paints=%10 "
                            "coordinate_basis=sdk_x_zero axis_half_span_x=%11 "
-                           "center_x=%12 center_ratio=%13")
+                           "center_x=%12 center_ratio=%13 mode=%14 algorithm=%15 "
+                           "template_matched=%16 similarity=%17 threshold=%18 "
+                           "timeout_ms=%19 detector_reason=%20")
                 .arg(sourceFrameNumber).arg(points.size()).arg(now - receivedAtEpochMs)
                 .arg(detection.valid).arg(static_cast<int>(m_viewMode)).arg(isVisible())
                 .arg(width()).arg(height()).arg(m_receivedProfiles).arg(m_profilePaints)
                 .arg(m_displayHalfSpanX, 0, 'g', 9)
                 .arg(detection.profileCenterX, 0, 'g', 9)
-                .arg(detection.absoluteCenterRatio, 0, 'f', 6));
+                .arg(detection.absoluteCenterRatio, 0, 'f', 6)
+                .arg(static_cast<int>(detection.profileDetectionMode))
+                .arg(crawling::profileDetectionModeName(detection.profileDetectionMode))
+                .arg(detection.templateMatched).arg(detection.templateSimilarity, 0, 'g', 10)
+                .arg(detection.templateMinimumSimilarity, 0, 'g', 10)
+                .arg(m_inputTimeoutMs).arg(detection.profileDetectionReason));
     }
     m_profileUpdatePending = true;
     update();
@@ -153,7 +166,7 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
     const qint64 age = m_receivedAtEpochMs > 0
                            ? QDateTime::currentMSecsSinceEpoch() - m_receivedAtEpochMs
                            : 0;
-    const bool fresh = m_receivedAtEpochMs > 0 && age >= 0 && age <= 180;
+    const bool fresh = m_receivedAtEpochMs > 0 && age >= 0 && age <= m_inputTimeoutMs;
     QVector<QPointF> valid;
     QVector<int> validIndices;
     valid.reserve(m_points.size());
@@ -243,7 +256,9 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
                            "horizontal_range=%8,%9 vertical_range=%10,%11 "
                            "area=%12x%13 reason=%14 received_profiles=%15 profile_paints=%16 "
                            "nonfinite=%17 nonpositive_z=%18 nonincreasing_x=%19 detection_valid=%20 "
-                           "display_data=raw_xyz first_plotted_column=%21 last_plotted_column=%22")
+                           "display_data=raw_xyz first_plotted_column=%21 last_plotted_column=%22 "
+                           "mode=%23 algorithm=%24 template_matched=%25 similarity=%26 "
+                           "threshold=%27 timeout_ms=%28 detector_reason=%29 display_reason=%30")
                 .arg(m_frameNumber).arg(m_points.size()).arg(valid.size())
                 .arg(m_points.size() - valid.size()).arg(age).arg(fresh)
                 .arg(static_cast<int>(m_viewMode))
@@ -254,7 +269,15 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
                 .arg(nonfinitePoints).arg(nonpositiveZPoints).arg(nonincreasingXPoints)
                 .arg(m_detection.valid)
                 .arg(validIndices.isEmpty() ? -1 : validIndices.front())
-                .arg(validIndices.isEmpty() ? -1 : validIndices.back()));
+                .arg(validIndices.isEmpty() ? -1 : validIndices.back())
+                .arg(static_cast<int>(m_detection.profileDetectionMode))
+                .arg(crawling::profileDetectionModeName(m_detection.profileDetectionMode))
+                .arg(m_detection.templateMatched).arg(m_detection.templateSimilarity, 0, 'g', 10)
+                .arg(m_detection.templateMinimumSimilarity, 0, 'g', 10)
+                .arg(m_inputTimeoutMs).arg(m_detection.profileDetectionReason)
+                .arg(!fresh ? QStringLiteral("result_stale")
+                     : m_detection.valid ? QStringLiteral("located")
+                                         : QStringLiteral("not_located")));
     }
 
     if (valid.size() < 2) {
@@ -405,12 +428,20 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
     painter.restore();
 
     painter.setPen(QColor(QStringLiteral("#aebed0")));
+    const QString algorithm = m_detection.profileDetectionMode == crawling::ProfileDetectionMode::TemplateOnly
+        ? QStringLiteral("纯模板匹配")
+        : m_detection.profileDetectionMode == crawling::ProfileDetectionMode::Hybrid
+            ? QStringLiteral("模板+点位") : QStringLiteral("基线+肩部");
     const QString state = !fresh
-                              ? QStringLiteral("数据过期，定位线已隐藏")
+                              ? (m_detection.templateMatched
+                                     ? QStringLiteral("匹配成功，结果过期，定位线已隐藏")
+                                     : QStringLiteral("数据过期，定位线已隐藏"))
                               : (m_hasDetection && m_detection.valid
                                      ? QStringLiteral("本帧焊道候选")
-                                     : QStringLiteral("本帧未确认焊道"));
-    painter.drawText(plot.left() + 6, plot.top() + 18, state);
+                                     : m_detection.profileDetectionMode == crawling::ProfileDetectionMode::TemplateOnly
+                                         ? QStringLiteral("本帧模板未匹配")
+                                         : QStringLiteral("本帧未确认焊道"));
+    painter.drawText(plot.left() + 6, plot.top() + 18, algorithm + QStringLiteral("：") + state);
     painter.drawText(8, 18, viewTitle);
     painter.drawText(plot.left(), height() - 8,
                      QStringLiteral("%1 %2 .. %3    %4 %5 .. %6    SDK #%7 | %8/%9 | %10 ms")

@@ -6,6 +6,8 @@
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaObject>
+#include <QMutexLocker>
 
 #include <algorithm>
 #include <cmath>
@@ -217,6 +219,11 @@ void LaserCorrectionController::setSettings(
   settings_.minimumInnerWheelRatio =
       clamp(settings_.minimumInnerWheelRatio, 0.45, 0.90);
   settings_.maxAngularRadps = std::max(0.01, settings_.maxAngularRadps);
+  // This is the hard source-age deadline used by the safety watchdog and by
+  // queued-frame rejection. Keep it explicit and bounded at the safety edge.
+  settings_.imageTimeoutMs = std::clamp(settings_.imageTimeoutMs, 50, 5000);
+  emit profileInputTimeoutChanged(settings_.imageTimeoutMs);
+  settings_.telemetryTimeoutMs = std::clamp(settings_.telemetryTimeoutMs, 100, 5000);
   settings_.detectionTimeoutMs = std::max(200, settings_.detectionTimeoutMs);
   settings_.transientDetectionHoldMs =
       std::clamp(settings_.transientDetectionHoldMs, 100,
@@ -227,6 +234,8 @@ void LaserCorrectionController::setSettings(
       std::max(settings_.detectionTimeoutMs, 1000), 5000);
   settings_.motionStallTimeoutMs =
       std::max(3000, settings_.motionStallTimeoutMs);
+  settings_.detector.widthJumpConfirmationFrames = std::clamp(
+      settings_.detector.widthJumpConfirmationFrames, 2, 8);
 }
 
 void LaserCorrectionController::setProfileTemplates(
@@ -239,14 +248,217 @@ void LaserCorrectionController::setProfileTuning(
   settings_.detector.profileTuning = tuning;
 }
 
+void LaserCorrectionController::setProfileDetectionMode(
+    ProfileDetectionMode mode) {
+  const auto previous = settings_.detector.profileDetectionMode;
+  switch (mode) {
+    case ProfileDetectionMode::BaselineShoulder:
+    case ProfileDetectionMode::TemplateOnly:
+    case ProfileDetectionMode::Hybrid:
+      settings_.detector.profileDetectionMode = mode;
+      break;
+    default:
+      settings_.detector.profileDetectionMode =
+          ProfileDetectionMode::BaselineShoulder;
+      break;
+  }
+  emit profileDiagnosticBatch(QStringList{QStringLiteral(
+      "event=profile_algorithm_changed previous_mode=%1 mode=%2 algorithm=%3 active=%4")
+      .arg(static_cast<int>(previous)).arg(static_cast<int>(settings_.detector.profileDetectionMode))
+      .arg(profileDetectionModeName(settings_.detector.profileDetectionMode)).arg(status_.active)});
+}
+
 void LaserCorrectionController::setProfileDetectionTraceEnabled(bool enabled) {
   profileDetectionTraceEnabled_ = enabled;
+  if (!enabled) {
+    if (!profileTraceRing_.isEmpty()) {
+      QStringList flushed;
+      flushed.append(QStringLiteral(
+          "event=profile_trace_ring_flush reason=trace_disabled batches=%1")
+                        .arg(profileTraceRing_.size()));
+      for (const QStringList& batch : profileTraceRing_)
+        flushed.append(batch);
+      emit profileDetectionTraceBatch(flushed);
+    }
+    profileTraceRing_.clear();
+    profileTraceBatchCounter_ = 0;
+    profileTraceCaptureUntilMs_ = -1;
+    profileTraceNextFaultFlushMs_ = -1;
+  }
+  lastProfileDetailCaptureMs_ = -1;
 }
 
 void LaserCorrectionController::emitProfileDetectionTrace(
     ProfileWeldDetectionTrace& trace) {
   if (!trace.enabled || trace.lines.isEmpty()) return;
-  emit profileDetectionTraceBatch(trace.lines);
+  // Only sampled frames contain point/residual arrays. Never put an already
+  // written batch back in the ring: a fault must not replay the same frame.
+  constexpr int kRingBatches = 320;
+  constexpr int kNormalSampleEvery = 30;
+  const qint64 now = clock_.elapsed();
+  ++profileTraceBatchCounter_;
+  QString faultReason;
+  for (const QString& line : trace.lines) {
+    if (line.contains(QStringLiteral("width_rejected=1")) ||
+        line.contains(QStringLiteral("width_jump_pending")) ||
+        line.contains(QStringLiteral("width_jump_without_template"))) {
+      faultReason = QStringLiteral("width_rejected");
+      break;
+    }
+    if (line.contains(QStringLiteral("profile_input_rejected")) ||
+        line.contains(QStringLiteral("detector_result valid=0")) ||
+        line.contains(QStringLiteral("template_only_result matched=0")) ||
+        line.contains(QStringLiteral("template_only_exit")) ||
+        line.contains(QStringLiteral("result=not_located")) ||
+        line.contains(QStringLiteral("result=result_stale"))) {
+      faultReason = QStringLiteral("profile_candidate_invalid");
+      break;
+    }
+  }
+  if (!faultReason.isEmpty() && now > profileTraceCaptureUntilMs_ &&
+      now >= profileTraceNextFaultFlushMs_) {
+    profileTraceCaptureUntilMs_ = now + 3000;
+    profileTraceNextFaultFlushMs_ = now + 10000;
+    profileTraceRing_.append(trace.lines);
+    QStringList flushed;
+    flushed.append(QStringLiteral("event=profile_trace_ring_flush reason=%1 batches=%2")
+                      .arg(faultReason).arg(profileTraceRing_.size()));
+    for (const QStringList& batch : profileTraceRing_)
+      flushed.append(batch);
+    flushed.append(QStringLiteral("event=profile_trace_ring_tail_begin"));
+    emit profileDetectionTraceBatch(flushed);
+    profileTraceRing_.clear();
+    profileTraceBatchCounter_ = 0;
+    return;
+  }
+  if (now <= profileTraceCaptureUntilMs_ ||
+      profileTraceBatchCounter_ % kNormalSampleEvery == 0) {
+    emit profileDetectionTraceBatch(trace.lines);
+  } else {
+    profileTraceRing_.append(trace.lines);
+    while (profileTraceRing_.size() > kRingBatches)
+      profileTraceRing_.removeFirst();
+  }
+}
+
+void LaserCorrectionController::setProfileInputTimeout(int timeoutMs) {
+  settings_.imageTimeoutMs = std::clamp(timeoutMs, 50, 5000);
+  emit profileInputTimeoutChanged(settings_.imageTimeoutMs);
+}
+
+void LaserCorrectionController::submitProfileFrame(
+    const QVector<QVector3D>& points, quint32 frame, qint64 receivedAtEpochMs) {
+  QMutexLocker lock(&profileInputMutex_);
+  if (profileInputClosed_) return;
+  if (profileInputScheduled_) ++pendingProfileReplaced_;
+  pendingProfilePoints_ = points;
+  pendingProfileFrame_ = frame;
+  pendingProfileReceivedMs_ = receivedAtEpochMs;
+  if (profileInputScheduled_) return;
+  profileInputScheduled_ = true;
+  QMetaObject::invokeMethod(this, [this] { consumeLatestProfileFrame(); },
+                            Qt::QueuedConnection);
+}
+
+void LaserCorrectionController::consumeLatestProfileFrame() {
+  QVector<QVector3D> points;
+  quint32 frame;
+  qint64 receivedMs;
+  {
+    QMutexLocker lock(&profileInputMutex_);
+    if (profileInputClosed_ || !profileInputScheduled_) return;
+    points.swap(pendingProfilePoints_);
+    frame = pendingProfileFrame_;
+    receivedMs = pendingProfileReceivedMs_;
+    lastProfileReplaced_ = pendingProfileReplaced_;
+    totalProfileReplaced_ += pendingProfileReplaced_;
+    pendingProfileReplaced_ = 0;
+    profileInputScheduled_ = false;
+  }
+  // Release the mailbox before computing. At most one further invocation can
+  // be queued, carrying the latest frame rather than a backlog of old scans.
+  processProfileFrame(points, frame, receivedMs);
+}
+
+void LaserCorrectionController::recordProfileDiagnostic(
+    quint32 frame, qint64 receivedAtEpochMs, qint64 entryAgeMs,
+    const LaserGapDetection* detection, const QString& reason,
+    qint64 processingMs, ProfileWeldDetectionTrace& trace) {
+  const qint64 now = clock_.elapsed();
+  const qint64 completedEpochMs = QDateTime::currentMSecsSinceEpoch();
+  const qint64 completedAgeMs = completedEpochMs - receivedAtEpochMs;
+  const qint64 resultAgeMs = detection ? lastProfileResultEpochMs_ - receivedAtEpochMs : -1;
+  const auto mode = detection ? detection->profileDetectionMode
+                             : settings_.detector.profileDetectionMode;
+  const bool fresh = resultAgeMs >= 0 && resultAgeMs <= settings_.imageTimeoutMs;
+  const QString outcome = detection && !fresh ? QStringLiteral("result_stale") : reason;
+  const QString summary = QStringLiteral(
+      "event=profile_localization frame=%1 mode=%2 algorithm=%3 active=%4 "
+      "received_epoch_ms=%5 completed_epoch_ms=%6 entry_age_ms=%7 result_age_ms=%8 "
+      "timeout_ms=%9 detector_ms=%10 processing_ms=%11 replaced_frames=%12 replaced_total=%13 "
+      "detector_ran=%14 detection_valid=%15 detector_reason=%16 result=%17 "
+      "template_evaluated=%18 template_matched=%19 template_rejected=%20 template_name=\"%21\" "
+      "similarity=%22 threshold=%23 width_scale=%24 windows=%25 comparisons=%26 "
+      "prior_rejected=%27 signal_rejected=%28 coverage_rejected=%29 "
+      "start=%30 end=%31 center_x=%32 control_gap_valid=%33 confirmation_count=%34 "
+      "width_confirmation_count=%35 control_reason=\"%36\" session=%37 "
+      "usable_templates=%38 runner_up_similarity=%39 width_rejected=%40 continuity_rejected=%41 "
+      "detection_held=%42 control_measurement_accepted=%43 control_decision=%44 "
+      "completed_age_ms=%45 result_epoch_ms=%46")
+      .arg(frame).arg(static_cast<int>(mode)).arg(profileDetectionModeName(mode))
+      .arg(status_.active).arg(receivedAtEpochMs).arg(completedEpochMs)
+      .arg(entryAgeMs).arg(resultAgeMs).arg(settings_.imageTimeoutMs)
+      .arg(detection ? lastDetectorDurationMs_ : -1).arg(processingMs)
+      .arg(lastProfileReplaced_).arg(totalProfileReplaced_).arg(detection != nullptr)
+      .arg(detection && detection->valid)
+      .arg(detection ? detection->profileDetectionReason : QStringLiteral("not_run"))
+      .arg(outcome).arg(detection && detection->templateEvaluated)
+      .arg(detection && detection->templateMatched).arg(detection && detection->templateRejected)
+      .arg(detection ? detection->templateName.simplified().replace(QLatin1Char('"'), QLatin1Char('\'')) : QString())
+      .arg(detection ? detection->templateSimilarity : 0.0, 0, 'g', 10)
+      .arg(detection ? detection->templateMinimumSimilarity : 0.0, 0, 'g', 10)
+      .arg(detection ? detection->templateWidthScale : 0.0, 0, 'g', 10)
+      .arg(detection ? detection->templateWindowCount : 0)
+      .arg(detection ? detection->templateComparisonCount : 0)
+      .arg(detection ? detection->templatePriorRejectedCount : 0)
+      .arg(detection ? detection->templateSignalRejectedCount : 0)
+      .arg(detection ? detection->templateCoverageRejectedCount : 0)
+      .arg(detection ? detection->gapStartPx : -1).arg(detection ? detection->gapEndPx : -1)
+      .arg(detection ? detection->profileCenterX : 0.0, 0, 'g', 10)
+      .arg(status_.active && status_.gapValid).arg(initialGapConfirmationCount_)
+      .arg(pendingWidthJumpConfirmationCount_)
+      .arg(status_.reason.simplified().replace(QLatin1Char('"'), QLatin1Char('\'')))
+      .arg(trajectorySessionId_).arg(detection ? detection->templateEnabledCount : 0)
+      .arg(detection ? detection->templateRunnerUpSimilarity : 0.0, 0, 'g', 10)
+      .arg(detection && detection->widthRejected).arg(detection && detection->continuityRejected)
+      .arg(status_.active && detectionHeld_)
+      .arg(detection && lastProfileMeasurementAccepted_)
+      .arg(detection ? lastProfileControlDecision_ : QStringLiteral("not_run"))
+      .arg(completedAgeMs).arg(detection ? lastProfileResultEpochMs_ : 0);
+  profileSummaryRing_.append(summary);
+  while (profileSummaryRing_.size() > 300) profileSummaryRing_.removeFirst();
+  trace.append(summary);
+  const QString signature = QString::number(static_cast<int>(mode)) + outcome +
+      QString::number(status_.active) + QString::number(status_.gapValid) +
+      QString::number(detection && detection->templateMatched);
+  if (lastProfileSummaryLogMs_ < 0 || now - lastProfileSummaryLogMs_ >= 1000 ||
+      (signature != lastProfileSummarySignature_ && now - lastProfileSummaryLogMs_ >= 100)) {
+    emit profileDiagnosticBatch(QStringList{summary});
+    lastProfileSummaryLogMs_ = now;
+    lastProfileSummarySignature_ = signature;
+  }
+}
+
+void LaserCorrectionController::flushProfileDiagnostics(const QString& reason) {
+  QStringList batch{QStringLiteral(
+      "event=profile_localization_history reason=\"%1\" frames=%2 mode=%3 algorithm=%4")
+      .arg(reason.simplified()).arg(profileSummaryRing_.size())
+      .arg(static_cast<int>(settings_.detector.profileDetectionMode))
+      .arg(profileDetectionModeName(settings_.detector.profileDetectionMode))};
+  batch.append(profileSummaryRing_);
+  emit profileDiagnosticBatch(batch);
+  profileSummaryRing_.clear();
+  setProfileDetectionTraceEnabled(false);
 }
 
 void LaserCorrectionController::setEnabled(bool enabled) {
@@ -404,41 +616,66 @@ void LaserCorrectionController::processCameraImage(const QImage& image) {
 
 void LaserCorrectionController::processProfileFrame(
     const QVector<QVector3D>& points, quint32 sourceFrameNumber, qint64 receivedAtEpochMs) {
+  QElapsedTimer processingTimer;
+  processingTimer.start();
   const qint64 age = QDateTime::currentMSecsSinceEpoch() - receivedAtEpochMs;
   const qint64 now = clock_.elapsed();
   ProfileWeldDetectionTrace trace;
-  trace.enabled = profileDetectionTraceEnabled_;
-  if (trace.enabled) {
-    trace.append(QStringLiteral(
-        "event=profile_input frame=%1 samples=%2 received_epoch_ms=%3 age_ms=%4")
-                     .arg(sourceFrameNumber)
-                     .arg(points.size())
-                     .arg(receivedAtEpochMs)
-                     .arg(age));
-    QStringList pointChunks;
-    pointChunks.reserve((points.size() + 127) / 128);
-    QString chunk;
-    chunk.reserve(4096);
-    for (int index = 0; index < points.size(); ++index) {
-      const QVector3D& point = points[index];
-      chunk += QStringLiteral("%1:%2,%3,%4;")
-                   .arg(index)
-                   .arg(point.x(), 0, 'g', 10)
-                   .arg(point.y(), 0, 'g', 10)
-                   .arg(point.z(), 0, 'g', 10);
-      if ((index + 1) % 128 == 0 || index + 1 == points.size()) {
-        pointChunks.append(chunk);
-        chunk.clear();
+  lastProfileMeasurementAccepted_ = false;
+  lastProfileControlDecision_ = QStringLiteral("idle_observation");
+  trace.enabled = profileDetectionTraceEnabled_ &&
+      (lastProfileDetailCaptureMs_ < 0 || now - lastProfileDetailCaptureMs_ >= 250);
+  if (trace.enabled) lastProfileDetailCaptureMs_ = now;
+  if (points.size() < 32 || age < 0 || age > settings_.imageTimeoutMs) {
+    const QString reason = points.size() < 32 ? QStringLiteral("too_few_samples")
+        : age < 0 ? QStringLiteral("invalid_timestamp") : QStringLiteral("input_stale");
+    // Rejected input breaks consecutive confirmation; the next fresh
+    // candidate must not inherit votes from before a timeout or dropout.
+    initialGapConfirmationCount_ = 0;
+    pendingWidthJumpConfirmationCount_ = 0;
+    trace.append(QStringLiteral("event=profile_input_rejected frame=%1 reason=%2")
+                     .arg(sourceFrameNumber).arg(reason));
+    recordProfileDiagnostic(sourceFrameNumber, receivedAtEpochMs, age, nullptr,
+                            reason, processingTimer.elapsed(), trace);
+    emitProfileDetectionTrace(trace);
+    return;
+  }
+  trace.append(QStringLiteral(
+      "event=profile_input frame=%1 samples=%2 received_epoch_ms=%3 age_ms=%4 mode=%5 algorithm=%6")
+      .arg(sourceFrameNumber).arg(points.size()).arg(receivedAtEpochMs).arg(age)
+      .arg(static_cast<int>(settings_.detector.profileDetectionMode))
+      .arg(profileDetectionModeName(settings_.detector.profileDetectionMode)));
+  // Serialize large arrays only on sampled frames and after control processing.
+  const auto finish = [&](const LaserGapDetection* detection, const QString& reason) {
+    if (trace.enabled) {
+      QStringList pointChunks;
+      pointChunks.reserve((points.size() + 127) / 128);
+      QString chunk;
+      chunk.reserve(4096);
+      for (int index = 0; index < points.size(); ++index) {
+        const QVector3D& point = points[index];
+        chunk += QStringLiteral("%1:%2,%3,%4;")
+                     .arg(index)
+                     .arg(point.x(), 0, 'g', 10)
+                     .arg(point.y(), 0, 'g', 10)
+                     .arg(point.z(), 0, 'g', 10);
+        if ((index + 1) % 128 == 0 || index + 1 == points.size()) {
+          pointChunks.append(chunk);
+          chunk.clear();
+        }
+      }
+      for (int index = 0; index < pointChunks.size(); ++index) {
+        trace.append(QStringLiteral("event=profile_points frame=%1 chunk=%2/%3 data=%4")
+                         .arg(sourceFrameNumber)
+                         .arg(index + 1)
+                         .arg(pointChunks.size())
+                         .arg(pointChunks[index]));
       }
     }
-    for (int index = 0; index < pointChunks.size(); ++index) {
-      trace.append(QStringLiteral("event=profile_points frame=%1 chunk=%2/%3 data=%4")
-                       .arg(sourceFrameNumber)
-                       .arg(index + 1)
-                       .arg(pointChunks.size())
-                       .arg(pointChunks[index]));
-    }
-  }
+    recordProfileDiagnostic(sourceFrameNumber, receivedAtEpochMs, age, detection,
+                            reason, processingTimer.elapsed(), trace);
+    emitProfileDetectionTrace(trace);
+  };
   if (lastProfileFrameDiagnosticMs_ < 0 ||
       now - lastProfileFrameDiagnosticMs_ >= 1000) {
     lastProfileFrameDiagnosticMs_ = now;
@@ -490,23 +727,6 @@ void LaserCorrectionController::processProfileFrame(
             .arg(minZ, 0, 'f', 3)
             .arg(maxZ, 0, 'f', 3));
   }
-  if (points.size() < 32 || age < 0 || age > settings_.imageTimeoutMs) {
-    if (trace.enabled)
-      trace.append(QStringLiteral(
-          "event=profile_input_rejected frame=%1 reason=%2")
-                      .arg(sourceFrameNumber)
-                      .arg(points.size() < 32 ? QStringLiteral("too_few_samples")
-                                              : QStringLiteral("stale_or_invalid_age")));
-    if (lastProfileFrameDiagnosticMs_ == now)
-      emit diagnosticLogMessage(
-          QStringLiteral("event=laser_profile_dropped sdk_frame=%1 reason=%2")
-              .arg(sourceFrameNumber)
-              .arg(points.size() < 32
-                       ? QStringLiteral("too_few_samples")
-                       : QStringLiteral("stale_or_invalid_age")));
-    emitProfileDetectionTrace(trace);
-    return;
-  }
   if (!status_.active || boundaryStopLatched_) {
     // Live inspection is independent of robot enable and the stop latch.
     // Do not refresh control state or reuse old tracking priors while idle.
@@ -520,6 +740,8 @@ void LaserCorrectionController::processProfileFrame(
     QElapsedTimer detectorTimer;
     detectorTimer.start();
     const LaserGapDetection detection = ProfileWeldDetector::detect(points, config);
+    lastDetectorDurationMs_ = detectorTimer.elapsed();
+    lastProfileResultEpochMs_ = QDateTime::currentMSecsSinceEpoch();
     profileAxisHalfSpanX_ = detection.profileAxisHalfSpanX;
     if (lastProfileFrameDiagnosticMs_ == now) {
       emit diagnosticLogMessage(
@@ -529,7 +751,7 @@ void LaserCorrectionController::processProfileFrame(
               "detector_ms=%7 continuity_rejected=%8 width_rejected=%9 noise_z=%10 "
               "template_evaluated=%11 template_matched=%12 template_rejected=%13 "
               "template_name=%14 template_similarity=%15 template_width_scale=%16 "
-              "coordinate_basis=sdk_x_zero axis_half_span_x=%17 center_x=%18 center_ratio=%19")
+              "coordinate_basis=sdk_x_zero axis_half_span_x=%17 center_x=%18 center_ratio=%19 mode=%20")
               .arg(sourceFrameNumber)
               .arg(points.size())
               .arg(detection.valid)
@@ -544,7 +766,8 @@ void LaserCorrectionController::processProfileFrame(
               .arg(detection.templateWidthScale, 0, 'f', 3)
               .arg(detection.profileAxisHalfSpanX, 0, 'g', 9)
               .arg(detection.profileCenterX, 0, 'g', 9)
-              .arg(detection.absoluteCenterRatio, 0, 'f', 6));
+              .arg(detection.absoluteCenterRatio, 0, 'f', 6)
+               .arg(static_cast<int>(config.profileDetectionMode)));
     }
     emit profileObservationReady(points, detection, sourceFrameNumber, receivedAtEpochMs);
     if (trace.enabled) {
@@ -559,7 +782,8 @@ void LaserCorrectionController::processProfileFrame(
                        .arg(detection.confidence, 0, 'g', 10)
                        .arg(detectorTimer.elapsed()));
     }
-    emitProfileDetectionTrace(trace);
+    finish(&detection, detection.valid ? QStringLiteral("located")
+                                       : QStringLiteral("not_located"));
     return;
   }
   if (sourceFrameNumberValid_ && sourceFrameNumber == sourceFrameNumber_) {
@@ -567,6 +791,8 @@ void LaserCorrectionController::processProfileFrame(
       trace.append(QStringLiteral(
           "event=profile_input_rejected frame=%1 reason=duplicate_frame")
                       .arg(sourceFrameNumber));
+    recordProfileDiagnostic(sourceFrameNumber, receivedAtEpochMs, age, nullptr,
+                            QStringLiteral("duplicate_frame"), processingTimer.elapsed(), trace);
     emitProfileDetectionTrace(trace);
     return;
   }
@@ -574,7 +800,7 @@ void LaserCorrectionController::processProfileFrame(
   sourceFrameNumberValid_ = true;
   sourceReceivedAtEpochMs_ = receivedAtEpochMs;
   processingSourceFrame_ = true;
-  processObservation(QImage(), &points, &trace);
+  processObservation(QImage(), &points, trace.enabled ? &trace : nullptr);
   processingSourceFrame_ = false;
   if (trace.enabled) {
     trace.append(QStringLiteral(
@@ -591,7 +817,7 @@ void LaserCorrectionController::processProfileFrame(
                      .arg(lastDetectorDurationMs_)
                      .arg(status_.reason));
   }
-  emitProfileDetectionTrace(trace);
+  finish(&lastProfileDetection_, lastProfileControlDecision_);
 }
 
 void LaserCorrectionController::processObservation(
@@ -737,12 +963,13 @@ void LaserCorrectionController::processObservation(
   }
   if (profileTrace && profileTrace->enabled) {
     profileTrace->append(QStringLiteral(
-        "event=detector_config active=%1 boundary_stop=%2 axis_locked=%3 "
-        "expected_center=%4 expected_absolute_center=%5 expected_width=%6 "
-        "reference_center=%7 max_center_jump=%8 max_reference_drift=%9 "
-        "minimum_width_ratio=%10 maximum_width_ratio=%11 grow_sigma=%12 "
-        "seed_sigma=%13 support_ratio=%14 candidate_hole_ratio=%15 "
-        "internal_hole_ratio=%16 smoothing_radius=%17")
+        "event=detector_config mode=%1 active=%2 boundary_stop=%3 axis_locked=%4 "
+        "expected_center=%5 expected_absolute_center=%6 expected_width=%7 "
+        "reference_center=%8 max_center_jump=%9 max_reference_drift=%10 "
+        "minimum_width_ratio=%11 maximum_width_ratio=%12 grow_sigma=%13 "
+        "seed_sigma=%14 support_ratio=%15 candidate_hole_ratio=%16 "
+        "internal_hole_ratio=%17 smoothing_radius=%18")
+                             .arg(static_cast<int>(detectorConfig.profileDetectionMode))
                              .arg(status_.active)
                              .arg(boundaryStopLatched_)
                              .arg(detectorConfig.profileAxisLocked)
@@ -760,6 +987,13 @@ void LaserCorrectionController::processObservation(
                              .arg(detectorConfig.profileTuning.maximumCandidateHoleRatio, 0, 'g', 10)
                              .arg(detectorConfig.profileTuning.maximumInternalHoleRatio, 0, 'g', 10)
                              .arg(detectorConfig.profileTuning.smoothingRadius));
+    profileTrace->append(QStringLiteral(
+        "event=width_guard_config jump_ratio=%1 confirmation_frames=%2 "
+        "require_template=%3")
+                             .arg(detectorConfig.maximumTrackingGapWidthJumpRatio,
+                                  0, 'g', 10)
+                             .arg(detectorConfig.widthJumpConfirmationFrames)
+                             .arg(detectorConfig.requireTemplateForWidthJump));
   }
   LaserRawFrameDiagnostic rawFrameDiagnostic;
   LaserRawFrameDiagnostic* rawFrameDiagnosticOutput =
@@ -769,7 +1003,12 @@ void LaserCorrectionController::processObservation(
   const LaserGapDetection detection =
       profile ? ProfileWeldDetector::detect(*profile, detectorConfig) :
                 LaserGapDetector::detect(image, detectorConfig, rawFrameDiagnosticOutput);
-  if (profile) profileAxisHalfSpanX_ = detection.profileAxisHalfSpanX;
+  if (profile) {
+    profileAxisHalfSpanX_ = detection.profileAxisHalfSpanX;
+    lastProfileDetection_ = detection;
+    lastProfileControlDecision_ = detection.valid ? QStringLiteral("association_rejected")
+                                                : QStringLiteral("not_located");
+  }
   const bool realTwoEdge = detection.valid && !detection.edgeBreakFallback &&
                            !detection.contourFallback;
   lastDetectorDurationMs_ = detectorTimer.elapsed();
@@ -785,8 +1024,8 @@ void LaserCorrectionController::processObservation(
         "noise_z=%10 baseline_slope=%11 baseline_offset_z=%12 template_evaluated=%13 "
         "template_matched=%14 template_rejected=%15 template_name=%16 "
         "template_similarity=%17 template_width_scale=%18 grow_sigma=%19 seed_sigma=%20 "
-        "coordinate_basis=sdk_x_zero axis_half_span_x=%21 center_x=%22 "
-        "left_ratio=%23 right_ratio=%24 line_start_ratio=%25 line_end_ratio=%26")
+         "coordinate_basis=sdk_x_zero axis_half_span_x=%21 center_x=%22 "
+         "left_ratio=%23 right_ratio=%24 line_start_ratio=%25 line_end_ratio=%26 mode=%27")
         .arg(sourceFrameNumber_).arg(profile->size()).arg(detection.valid)
         .arg(detection.gapStartPx).arg(detection.gapEndPx).arg(detection.absoluteCenterRatio)
         .arg(detection.confidence).arg(detection.continuityRejected).arg(detection.widthRejected)
@@ -802,7 +1041,8 @@ void LaserCorrectionController::processObservation(
         .arg(detection.profileGapStartRatio, 0, 'f', 6)
         .arg(detection.profileGapEndRatio, 0, 'f', 6)
         .arg(detection.profileLineStartRatio, 0, 'f', 6)
-        .arg(detection.profileLineEndRatio, 0, 'f', 6));
+         .arg(detection.profileLineEndRatio, 0, 'f', 6)
+         .arg(static_cast<int>(detectorConfig.profileDetectionMode)));
   }
   if (rawFrameDiagnosticOutput && !profile) {
     logRawFrameDiagnostic(rawFrameDiagnostic, detection, detectorConfig, now);
@@ -819,6 +1059,23 @@ void LaserCorrectionController::processObservation(
             .arg(clock_.elapsed() - lastImageMs_));
   }
 
+  // A fresh input may become stale during detection. Never let it update the
+  // tracked center/width or renew guidance after the watchdog deadline.
+  if (profile) lastProfileResultEpochMs_ = QDateTime::currentMSecsSinceEpoch();
+  if (profile && processingSourceFrame_ &&
+      (lastProfileResultEpochMs_ - sourceReceivedAtEpochMs_ > settings_.imageTimeoutMs ||
+       lastProfileResultEpochMs_ < sourceReceivedAtEpochMs_)) {
+    lastProfileControlDecision_ = QStringLiteral("result_stale");
+    initialGapConfirmationCount_ = 0;
+    pendingWidthJumpConfirmationCount_ = 0;
+    status_.gapValid = false;
+    status_.confidence = 0.0;
+    detectionHeld_ = false;
+    status_.detectionHeld = false;
+    status_.reason = CRAWLING_TEXT("焊道定位结果已过期，等待新轮廓");
+    publishStatus();
+    return;
+  }
   status_.gapValid = detection.valid;
   trajectoryPredictionActive_ = false;
   status_.horizontalLaser = detection.valid ? detection.horizontal
@@ -832,6 +1089,7 @@ void LaserCorrectionController::processObservation(
   status_.baselineSlope = detection.baselineSlope;
   status_.baselineHalfWidthPx = detection.baselineHalfWidthPx;
   const int lineSpanPx = detection.lineEndPx - detection.lineStartPx;
+  bool widthJumpPending = false;
   bool confirmedContourIdentity = false;
   if (status_.active && ((phase_ == Phase::AwaitingInputs &&
                          !gapTrackerValid_) || reacquisitionPending_)) {
@@ -871,6 +1129,7 @@ void LaserCorrectionController::processObservation(
           detection.absoluteCenterRatio;
       pendingInitialGapWidthRatio_ = candidateWidthRatio;
       if (initialGapConfirmationCount_ < requiredFrames) {
+        if (profile) lastProfileControlDecision_ = QStringLiteral("initial_confirmation_pending");
         // A re-localization candidate is not yet a measurement. Keep forward
         // motion with decaying authority from the last confirmed observation.
         status_.gapValid = reacquisitionPending_ && gapTrackerValid_;
@@ -881,7 +1140,8 @@ void LaserCorrectionController::processObservation(
         detectionEdgeBreakFallback_ = status_.gapValid;
         status_.edgeBreakFallback = detectionEdgeBreakFallback_;
         status_.reason =
-            CRAWLING_TEXT("正在确认原始图最大缺口（%1/%2）")
+            (profile ? CRAWLING_TEXT("正在确认焊道定位候选（%1/%2）")
+                     : CRAWLING_TEXT("正在确认原始图最大缺口（%1/%2）"))
                 .arg(initialGapConfirmationCount_)
                 .arg(requiredFrames);
         // An unconfirmed candidate cannot renew measured guidance or expand
@@ -913,6 +1173,61 @@ void LaserCorrectionController::processObservation(
                                        : detection.profileContour ? CRAWLING_TEXT("SDK 原始轮廓凸起双边界")
                                                                   : CRAWLING_TEXT("真实双边缺口")));
     }
+  }
+  // A template-supported width change is still only a candidate. Keep the
+  // old tracked center/width until the same change survives consecutive
+  // frames; an unmatched jump is rejected immediately by the detector.
+  if (status_.active && gapTrackerValid_ && !reacquisitionPending_ &&
+      profile != nullptr && detection.profileContour && detection.valid && realTwoEdge &&
+      detectorConfig.expectedAbsoluteGapWidthRatio > 0.0) {
+    const double candidateAbsoluteWidth =
+        detection.profileGapEndRatio - detection.profileGapStartRatio;
+    const bool widthJump = std::abs(candidateAbsoluteWidth -
+                                    detectorConfig.expectedAbsoluteGapWidthRatio) >
+        detectorConfig.maximumTrackingGapWidthJumpRatio;
+    if (widthJump) {
+      const bool templateAllowed = !detectorConfig.requireTemplateForWidthJump ||
+          detection.templateMatched;
+      if (!templateAllowed) {
+        pendingWidthJumpConfirmationCount_ = 0;
+        widthJumpPending = true;
+      } else {
+        const bool samePending = pendingWidthJumpConfirmationCount_ > 0 &&
+            std::abs(candidateAbsoluteWidth - pendingWidthJumpWidthRatio_) <=
+                std::max(0.02, pendingWidthJumpWidthRatio_ * 0.25) &&
+            std::abs(detection.absoluteCenterRatio -
+                     pendingWidthJumpCenterRatio_) <= 0.04;
+        pendingWidthJumpConfirmationCount_ = samePending
+            ? pendingWidthJumpConfirmationCount_ + 1 : 1;
+        pendingWidthJumpWidthRatio_ = candidateAbsoluteWidth;
+        pendingWidthJumpCenterRatio_ = detection.absoluteCenterRatio;
+        const int requiredFrames = std::clamp(
+            detectorConfig.widthJumpConfirmationFrames, 2, 8);
+        widthJumpPending = pendingWidthJumpConfirmationCount_ < requiredFrames;
+        if (!widthJumpPending) pendingWidthJumpConfirmationCount_ = 0;
+      }
+      if (widthJumpPending && profileTrace && profileTrace->enabled)
+        profileTrace->append(QStringLiteral(
+            "event=width_jump_pending width_ratio=%1 expected_width_ratio=%2 "
+            "template_matched=%3 confirmation=%4 required=%5")
+                                  .arg(candidateAbsoluteWidth, 0, 'g', 10)
+                                  .arg(detectorConfig.expectedAbsoluteGapWidthRatio, 0, 'g', 10)
+                                  .arg(detection.templateMatched)
+                                  .arg(pendingWidthJumpConfirmationCount_)
+                                  .arg(detectorConfig.widthJumpConfirmationFrames));
+    } else {
+      pendingWidthJumpConfirmationCount_ = 0;
+    }
+  } else if (!detection.valid || !gapTrackerValid_) {
+    pendingWidthJumpConfirmationCount_ = 0;
+  }
+  if (widthJumpPending) {
+    if (profile) lastProfileControlDecision_ = detection.templateMatched
+        ? QStringLiteral("width_confirmation_pending") : QStringLiteral("width_jump_without_template");
+    status_.gapValid = false;
+    status_.confidence = 0.0;
+    detectionHeld_ = false;
+    status_.detectionHeld = false;
   }
   if (detection.valid && !reacquisitionPending_) {
     status_.gapStartPx = detection.gapStartPx;
@@ -985,7 +1300,7 @@ void LaserCorrectionController::processObservation(
   if (!status_.gapValid) {
     boundaryObservationReliable_ = false;
     const bool candidateJump = detection.continuityRejected ||
-                               detection.widthRejected;
+                               detection.widthRejected || widthJumpPending;
     const qint64 heldDetectionAgeMs = now - lastValidDetectionMs_;
     // A native SDK profile with no candidate is still different from a camera
     // outage when the source frame was just received. The X/Z scan may be
@@ -1043,8 +1358,9 @@ void LaserCorrectionController::processObservation(
                         "原始数据仍在到达，进入 %3 ms 恢复窗口")
               .arg(detection.continuityRejected ? CRAWLING_TEXT("是")
                                                  : CRAWLING_TEXT("否"))
-              .arg(detection.widthRejected ? CRAWLING_TEXT("是")
-                                           : CRAWLING_TEXT("否"))
+              .arg((detection.widthRejected || widthJumpPending)
+                       ? CRAWLING_TEXT("是")
+                       : CRAWLING_TEXT("否"))
               .arg(detectionHoldLimitMs));
     }
     if (gapTrackerValid_ && heldDetectionAgeMs >= 0 &&
@@ -1063,14 +1379,14 @@ void LaserCorrectionController::processObservation(
       detectionEdgeBreakFallback_ = true;
       status_.edgeBreakFallback = true;
       const QString reuseReason =
-          detection.widthRejected
+          (detection.widthRejected || widthJumpPending)
               ? CRAWLING_TEXT("缺口宽度突变")
               : (detection.continuityRejected
                      ? CRAWLING_TEXT("候选跳变")
                      : (profile != nullptr
                             ? CRAWLING_TEXT("SDK 原始轮廓暂时无有效凸起候选")
                             : CRAWLING_TEXT("短时遮挡")));
-      status_.reason = detection.widthRejected
+      status_.reason = (detection.widthRejected || widthJumpPending)
                            ? CRAWLING_TEXT("激光缺口宽度突变，平滑沿用上一帧断口")
                            : (detection.continuityRejected
                                   ? CRAWLING_TEXT("激光候选跳变，平滑沿用上一帧断口")
@@ -1241,6 +1557,10 @@ void LaserCorrectionController::processObservation(
   detectionHeld_ = false;
   status_.detectionHeld = false;
   lastValidDetectionMs_ = now;
+  if (profile) {
+    lastProfileMeasurementAccepted_ = true;
+    lastProfileControlDecision_ = QStringLiteral("control_accepted");
+  }
   lastObservedGapAbsoluteCenterRatio_ = detection.absoluteCenterRatio;
   lastObservedWasContour_ = detection.contourFallback && detection.confidence >= 0.060;
   if (detectionDegradedLogged_) {
@@ -1353,6 +1673,12 @@ void LaserCorrectionController::processObservation(
 }
 
 void LaserCorrectionController::shutdown() {
+  {
+    QMutexLocker lock(&profileInputMutex_);
+    profileInputClosed_ = true;
+    profileInputScheduled_ = false;
+    pendingProfilePoints_.clear();
+  }
   watchdog_.stop();
   if (status_.active) {
     stop(CRAWLING_TEXT("软件正在关闭，自动纠偏已停止"));
@@ -1554,6 +1880,8 @@ void LaserCorrectionController::queueRawFrame(
   QJsonObject record;
   QJsonObject detector;
   detector.insert(QStringLiteral("minimumGapRatio"), config.minimumGapRatio);
+  detector.insert(QStringLiteral("profileDetectionMode"),
+                  static_cast<int>(config.profileDetectionMode));
   detector.insert(QStringLiteral("minimumSideSupportRatio"), config.minimumSideSupportRatio);
   detector.insert(QStringLiteral("minimumContrast"), config.minimumContrast);
   detector.insert(QStringLiteral("allowOpenCvContour"), config.allowOpenCvContour);
@@ -1577,6 +1905,8 @@ void LaserCorrectionController::queueRawFrame(
   detector.insert(QStringLiteral("edgeBreakGapRatio"), config.edgeBreakGapRatio);
   detector.insert(QStringLiteral("minimumEdgeBreakRunRatio"), config.minimumEdgeBreakRunRatio);
   detector.insert(QStringLiteral("maximumTrackingGapWidthJumpRatio"), config.maximumTrackingGapWidthJumpRatio);
+   detector.insert(QStringLiteral("widthJumpConfirmationFrames"), config.widthJumpConfirmationFrames);
+   detector.insert(QStringLiteral("requireTemplateForWidthJump"), config.requireTemplateForWidthJump);
   detector.insert(QStringLiteral("expectedLineStartRatio"), config.expectedLineStartRatio);
   detector.insert(QStringLiteral("expectedLineEndRatio"), config.expectedLineEndRatio);
   detector.insert(QStringLiteral("expectedAxis"), config.expectedAxis);
@@ -1943,6 +2273,9 @@ void LaserCorrectionController::resetGapTracker() {
   filteredLeftEdgeM_ = 0.0;
   filteredRightEdgeM_ = 0.0;
   filteredEdgeValid_ = false;
+  pendingWidthJumpConfirmationCount_ = 0;
+  pendingWidthJumpWidthRatio_ = 0.0;
+  pendingWidthJumpCenterRatio_ = 0.5;
   trackingReferenceGapCenterRatio_ = -1.0;
   trackingReferenceGapAbsoluteCenterRatio_ = -1.0;
   status_.referenceGapAbsoluteCenterRatio = 0.5;
@@ -3363,6 +3696,17 @@ void LaserCorrectionController::resetSession() {
   initialGapConfirmationContour_ = false;
   pendingInitialGapAbsoluteCenterRatio_ = 0.5;
   pendingInitialGapWidthRatio_ = 0.0;
+  pendingWidthJumpConfirmationCount_ = 0;
+  pendingWidthJumpWidthRatio_ = 0.0;
+  pendingWidthJumpCenterRatio_ = 0.5;
+  profileTraceRing_.clear();
+  profileTraceBatchCounter_ = 0;
+  profileTraceCaptureUntilMs_ = -1;
+  profileTraceNextFaultFlushMs_ = -1;
+  lastProfileDetailCaptureMs_ = -1;
+  profileSummaryRing_.clear();
+  lastProfileSummaryLogMs_ = -1;
+  lastProfileSummarySignature_.clear();
   speedSupervisorScale_ = 1.0;
   speedSupervisorBoundaryScale_ = 1.0;
   speedSupervisorObservationScale_ = 1.0;
@@ -3900,6 +4244,7 @@ void LaserCorrectionController::stop(const QString& reason) {
   profileDetectionTraceEnabled_ = false;
   emit commandChanged(0.0, 0.0);
   lastCommandMs_ = clock_.elapsed();
+  if (wasActive) flushProfileDiagnostics(reason);
   if (wasActive || reason != CRAWLING_TEXT("自动纠偏已停止")) {
     emit logMessage(reason);
   }

@@ -29,11 +29,31 @@ struct ProfileWeldTemplate {
   QString name;
   QVector<float> normalizedShape;
   double widthRatio = 0.0;
+  // Position of the template peak in the normalized shape. This lets pure
+  // template mode report the peak instead of the window midpoint.
+  double peakRatio = 0.5;
   double minimumWidthScale = 0.20;
   double maximumWidthScale = 5.00;
-  double minimumSimilarity = 0.72;
+  // NCC threshold. 0.85 is a conservative default; existing persisted
+  // templates keep their explicitly configured threshold when loaded.
+  double minimumSimilarity = 0.85;
   bool enabled = true;
 };
+
+enum class ProfileDetectionMode {
+  BaselineShoulder = 0,
+  TemplateOnly = 1,
+  Hybrid = 2,
+};
+
+inline QString profileDetectionModeName(ProfileDetectionMode mode) {
+  switch (mode) {
+    case ProfileDetectionMode::BaselineShoulder: return QStringLiteral("baseline_shoulder");
+    case ProfileDetectionMode::TemplateOnly: return QStringLiteral("template_only");
+    case ProfileDetectionMode::Hybrid: return QStringLiteral("hybrid");
+  }
+  return QStringLiteral("unknown");
+}
 
 struct ProfileWeldDetectionTrace {
   bool enabled = false;
@@ -45,6 +65,8 @@ struct ProfileWeldDetectionTrace {
 };
 
 struct LaserGapDetectorConfig {
+  ProfileDetectionMode profileDetectionMode =
+      ProfileDetectionMode::BaselineShoulder;
   double minimumGapRatio = 0.006;
   double minimumSideSupportRatio = 0.03;
   int minimumContrast = 24;
@@ -98,6 +120,10 @@ struct LaserGapDetectorConfig {
   // At a laser boundary only a short portion of one side may remain visible.
   double minimumEdgeBreakRunRatio = 0.025;
   double maximumTrackingGapWidthJumpRatio = 0.08;
+  // A large width change is an association failure unless a profile template
+  // supports it. The controller still requires consecutive confirmation.
+  int widthJumpConfirmationFrames = 3;
+  bool requireTemplateForWidthJump = true;
   // Ratios against the full image axis, supplied by the previous frame.
   double expectedLineStartRatio = -1.0;
   double expectedLineEndRatio = -1.0;
@@ -114,6 +140,8 @@ struct LaserGapDetectorConfig {
 
 struct LaserGapDetection {
   bool valid = false;
+  ProfileDetectionMode profileDetectionMode = ProfileDetectionMode::BaselineShoulder;
+  QString profileDetectionReason;
   bool horizontal = true;
   // Geometry of the broadly supported original laser stripe. Its normal
   // coordinate is offset + slope * scan-axis pixel; a weld is an interruption
@@ -158,6 +186,15 @@ struct LaserGapDetection {
   QString templateName;
   double templateSimilarity = 0.0;
   double templateWidthScale = 0.0;
+  // Search diagnostics remain available even when detailed point logging is off.
+  int templateEnabledCount = 0;
+  int templateWindowCount = 0;
+  int templateComparisonCount = 0;
+  int templatePriorRejectedCount = 0;
+  int templateSignalRejectedCount = 0;
+  int templateCoverageRejectedCount = 0;
+  double templateMinimumSimilarity = 0.0;
+  double templateRunnerUpSimilarity = 0.0;
   bool contourAgreesWithGap = false;
   bool contourConflict = false;
   // Retained for source compatibility. Auxiliary contours are never dominant.

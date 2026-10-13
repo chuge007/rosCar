@@ -24,6 +24,7 @@ public:
     explicit RobotProfileView(QWidget *parent = nullptr);
 
 public slots:
+    void setInputTimeoutMs(int timeoutMs);
     void setPoints(const QVector<QVector3D> &points);
     void setProfileObservation(const QVector<QVector3D> &points,
                                const crawling::LaserGapDetection &detection,
@@ -57,6 +58,7 @@ private:
     bool m_hasDetection = false;
     quint32 m_frameNumber = 0;
     qint64 m_receivedAtEpochMs = 0;
+    int m_inputTimeoutMs = 180;
     bool m_displayRangeInitialized = false;
     double m_displayHalfSpanX = 0.0;
     double m_displayMinVertical = 0.0;

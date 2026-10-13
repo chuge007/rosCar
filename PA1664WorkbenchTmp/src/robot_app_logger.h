@@ -11,6 +11,7 @@ class AppLogger final {
  public:
   static void initialize();
   static void write(const QString& category, const QString& message);
+  static void writeBatch(const QString& category, const QStringList& messages);
   static bool resetProfileDetection();
   static void writeProfileDetection(const QString& message);
   static void writeProfileDetectionBatch(const QStringList& messages);
@@ -39,6 +40,7 @@ class ProfileDetectionLogWriter final : public QObject {
   void endSession(const QString& reason);
   void append(const QString& message);
   void appendBatch(const QStringList& messages);
+  void appendDiagnosticBatch(const QStringList& messages);
 
  private:
   bool sessionActive_ = false;

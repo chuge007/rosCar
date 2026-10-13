@@ -46,6 +46,12 @@ void AppLogger::write(const QString& category, const QString& message) {
   writeLine(QStringLiteral("INFO"), category, message);
 }
 
+void AppLogger::writeBatch(const QString& category, const QStringList& messages) {
+  if (messages.isEmpty()) return;
+  writeLinesToFile(filePath(), QStringLiteral("INFO"), category, messages,
+                   kMaximumBytes, kRetainedBytes, loggerMutex(), logSequence());
+}
+
 bool AppLogger::resetProfileDetection() {
   QMutexLocker lock(&profileDetectionLoggerMutex());
   const QString path = profileDetectionFilePath();
@@ -152,6 +158,11 @@ void ProfileDetectionLogWriter::append(const QString& message) {
 void ProfileDetectionLogWriter::appendBatch(const QStringList& messages) {
   if (!sessionActive_) return;
   AppLogger::writeProfileDetectionBatch(messages);
+}
+
+void ProfileDetectionLogWriter::appendDiagnosticBatch(const QStringList& messages) {
+  // Compact localization diagnostics are independent of the detailed-log checkbox.
+  AppLogger::writeBatch(QStringLiteral("LASER.LOCATE"), messages);
 }
 }  // namespace crawling
 

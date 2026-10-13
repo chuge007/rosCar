@@ -3,6 +3,7 @@
 #include "laser_gap_detector.h"
 #include <QVector3D>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <deque>
 #include <limits>
@@ -59,6 +60,15 @@ class ProfileWeldDetector final {
     output.widthRatio =
         double(detection.contourEndPx - detection.contourStartPx + 1) /
         std::max(1, valid.back() - valid.front());
+    if (!output.normalizedShape.isEmpty()) {
+      int peak = 0;
+      for (int index = 1; index < output.normalizedShape.size(); ++index) {
+        if (output.normalizedShape[index] > output.normalizedShape[peak])
+          peak = index;
+      }
+      output.peakRatio = double(peak) /
+          std::max(1, static_cast<int>(output.normalizedShape.size()) - 1);
+    }
     return output;
   }
 
@@ -138,11 +148,17 @@ class ProfileWeldDetector final {
                                  const LaserGapDetectorConfig& config = {}) {
     LaserGapDetection result;
     result.profileContour = true;
+    result.profileDetectionMode = config.profileDetectionMode;
+    result.profileDetectionReason = QStringLiteral("insufficient_scan");
     const int n = points.size();
     ProfileWeldDetectionTrace* trace = config.profileDetectionTrace;
     if (trace && trace->enabled)
-      trace->append(QStringLiteral("event=detector_begin samples=%1").arg(n));
+      trace->append(QStringLiteral("event=detector_begin samples=%1 mode=%2 algorithm=%3")
+                        .arg(n)
+                        .arg(static_cast<int>(config.profileDetectionMode))
+                        .arg(profileDetectionModeName(config.profileDetectionMode)));
     if (n < 32) {
+      result.profileDetectionReason = QStringLiteral("too_few_samples");
       if (trace && trace->enabled)
         trace->append(QStringLiteral(
             "event=detector_exit reason=too_few_samples samples=%1").arg(n));
@@ -190,6 +206,7 @@ class ProfileWeldDetector final {
                        .arg(scanMinimumX, 0, 'g', 10)
                        .arg(scanMaximumX, 0, 'g', 10));
     if (result.profileAxisHalfSpanX <= 0.0) {
+      result.profileDetectionReason = QStringLiteral("invalid_axis_half_span");
       if (trace && trace->enabled)
         trace->append(QStringLiteral(
             "event=detector_exit reason=invalid_axis_half_span"));
@@ -201,6 +218,7 @@ class ProfileWeldDetector final {
     result.profileLineStartRatio = xRatio(scanMinimumX);
     result.profileLineEndRatio = xRatio(scanMaximumX);
     if (valid.size() < 24 || differences.size() < 12) {
+      result.profileDetectionReason = QStringLiteral("insufficient_valid_scan");
       if (trace && trace->enabled)
         trace->append(QStringLiteral(
             "event=detector_exit reason=insufficient_valid_scan valid=%1 differences=%2")
@@ -247,6 +265,7 @@ class ProfileWeldDetector final {
     }
     const double lx = median(leftX), rx = median(rightX);
     if (rx <= lx) {
+      result.profileDetectionReason = QStringLiteral("invalid_baseline_span");
       if (trace && trace->enabled)
         trace->append(QStringLiteral(
             "event=detector_exit reason=invalid_baseline_span left_x=%1 right_x=%2")
@@ -338,14 +357,21 @@ class ProfileWeldDetector final {
                         residual, valid);
     }
     double best = 0, runnerUp = 0;
+    double diagnosticSimilarity = -1.0, diagnosticThreshold = 0.0, diagnosticScale = 0.0;
+    QString diagnosticName;
     bool templateActive = false;
     for (const ProfileWeldTemplate& profileTemplate : config.profileTemplates) {
-      if (profileTemplate.enabled &&
-          profileTemplate.normalizedShape.size() >= kTemplateSamples) {
+      if (config.profileDetectionMode != ProfileDetectionMode::BaselineShoulder &&
+          profileTemplate.enabled) {
         templateActive = true;
-        break;
+        if (usableTemplate(profileTemplate)) ++result.templateEnabledCount;
       }
     }
+    if (config.profileDetectionMode == ProfileDetectionMode::TemplateOnly) {
+      return detectTemplateOnly(points, valid, residual, result, config,
+                                templateActive, trace);
+    }
+    result.profileDetectionReason = QStringLiteral("no_raised_candidate");
     // Candidate saliency combines height above the robust parent baseline
     // with a multi-scale top-hat response. The first term preserves a whole
     // raised plateau; the second reveals narrower peaks and slope changes.
@@ -484,10 +510,9 @@ class ProfileWeldDetector final {
                             .arg(center, 0, 'g', 8));
         continue;
       }
-      // Raised weld shoulders can change apparent width as the raw profile
-      // crosses a sloped seam or contains invalid scan slots. Width is useful
-      // for ranking candidates, but it must not erase a candidate whose center
-      // and two shoulder supports remain continuous.
+      // A large width jump is an association failure. A profile template may
+      // nominate a legitimate scale change, but the controller must still
+      // confirm it over multiple frames before changing the tracked geometry.
       const bool widthJump = config.expectedAbsoluteGapWidthRatio > 0 &&
           std::abs(absoluteWidth-config.expectedAbsoluteGapWidthRatio) >
               config.maximumTrackingGapWidthJumpRatio;
@@ -497,13 +522,17 @@ class ProfileWeldDetector final {
         score /= 1 + 12*std::abs(center-config.expectedAbsoluteCenterRatio);
       QString matchedTemplateName;
       double matchedTemplateSimilarity = 0.0;
+      double matchedTemplateThreshold = 0.0;
       double matchedTemplateWidthScale = 0.0;
+      double matchedTemplatePeakRatio = 0.5;
+      double candidateSimilarity = -1.0, candidateThreshold = 0.0, candidateScale = 0.0;
+      QString candidateTemplateName;
       bool candidateTemplateMatched = false;
       if (templateActive) {
+        ++result.templateWindowCount;
         const QVector<float> candidateShape = normalizedRaisedShape(residual, start, end);
         for (const ProfileWeldTemplate& profileTemplate : config.profileTemplates) {
-          if (!profileTemplate.enabled ||
-              profileTemplate.normalizedShape.size() < kTemplateSamples ||
+          if (!usableTemplate(profileTemplate) ||
               candidateShape.size() != profileTemplate.normalizedShape.size()) {
             continue;
           }
@@ -511,17 +540,47 @@ class ProfileWeldDetector final {
               ? width / profileTemplate.widthRatio : 1.0;
           if (widthScale < profileTemplate.minimumWidthScale ||
               widthScale > profileTemplate.maximumWidthScale) {
+            ++result.templatePriorRejectedCount;
+            if (trace && trace->enabled)
+              trace->append(QStringLiteral(
+                  "event=template_comparison algorithm=hybrid start=%1 end=%2 name=\"%3\" "
+                  "width_scale=%4 minimum_scale=%5 maximum_scale=%6 reason=width_scale_rejected")
+                  .arg(start).arg(end).arg(profileTemplate.name)
+                  .arg(widthScale, 0, 'g', 10).arg(profileTemplate.minimumWidthScale)
+                  .arg(profileTemplate.maximumWidthScale));
             continue;
           }
           const double similarity = templateSimilarity(
               profileTemplate.normalizedShape, candidateShape);
+          ++result.templateComparisonCount;
+          if (trace && trace->enabled)
+            trace->append(QStringLiteral(
+                "event=template_comparison algorithm=hybrid start=%1 end=%2 name=\"%3\" "
+                "similarity=%4 threshold=%5 width_scale=%6 matched=%7")
+                .arg(start).arg(end).arg(profileTemplate.name).arg(similarity, 0, 'g', 10)
+                .arg(profileTemplate.minimumSimilarity, 0, 'g', 10).arg(widthScale, 0, 'g', 10)
+                .arg(similarity >= profileTemplate.minimumSimilarity));
+          if (similarity > candidateSimilarity) {
+            candidateSimilarity = similarity;
+            candidateTemplateName = profileTemplate.name;
+            candidateThreshold = profileTemplate.minimumSimilarity;
+            candidateScale = widthScale;
+          }
+          if (similarity > diagnosticSimilarity) {
+            diagnosticSimilarity = similarity;
+            diagnosticName = profileTemplate.name;
+            diagnosticThreshold = profileTemplate.minimumSimilarity;
+            diagnosticScale = widthScale;
+          }
           if (similarity < profileTemplate.minimumSimilarity ||
               similarity <= matchedTemplateSimilarity) {
             continue;
           }
           matchedTemplateName = profileTemplate.name;
           matchedTemplateSimilarity = similarity;
+          matchedTemplateThreshold = profileTemplate.minimumSimilarity;
           matchedTemplateWidthScale = widthScale;
+          matchedTemplatePeakRatio = std::clamp(profileTemplate.peakRatio, 0.0, 1.0);
           candidateTemplateMatched = true;
         }
         if (candidateTemplateMatched) {
@@ -534,6 +593,18 @@ class ProfileWeldDetector final {
                             .arg(span.second)
                             .arg(center, 0, 'g', 8));
         }
+      }
+      if (widthJump && config.requireTemplateForWidthJump &&
+          !candidateTemplateMatched) {
+        result.widthRejected = true;
+        if (trace && trace->enabled)
+          trace->append(QStringLiteral(
+              "event=candidate frame_start=%1 frame_end=%2 width_ratio=%3 "
+              "expected_width_ratio=%4 rejected=width_jump_without_template")
+                            .arg(span.first).arg(span.second)
+                            .arg(absoluteWidth, 0, 'g', 10)
+                            .arg(config.expectedAbsoluteGapWidthRatio, 0, 'g', 10));
+        continue;
       }
       if (score <= best) {
         runnerUp = std::max(runnerUp, score);
@@ -572,26 +643,48 @@ class ProfileWeldDetector final {
       result.gapStartPx = result.contourStartPx = start;
       result.gapEndPx = result.contourEndPx = end;
       result.lineStartPx = valid.front(); result.lineEndPx = valid.back();
-      // Use footprint midpoint, not the highest point: asymmetric peaks must
-      // not move the steering target when their height changes.
-      result.absoluteCenterRatio = center;
-      result.profileCenterX = centerX;
+      // Generic mode uses the footprint midpoint. Once a template confirms
+      // the candidate, its stored peak location gives the more precise seam
+      // target while the measured span still supplies the tracking width.
+      const double templateCenterX =
+          double(points[start].x()) +
+          (double(points[end].x()) - double(points[start].x())) *
+              matchedTemplatePeakRatio;
+      const double outputCenterX = candidateTemplateMatched
+          ? templateCenterX : centerX;
+      const double outputCenterRatio = candidateTemplateMatched
+          ? xRatio(outputCenterX) : center;
+      result.absoluteCenterRatio = outputCenterRatio;
+      result.profileCenterX = outputCenterX;
       result.profileGapStartRatio = xRatio(points[start].x());
       result.profileGapEndRatio = xRatio(points[end].x());
       result.normalizedCenter = std::clamp(
-          (centerX - scanMinimumX) / (scanMaximumX - scanMinimumX), 0.0, 1.0);
+          (outputCenterX - scanMinimumX) / (scanMaximumX - scanMinimumX),
+          0.0, 1.0);
       result.confidence = result.contourConfidence = .5 + .4*support/length;
       result.supportingSamples = support;
       result.templateEvaluated = templateActive;
       result.templateMatched = candidateTemplateMatched;
       result.templateRejected = false;
-      result.templateName = matchedTemplateName;
-      result.templateSimilarity = matchedTemplateSimilarity;
-      result.templateWidthScale = matchedTemplateWidthScale;
+      result.templateName = candidateTemplateMatched ? matchedTemplateName : candidateTemplateName;
+      result.templateSimilarity = candidateTemplateMatched ? matchedTemplateSimilarity
+                                                          : std::max(0.0, candidateSimilarity);
+      result.templateMinimumSimilarity = candidateTemplateMatched ? matchedTemplateThreshold : candidateThreshold;
+      result.templateWidthScale = candidateTemplateMatched ? matchedTemplateWidthScale : candidateScale;
+    }
+    if (!result.valid && diagnosticSimilarity >= 0.0) {
+      result.templateSimilarity = diagnosticSimilarity;
+      result.templateName = diagnosticName;
+      result.templateMinimumSimilarity = diagnosticThreshold;
+      result.templateWidthScale = diagnosticScale;
     }
     result.templateEvaluated = templateActive;
-    result.templateRejected = false;
+    result.templateRejected = templateActive && !result.templateMatched;
     if (result.valid) result.continuityRejected = result.widthRejected = false;
+    result.profileDetectionReason = result.valid ? QStringLiteral("located")
+        : result.widthRejected ? QStringLiteral("width_jump_without_template")
+        : result.continuityRejected ? QStringLiteral("continuity_rejected")
+                                    : QStringLiteral("no_raised_candidate");
     if (trace && trace->enabled)
       trace->append(QStringLiteral(
           "event=detector_result valid=%1 start=%2 end=%3 center_x=%4 "
@@ -614,6 +707,311 @@ class ProfileWeldDetector final {
 
  private:
   static constexpr int kTemplateSamples = 41;
+  static bool usableTemplate(const ProfileWeldTemplate& value) {
+    if (!value.enabled || value.normalizedShape.size() != kTemplateSamples ||
+        !std::isfinite(value.widthRatio) || value.widthRatio <= 1e-6 ||
+        !std::isfinite(value.minimumSimilarity) || value.minimumSimilarity < 0.0 ||
+        value.minimumSimilarity > 1.0 || !std::isfinite(value.peakRatio) ||
+        !std::isfinite(value.minimumWidthScale) || !std::isfinite(value.maximumWidthScale) ||
+        value.minimumWidthScale <= 0.0 || value.maximumWidthScale < value.minimumWidthScale)
+      return false;
+    double sum = 0.0;
+    for (float sample : value.normalizedShape) {
+      if (!std::isfinite(sample)) return false;
+      sum += sample;
+    }
+    const double mean = sum / kTemplateSamples;
+    double energy = 0.0;
+    for (float sample : value.normalizedShape) energy += (sample - mean) * (sample - mean);
+    return energy > 1e-12;
+  }
+
+  // Match a normalized template directly against the baseline-removed scan.
+  // The existing template format stores a width ratio rather than a fixed
+  // point count, so a small set of logarithmically spaced scales covers width
+  // drift without changing the persisted 41-sample representation.
+  static LaserGapDetection detectTemplateOnly(
+      const QVector<QVector3D>& points, const std::vector<int>& valid,
+      const std::vector<double>& residual, LaserGapDetection result,
+      const LaserGapDetectorConfig& config, bool templateActive,
+      ProfileWeldDetectionTrace* trace) {
+    result.templateEvaluated = templateActive;
+    result.templateEnabledCount = 0;
+    if (!templateActive) {
+      result.templateRejected = true;
+      result.profileDetectionReason = QStringLiteral("no_enabled_template");
+      if (trace && trace->enabled)
+        trace->append(QStringLiteral(
+            "event=template_only_exit reason=no_enabled_template"));
+      return result;
+    }
+    const int firstIndex = valid.front();
+    const int lastIndex = valid.back();
+    const int validSpan = std::max(1, lastIndex - firstIndex);
+    const auto xRatio = [&result](double x) {
+      return std::clamp(0.5 + x / (2.0 * result.profileAxisHalfSpanX),
+                        0.0, 1.0);
+    };
+    double bestScore = 0.0;
+    double runnerUp = 0.0;
+    QString bestName;
+    double bestWidthScale = 0.0;
+    int bestStart = -1;
+    int bestEnd = -1;
+    double bestPeakRatio = 0.5;
+    double bestThreshold = 0.0;
+    double diagnosticScore = -1.0;
+    QString diagnosticName;
+    double diagnosticScale = 0.0;
+    double diagnosticThreshold = 0.0;
+    const bool hasPrior = config.expectedAbsoluteCenterRatio >= 0.0;
+    const double centerTolerance = std::max(
+        0.08, config.maximumAbsoluteCenterJumpRatio * 1.5);
+
+    for (const ProfileWeldTemplate& profileTemplate : config.profileTemplates) {
+      if (!usableTemplate(profileTemplate)) {
+        continue;
+      }
+      ++result.templateEnabledCount;
+      // Precompute template moments once and sample windows on the stack.
+      // Preserve the original float normalization even for nearly flat
+      // windows, while eliminating temporary QVector allocations.
+      std::array<double, kTemplateSamples> centeredTemplate;
+      double templateMean = 0.0;
+      for (float value : profileTemplate.normalizedShape) templateMean += value;
+      templateMean /= kTemplateSamples;
+      double templateEnergy = 0.0;
+      for (int sample = 0; sample < kTemplateSamples; ++sample) {
+        centeredTemplate[sample] = profileTemplate.normalizedShape[sample] - templateMean;
+        templateEnergy += centeredTemplate[sample] * centeredTemplate[sample];
+      }
+      const double minimumScale = std::clamp(
+          profileTemplate.minimumWidthScale, 0.20, 5.0);
+      const double maximumScale = std::clamp(
+          profileTemplate.maximumWidthScale, minimumScale, 5.0);
+      QVector<double> scales;
+      constexpr int kScaleSamples = 9;
+      for (int scaleIndex = 0; scaleIndex < kScaleSamples; ++scaleIndex) {
+        const double fraction = kScaleSamples == 1
+            ? 0.0 : double(scaleIndex) / double(kScaleSamples - 1);
+        const double scale = minimumScale * std::pow(
+            maximumScale / minimumScale, fraction);
+        if (scales.isEmpty() || std::abs(scale - scales.back()) > 1e-6)
+          scales.append(scale);
+      }
+      if (minimumScale <= 1.0 && maximumScale >= 1.0 &&
+          std::none_of(scales.begin(), scales.end(),
+                       [](double scale) { return std::abs(scale - 1.0) < 1e-6; }))
+        scales.append(1.0);
+
+      for (double scale : scales) {
+        const int targetWidth = std::max(
+            kTemplateSamples, int(std::lround(
+                profileTemplate.widthRatio * validSpan * scale)));
+        if (targetWidth >= validSpan) continue;
+        // Both boundaries advance monotonically. Each residual enters and
+        // leaves this maximum queue at most once per scale; previously every
+        // overlapping window rescanned hundreds/thousands of the same points.
+        std::deque<int> maximumQueue;
+        int windowRight = firstIndex - 1;
+        int endPosition = 1;
+        for (int startPosition = 0;
+             startPosition < static_cast<int>(valid.size()) - 1;
+             ++startPosition) {
+          const int start = valid[startPosition];
+          const int desiredEnd = start + targetWidth;
+          endPosition = std::max(endPosition, startPosition + 1);
+          while (endPosition < static_cast<int>(valid.size()) - 1 &&
+                 valid[endPosition] < desiredEnd) ++endPosition;
+          if (endPosition <= startPosition) continue;
+          const int end = valid[endPosition];
+          if (end - start < kTemplateSamples || end <= start) continue;
+          ++result.templateWindowCount;
+          while (windowRight < end) {
+            ++windowRight;
+            if (!std::isfinite(residual[windowRight])) continue;
+            while (!maximumQueue.empty() &&
+                   residual[maximumQueue.back()] <= residual[windowRight])
+              maximumQueue.pop_back();
+            maximumQueue.push_back(windowRight);
+          }
+          while (!maximumQueue.empty() && maximumQueue.front() < start)
+            maximumQueue.pop_front();
+
+          const double candidatePeakRatio = std::clamp(
+              profileTemplate.peakRatio, 0.0, 1.0);
+          const double candidatePeakX =
+              double(points[start].x()) +
+              (double(points[end].x()) - double(points[start].x())) *
+                  candidatePeakRatio;
+          if (hasPrior && std::abs(xRatio(candidatePeakX) -
+                                  config.expectedAbsoluteCenterRatio) >
+                             centerTolerance) {
+            ++result.templatePriorRejectedCount;
+            continue;
+          }
+          const double windowPeak = maximumQueue.empty() ? 0.0
+              : std::max(0.0, residual[maximumQueue.front()]);
+          // NCC is scale invariant by design; retain a modest absolute
+          // signal gate so a normalized noise ripple cannot become a weld.
+          if (windowPeak < std::max(1e-6, result.profileNoise * 1.5)) {
+            ++result.templateSignalRejectedCount;
+            continue;
+          }
+          int compared = 0;
+          const double similarity = templateWindowSimilarity(
+              residual, start, end, profileTemplate.normalizedShape,
+              centeredTemplate, templateEnergy, compared);
+          if (compared < int(std::ceil(kTemplateSamples * 0.80))) {
+            ++result.templateCoverageRejectedCount;
+            continue;
+          }
+          ++result.templateComparisonCount;
+          if (similarity > diagnosticScore) {
+            diagnosticScore = similarity;
+            diagnosticName = profileTemplate.name;
+            diagnosticScale = scale;
+            diagnosticThreshold = profileTemplate.minimumSimilarity;
+          }
+          if (similarity < profileTemplate.minimumSimilarity) continue;
+          if (similarity <= bestScore) {
+            runnerUp = std::max(runnerUp, similarity);
+            continue;
+          }
+          runnerUp = bestScore;
+          bestScore = similarity;
+          bestName = profileTemplate.name;
+          bestWidthScale = scale;
+          bestStart = start;
+          bestEnd = end;
+          bestPeakRatio = candidatePeakRatio;
+          bestThreshold = profileTemplate.minimumSimilarity;
+        }
+      }
+    }
+    result.templateSimilarity = bestStart >= 0 ? bestScore : std::max(0.0, diagnosticScore);
+    result.templateName = bestStart >= 0 ? bestName : diagnosticName;
+    result.templateWidthScale = bestStart >= 0 ? bestWidthScale : diagnosticScale;
+    result.templateMinimumSimilarity = bestStart >= 0 ? bestThreshold : diagnosticThreshold;
+    result.templateRunnerUpSimilarity = runnerUp;
+    result.templateMatched = bestStart >= 0;
+    result.templateRejected = !result.templateMatched;
+    if (bestStart < 0) {
+      result.profileDetectionReason = result.templateEnabledCount == 0
+          ? QStringLiteral("no_usable_template")
+          : result.templateComparisonCount > 0 ? QStringLiteral("similarity_below_threshold")
+          : result.templateCoverageRejectedCount > 0 ? QStringLiteral("insufficient_template_coverage")
+          : result.templateSignalRejectedCount > 0 ? QStringLiteral("insufficient_raised_signal")
+          : result.templatePriorRejectedCount > 0 ? QStringLiteral("template_prior_rejected")
+                                                   : QStringLiteral("no_template_window");
+      if (trace && trace->enabled)
+        trace->append(QStringLiteral(
+            "event=template_only_result matched=0 best_similarity=%1 "
+            "runner_up=%2 reason=%3 threshold=%4 name=\"%5\" "
+            "windows=%6 comparisons=%7 prior_rejected=%8 signal_rejected=%9 coverage_rejected=%10")
+                          .arg(result.templateSimilarity, 0, 'g', 10)
+                          .arg(runnerUp, 0, 'g', 10).arg(result.profileDetectionReason)
+                          .arg(result.templateMinimumSimilarity, 0, 'g', 10).arg(result.templateName)
+                          .arg(result.templateWindowCount).arg(result.templateComparisonCount)
+                          .arg(result.templatePriorRejectedCount).arg(result.templateSignalRejectedCount)
+                          .arg(result.templateCoverageRejectedCount));
+      return result;
+    }
+    const double startX = points[bestStart].x();
+    const double endX = points[bestEnd].x();
+    const double peakX = startX + (endX - startX) * bestPeakRatio;
+    const double center = xRatio(peakX);
+    result.valid = result.baselineSupported = result.contourSupported = true;
+    result.profileDetectionReason = QStringLiteral("located");
+    result.gapStartPx = result.contourStartPx = bestStart;
+    result.gapEndPx = result.contourEndPx = bestEnd;
+    result.lineStartPx = firstIndex;
+    result.lineEndPx = lastIndex;
+    result.profileCenterX = peakX;
+    result.absoluteCenterRatio = center;
+    result.normalizedCenter = std::clamp(
+        (peakX - double(points[firstIndex].x())) /
+            std::max(1e-9, double(points[lastIndex].x() - points[firstIndex].x())),
+        0.0, 1.0);
+    result.profileGapStartRatio = xRatio(startX);
+    result.profileGapEndRatio = xRatio(endX);
+    result.supportingSamples = bestEnd - bestStart + 1;
+    result.confidence = result.contourConfidence =
+        std::clamp(0.5 + 0.5 * bestScore, 0.0, 1.0);
+    if (trace && trace->enabled)
+      trace->append(QStringLiteral(
+          "event=template_only_result matched=1 name=%1 similarity=%2 "
+          "width_scale=%3 start=%4 end=%5 peak_x=%6 center_ratio=%7 "
+          "runner_up=%8 threshold=%9 windows=%10 comparisons=%11 algorithm=template_only")
+                        .arg(bestName)
+                        .arg(bestScore, 0, 'g', 10)
+                        .arg(bestWidthScale, 0, 'g', 10)
+                        .arg(bestStart)
+                        .arg(bestEnd)
+                        .arg(peakX, 0, 'g', 10)
+                        .arg(center, 0, 'g', 10)
+                        .arg(runnerUp, 0, 'g', 10).arg(bestThreshold, 0, 'g', 10)
+                        .arg(result.templateWindowCount).arg(result.templateComparisonCount));
+    return result;
+  }
+
+  static double templateWindowSimilarity(
+      const std::vector<double>& residual, int start, int end,
+      const QVector<float>& expected,
+      const std::array<double, kTemplateSamples>& centeredTemplate,
+      double templateEnergy, int& compared) {
+    std::array<double, kTemplateSamples> observed;
+    double observedSum = 0.0;
+    double expectedSum = 0.0;
+    double maximum = 0.0;
+    compared = 0;
+    for (int sample = 0; sample < kTemplateSamples; ++sample) {
+      const double position = start +
+          double(end - start) * sample / double(kTemplateSamples - 1);
+      const int left = std::max(start, static_cast<int>(std::floor(position)));
+      const int right = std::min(end, static_cast<int>(std::ceil(position)));
+      double value = residual[left];
+      if (!std::isfinite(value) && right != left) value = residual[right];
+      if (std::isfinite(value) && right != left && std::isfinite(residual[right]))
+        value += (residual[right] - value) * (position - left);
+      if (std::isfinite(value)) {
+        value = std::max(0.0, value);
+        maximum = std::max(maximum, value);
+        observed[sample] = static_cast<float>(value);
+      } else {
+        observed[sample] = value;
+      }
+      if (!std::isfinite(observed[sample])) continue;
+      expectedSum += expected[sample];
+      ++compared;
+    }
+    if (compared < int(std::ceil(kTemplateSamples * 0.80)) || maximum <= 1e-9)
+      return 0.0;
+    for (double& value : observed) {
+      if (!std::isfinite(value)) continue;
+      value = static_cast<float>(value / maximum);
+      observedSum += value;
+    }
+    const double observedMean = observedSum / compared;
+    const double expectedMean = expectedSum / compared;
+    double dot = 0.0;
+    double observedEnergy = 0.0;
+    double expectedEnergy = compared == kTemplateSamples ? templateEnergy : 0.0;
+    for (int sample = 0; sample < kTemplateSamples; ++sample) {
+      if (!std::isfinite(observed[sample])) continue;
+      const double o = observed[sample] - observedMean;
+      const double e = compared == kTemplateSamples ? centeredTemplate[sample]
+                                                     : expected[sample] - expectedMean;
+      dot += e * o;
+      observedEnergy += o * o;
+      if (compared != kTemplateSamples) expectedEnergy += e * e;
+    }
+    if (expectedEnergy <= 1e-12 || observedEnergy <= 1e-12)
+      return 0.0;
+    const double correlation = dot / std::sqrt(expectedEnergy * observedEnergy);
+    return std::clamp(0.5 * (correlation + 1.0), 0.0, 1.0) *
+           (0.6 + 0.4 * double(compared) / kTemplateSamples);
+  }
 
   static void appendTraceSeries(ProfileWeldDetectionTrace* trace,
                                 const QString& event,
@@ -773,20 +1171,37 @@ class ProfileWeldDetector final {
   static double templateSimilarity(const QVector<float>& expected,
                                    const QVector<float>& observed) {
     if (expected.size() != observed.size() || expected.isEmpty()) return 0.0;
-    double squaredError = 0.0;
+    double expectedMean = 0.0;
+    double observedMean = 0.0;
     int compared = 0;
     for (int index = 0; index < expected.size(); ++index) {
       if (!std::isfinite(observed[index])) continue;
-      const double difference = expected[index] - observed[index];
-      squaredError += difference * difference;
+      expectedMean += expected[index];
+      observedMean += observed[index];
       ++compared;
     }
     if (compared == 0) return 0.0;
+    expectedMean /= compared;
+    observedMean /= compared;
+    double dot = 0.0;
+    double expectedNorm = 0.0;
+    double observedNorm = 0.0;
+    for (int index = 0; index < expected.size(); ++index) {
+      if (!std::isfinite(observed[index])) continue;
+      const double e = expected[index] - expectedMean;
+      const double o = observed[index] - observedMean;
+      dot += e * o;
+      expectedNorm += e * e;
+      observedNorm += o * o;
+    }
+    if (expectedNorm <= 1e-12 || observedNorm <= 1e-12) return 0.0;
     // Sparse candidates get a mild coverage penalty so a mostly-missing
-    // shape cannot outrank a well-supported one, but a few dropouts no
-    // longer zero the whole comparison.
+    // shape cannot outrank a well-supported one. Mean-centering makes the
+    // score a normalized cross-correlation, which is less sensitive to
+    // height/offset drift than raw pointwise MSE.
     const double coverage = double(compared) / expected.size();
-    return std::max(0.0, 1.0 - std::sqrt(squaredError / compared)) *
+    const double correlation = dot / std::sqrt(expectedNorm * observedNorm);
+    return std::clamp(0.5 * (correlation + 1.0), 0.0, 1.0) *
            (0.6 + 0.4 * coverage);
   }
 };

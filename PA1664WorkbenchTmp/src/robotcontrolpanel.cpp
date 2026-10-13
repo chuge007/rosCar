@@ -190,6 +190,24 @@ RobotControlPanel::RobotControlPanel(crawling::ClampMotorController *clampContro
 
     m_correctionThread = new QThread(this);
     m_correctionController = new crawling::LaserCorrectionController;
+    if (m_profileDetectionMode) {
+        m_correctionController->setProfileDetectionMode(
+            static_cast<crawling::ProfileDetectionMode>(
+                m_profileDetectionMode->currentData().toInt()));
+    }
+    m_correctionController->setProfileTuning(m_profileWeldTuning);
+    m_correctionController->setProfileTemplates(m_profileTemplates);
+    if (m_laserInputTimeout) {
+        m_correctionController->setProfileInputTimeout(m_laserInputTimeout->value());
+        m_laserView->setInputTimeoutMs(m_laserInputTimeout->value());
+        connect(m_laserInputTimeout, QOverload<int>::of(&QSpinBox::valueChanged),
+                m_correctionController,
+                &crawling::LaserCorrectionController::setProfileInputTimeout,
+                Qt::QueuedConnection);
+    }
+    connect(m_correctionController,
+            &crawling::LaserCorrectionController::profileInputTimeoutChanged,
+            m_laserView, &RobotProfileView::setInputTimeoutMs, Qt::QueuedConnection);
     m_correctionController->moveToThread(m_correctionThread);
     connect(m_correctionThread, &QThread::finished, m_correctionController,
             &QObject::deleteLater);
@@ -203,6 +221,11 @@ RobotControlPanel::RobotControlPanel(crawling::ClampMotorController *clampContro
             m_profileDetectionLogWriter,
             &crawling::ProfileDetectionLogWriter::appendBatch,
             Qt::QueuedConnection);
+    connect(m_correctionController,
+            &crawling::LaserCorrectionController::profileDiagnosticBatch,
+            m_profileDetectionLogWriter,
+            &crawling::ProfileDetectionLogWriter::appendDiagnosticBatch,
+            Qt::QueuedConnection);
     m_profileDetectionLogThread->start();
     QMetaObject::invokeMethod(
         m_correctionController, "setProfileDetectionTraceEnabled",
@@ -210,8 +233,8 @@ RobotControlPanel::RobotControlPanel(crawling::ClampMotorController *clampContro
     connect(m_sensorController,
             &crawling::RobotSensorController::correctionProfileFrameReady,
             m_correctionController,
-            &crawling::LaserCorrectionController::processProfileFrame,
-            Qt::QueuedConnection);
+            &crawling::LaserCorrectionController::submitProfileFrame,
+            Qt::DirectConnection);
     connect(m_controller, &crawling::SynchronizedDriveController::telemetryChanged,
             m_correctionController,
             &crawling::LaserCorrectionController::processDriveTelemetry,
@@ -333,13 +356,22 @@ RobotControlPanel::~RobotControlPanel()
 {
     if (m_commandTimer)
         m_commandTimer->stop();
-    finishProfileDetectionLogSession(QStringLiteral("application_shutdown"));
+    // Drain the producer before deleting the receiver of the direct mailbox call.
+    if (m_sensorController && m_correctionController)
+        disconnect(m_sensorController,
+                   &crawling::RobotSensorController::correctionProfileFrameReady,
+                   m_correctionController,
+                   &crawling::LaserCorrectionController::submitProfileFrame);
     if (m_correctionController) {
         QMetaObject::invokeMethod(m_correctionController, "setEnabled",
                                   Qt::BlockingQueuedConnection, Q_ARG(bool, false));
         QMetaObject::invokeMethod(m_correctionController, "shutdown",
                                   Qt::BlockingQueuedConnection);
     }
+    if (m_sensorController)
+        QMetaObject::invokeMethod(m_sensorController, "shutdown",
+                                  Qt::BlockingQueuedConnection);
+    finishProfileDetectionLogSession(QStringLiteral("application_shutdown"));
     if (m_trajectoryWriter)
         QMetaObject::invokeMethod(m_trajectoryWriter, "shutdown",
                                   Qt::BlockingQueuedConnection);
@@ -355,9 +387,6 @@ RobotControlPanel::~RobotControlPanel()
         m_profileDetectionLogThread->quit();
         m_profileDetectionLogThread->wait();
     }
-    if (m_sensorController)
-        QMetaObject::invokeMethod(m_sensorController, "shutdown",
-                                  Qt::BlockingQueuedConnection);
     if (m_usbCameraController)
         QMetaObject::invokeMethod(m_usbCameraController, "shutdown",
                                   Qt::BlockingQueuedConnection);
@@ -635,6 +664,37 @@ void RobotControlPanel::buildUi()
         QStringLiteral("勾选后，每次点击开始都会覆盖旧日志，只记录本次自动纠偏"
                        "从开始到结束的轮廓点、基线、阈值、候选区域和淘汰原因。"));
     profileModeRow->addWidget(m_profileDetectionLogCheck);
+    profileModeRow->addWidget(new QLabel(QStringLiteral("定位算法"), profileGroup));
+    m_profileDetectionMode = new QComboBox(profileGroup);
+    m_profileDetectionMode->addItem(QStringLiteral("基线+肩部（默认）"),
+                                    static_cast<int>(crawling::ProfileDetectionMode::BaselineShoulder));
+    m_profileDetectionMode->addItem(QStringLiteral("纯模板匹配"),
+                                    static_cast<int>(crawling::ProfileDetectionMode::TemplateOnly));
+    m_profileDetectionMode->addItem(QStringLiteral("通用检测+模板"),
+                                    static_cast<int>(crawling::ProfileDetectionMode::Hybrid));
+    m_profileDetectionMode->setToolTip(
+        QStringLiteral("选择 SDK X/Z 焊道定位方式；纯模板和混合模式需要至少一个已启用模板。"));
+    profileModeRow->addWidget(m_profileDetectionMode);
+    connect(m_profileDetectionMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) {
+                if (!m_profileDetectionMode) return;
+                const auto mode = static_cast<crawling::ProfileDetectionMode>(
+                    m_profileDetectionMode->currentData().toInt());
+                QSettings persistent(crawling::DriveSettings::persistentFilePath(),
+                                     QSettings::IniFormat);
+                persistent.setValue(QStringLiteral("laserProfileTuning/profileDetectionMode"),
+                                    static_cast<int>(mode));
+                persistent.sync();
+                if (m_correctionController) {
+                    QMetaObject::invokeMethod(
+                        m_correctionController,
+                        [controller = m_correctionController, mode] {
+                            controller->setProfileDetectionMode(mode);
+                        }, Qt::QueuedConnection);
+                }
+                appendLog(QStringLiteral("实时焊道定位算法已切换：%1")
+                              .arg(m_profileDetectionMode->currentText()));
+            });
     connect(m_profileDetectionLogCheck, &QCheckBox::toggled,
             this, [this](bool enabled) {
                 QSettings persistent(crawling::DriveSettings::persistentFilePath(),
@@ -1119,15 +1179,19 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     m_commandTimeout = new QSpinBox(safety);
     m_feedbackTimeout = new QSpinBox(safety);
     m_armingTimeout = new QSpinBox(safety);
-    for (QSpinBox *box : {m_commandTimeout, m_feedbackTimeout, m_armingTimeout}) {
+    m_laserInputTimeout = new QSpinBox(safety);
+    for (QSpinBox *box : {m_commandTimeout, m_feedbackTimeout, m_armingTimeout,
+                          m_laserInputTimeout}) {
         box->setRange(100, 10000);
         box->setSuffix(QStringLiteral(" ms"));
     }
     m_feedbackTimeout->setMinimum(crawling::DriveSettings::kMinimumFeedbackTimeoutMs);
     m_armingTimeout->setMinimum(crawling::DriveSettings::kMinimumFeedbackTimeoutMs);
+    m_laserInputTimeout->setRange(50, 5000);
     safetyForm->addRow(QStringLiteral("命令超时"), m_commandTimeout);
     safetyForm->addRow(QStringLiteral("反馈超时"), m_feedbackTimeout);
     safetyForm->addRow(QStringLiteral("使能等待超时"), m_armingTimeout);
+    safetyForm->addRow(QStringLiteral("激光轮廓输入超时"), m_laserInputTimeout);
     auto *save = actionButton(QStringLiteral("保存并应用全部参数"), "primary");
     safetyForm->addRow(QString(), save);
     m_laserConfigState->setWordWrap(true);
@@ -1171,7 +1235,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
         connect(box, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, markDirty);
     for (QSpinBox *box : {m_leftId, m_rightId, m_commandTimeout, m_feedbackTimeout,
                           m_armingTimeout, m_clampNodeId, m_clampXId, m_clampYId,
-                          m_clampZId, m_cameraFps})
+                          m_clampZId, m_cameraFps, m_laserInputTimeout})
         connect(box, QOverload<int>::of(&QSpinBox::valueChanged), this, markDirty);
     for (QComboBox *box : {m_wheelCommunicationMode, m_wheelCanPort,
                            m_wheelCanBaud, m_wheelCanBitrate, m_leftPort,
@@ -1207,11 +1271,20 @@ void RobotControlPanel::loadProfileWeldTuning()
 {
     QSettings persistent(crawling::DriveSettings::persistentFilePath(),
                          QSettings::IniFormat);
+    const auto loadDetectionMode = [this, &persistent] {
+        if (!m_profileDetectionMode) return;
+        QSignalBlocker blocker(m_profileDetectionMode);
+        const int mode = persistent.value(
+            QStringLiteral("laserProfileTuning/profileDetectionMode"),
+            static_cast<int>(crawling::ProfileDetectionMode::BaselineShoulder)).toInt();
+        const int row = m_profileDetectionMode->findData(mode);
+        m_profileDetectionMode->setCurrentIndex(row >= 0 ? row : 0);
+    };
     const int tuningVersion = persistent.value(
         QStringLiteral("laserProfileTuning/version"), 0).toInt();
     if (tuningVersion < 3) {
         m_profileWeldTuning = crawling::ProfileWeldTuning{};
-        persistent.setValue(QStringLiteral("laserProfileTuning/version"), 3);
+        persistent.setValue(QStringLiteral("laserProfileTuning/version"), 4);
         persistent.sync();
         if (m_profileDetectionLogCheck) {
             QSignalBlocker blocker(m_profileDetectionLogCheck);
@@ -1219,6 +1292,7 @@ void RobotControlPanel::loadProfileWeldTuning()
                 QStringLiteral("laserProfileTuning/profileDetectionTraceEnabled"),
                 false).toBool());
         }
+        loadDetectionMode();
         return;
     }
     m_profileWeldTuning.smoothingRadius = persistent.value(
@@ -1249,13 +1323,14 @@ void RobotControlPanel::loadProfileWeldTuning()
             QStringLiteral("laserProfileTuning/profileDetectionTraceEnabled"),
             false).toBool());
     }
+    loadDetectionMode();
 }
 
 void RobotControlPanel::persistProfileWeldTuning()
 {
     QSettings persistent(crawling::DriveSettings::persistentFilePath(),
                          QSettings::IniFormat);
-    persistent.setValue(QStringLiteral("laserProfileTuning/version"), 3);
+    persistent.setValue(QStringLiteral("laserProfileTuning/version"), 4);
     persistent.setValue(QStringLiteral("laserProfileTuning/smoothingRadius"),
                         m_profileWeldTuning.smoothingRadius);
     persistent.setValue(QStringLiteral("laserProfileTuning/baselineEdgeRatio"),
@@ -1278,6 +1353,9 @@ void RobotControlPanel::persistProfileWeldTuning()
                         m_profileWeldTuning.shoulderRatio);
     persistent.setValue(QStringLiteral("laserProfileTuning/maximumWidthRatio"),
                         m_profileWeldTuning.maximumWidthRatio);
+    if (m_profileDetectionMode)
+        persistent.setValue(QStringLiteral("laserProfileTuning/profileDetectionMode"),
+                            m_profileDetectionMode->currentData().toInt());
     persistent.sync();
 }
 
@@ -1308,12 +1386,26 @@ void RobotControlPanel::loadProfileTemplates()
             profileTemplate.normalizedShape.append(value.toFloat());
         profileTemplate.widthRatio = persistent.value(prefix + QStringLiteral("widthRatio"), 0.0)
                                          .toDouble();
+        profileTemplate.peakRatio = persistent.value(prefix + QStringLiteral("peakRatio"), -1.0)
+                                        .toDouble();
+        if (!std::isfinite(profileTemplate.peakRatio) ||
+            profileTemplate.peakRatio < 0.0 || profileTemplate.peakRatio > 1.0) {
+            int peak = 0;
+            for (int sample = 1; sample < profileTemplate.normalizedShape.size(); ++sample) {
+                if (profileTemplate.normalizedShape[sample] >
+                    profileTemplate.normalizedShape[peak])
+                    peak = sample;
+            }
+            profileTemplate.peakRatio = profileTemplate.normalizedShape.isEmpty()
+                ? 0.5 : double(peak) /
+                    std::max(1, static_cast<int>(profileTemplate.normalizedShape.size()) - 1);
+        }
         profileTemplate.minimumWidthScale = persistent.value(
             prefix + QStringLiteral("minimumWidthScale"), 0.20).toDouble();
         profileTemplate.maximumWidthScale = persistent.value(
             prefix + QStringLiteral("maximumWidthScale"), 5.00).toDouble();
         profileTemplate.minimumSimilarity = persistent.value(
-            prefix + QStringLiteral("minimumSimilarity"), 0.72).toDouble();
+            prefix + QStringLiteral("minimumSimilarity"), 0.85).toDouble();
         profileTemplate.enabled = persistent.value(prefix + QStringLiteral("enabled"), true)
                                       .toBool();
         if (profileTemplate.normalizedShape.size() >= 41 &&
@@ -1343,6 +1435,7 @@ void RobotControlPanel::persistProfileTemplates()
         persistent.setValue(prefix + QStringLiteral("name"), profileTemplate.name);
         persistent.setValue(prefix + QStringLiteral("shape"), encoded);
         persistent.setValue(prefix + QStringLiteral("widthRatio"), profileTemplate.widthRatio);
+        persistent.setValue(prefix + QStringLiteral("peakRatio"), profileTemplate.peakRatio);
         persistent.setValue(prefix + QStringLiteral("minimumWidthScale"),
                             profileTemplate.minimumWidthScale);
         persistent.setValue(prefix + QStringLiteral("maximumWidthScale"),
@@ -1410,7 +1503,7 @@ void RobotControlPanel::showProfileTemplateDialog()
         return control;
     };
     auto *name = new QLineEdit(dialog);
-    auto *minimumSimilarity = slider(30, 90, 50, 0, 1.0);
+    auto *minimumSimilarity = slider(30, 95, 85, 0, 1.0);
     auto *widthTolerance = slider(10, 90, 50, 0, 1.0);
     auto *smoothingRadius = slider(1, 5, m_profileWeldTuning.smoothingRadius, 0, 1.0);
     auto *sensitivity = slider(5, 60,
@@ -1432,7 +1525,7 @@ void RobotControlPanel::showProfileTemplateDialog()
         QStringLiteral("识别原理：先估计焊道两侧母材高度，再找高于基线的拱起段；"
                        "窄尖峰、宽斜坡、台阶或不连续拱起都会在某个尺度上显著，取最大的异常凸起区域。"
                        "缺测跨度只用于跨过没有数据的区域；轮廓回到母材后分开识别。"
-                       "模板只给相似候选少量加权，不会拒绝其它形状的拱起。"), dialog);
+                       "模板匹配模式会用归一化相关校验形状；混合模式由通用检测提供候选、模板做精定位。"), dialog);
     hint->setWordWrap(true);
     layout->addWidget(hint);
     form->addRow(QString(), enabled);
@@ -1487,7 +1580,7 @@ void RobotControlPanel::showProfileTemplateDialog()
         maximumWidthRatio->setValue(int(m_profileWeldTuning.maximumWidthRatio * 100));
         if (index < 0 || index >= m_profileTemplates.size()) {
             name->setText(QStringLiteral("焊道模板 %1").arg(m_profileTemplates.size() + 1));
-            minimumSimilarity->setValue(50);
+            minimumSimilarity->setValue(85);
             widthTolerance->setValue(50);
             enabled->setChecked(true);
             status->setText(QStringLiteral("尚未建立模板。先在主界面的 X/Z 轮廓上拖拽红框，再采集。"));
@@ -1501,7 +1594,7 @@ void RobotControlPanel::showProfileTemplateDialog()
                          profileTemplate.maximumWidthScale - 1.0) * 100), 10, 90));
         enabled->setChecked(profileTemplate.enabled);
         status->setText(QStringLiteral("特征点 %1；基准宽度占扫描 %2；启用=%3。"
-                                       "匹配候选会获得少量排序加权，不匹配不会被拒绝。")
+                                       "纯模板模式要求达到相似度阈值，混合模式用于候选确认。")
                             .arg(profileTemplate.normalizedShape.size())
                             .arg(profileTemplate.widthRatio, 0, 'f', 3)
                             .arg(profileTemplate.enabled ? QStringLiteral("是")
@@ -1516,7 +1609,7 @@ void RobotControlPanel::showProfileTemplateDialog()
             [minimumSimilarity, widthTolerance, smoothingRadius, sensitivity,
              minimumWidthRatio, candidateHoleRatio, maximumWidthRatio,
              enabled, applyTuning] {
-                minimumSimilarity->setValue(50);
+                minimumSimilarity->setValue(85);
                 widthTolerance->setValue(50);
                 smoothingRadius->setValue(2);
                 sensitivity->setValue(45);
@@ -1661,6 +1754,8 @@ void RobotControlPanel::saveSettings()
                         m_correctionKp->value());
     persistent.setValue(QStringLiteral("laserCorrection/kd"),
                         m_correctionKd->value());
+    persistent.setValue(QStringLiteral("laserCorrection/imageTimeoutMs"),
+                        m_laserInputTimeout->value());
     persistent.sync();
     appendLog(QStringLiteral("小车配置已保存"));
 }
@@ -1668,6 +1763,17 @@ void RobotControlPanel::saveSettings()
 void RobotControlPanel::restoreSettings()
 {
     loadSettings();
+    if (m_correctionController && m_profileDetectionMode) {
+        const auto mode = static_cast<crawling::ProfileDetectionMode>(
+            m_profileDetectionMode->currentData().toInt());
+        QMetaObject::invokeMethod(
+            m_correctionController,
+            [controller = m_correctionController, mode] {
+                controller->setProfileDetectionMode(mode);
+            }, Qt::QueuedConnection);
+    }
+    applyProfileWeldTuning();
+    applyProfileTemplates();
     appendLog(QStringLiteral("已恢复保存的小车配置"));
 }
 
@@ -1797,6 +1903,9 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
         persistent.value(QStringLiteral("laserCorrection/kp"), 3.0).toDouble());
     m_correctionKd->setValue(
         persistent.value(QStringLiteral("laserCorrection/kd"), 0.12).toDouble());
+    m_laserInputTimeout->setValue(
+        persistent.value(QStringLiteral("laserCorrection/imageTimeoutMs"), 180)
+            .toInt());
     setComboValue(
         m_clampCommunicationMode,
         settings.clampCommunicationMode ==
@@ -2385,10 +2494,15 @@ void RobotControlPanel::startAutoCorrection()
     settings.segmentLengthM = m_correctionSegment->value() / kMillimetersPerMeter;
     settings.proportionalGain = m_correctionKp->value();
     settings.derivativeGain = m_correctionKd->value();
+    settings.imageTimeoutMs = m_laserInputTimeout->value();
     settings.wheelRadiusM = m_settings.wheelRadiusM;
     settings.trackWidthM = m_settings.trackWidthM;
     settings.detector.profileTuning = m_profileWeldTuning;
     settings.detector.profileTemplates = m_profileTemplates;
+    settings.detector.profileDetectionMode = m_profileDetectionMode
+        ? static_cast<crawling::ProfileDetectionMode>(
+              m_profileDetectionMode->currentData().toInt())
+        : crawling::ProfileDetectionMode::BaselineShoulder;
     settings.minimumInnerWheelRatio = m_settings.minimumInnerWheelRatio;
 
     const double synchronizedLimit =
@@ -2410,7 +2524,7 @@ void RobotControlPanel::startAutoCorrection()
         QStringLiteral(
             "event=start_request state=%1 laser_connected=%2 ui_speed_mmps=%3 "
             "target_speed_mps=%4 segment_mm=%5 kp=%6 kd=%7 speed_limit_mps=%8 "
-            "drive_linear_accel_mps2=%9 executable=%10")
+             "drive_linear_accel_mps2=%9 image_timeout_ms=%10 profile_detection_mode=%11 executable=%12")
             .arg(crawling::driveStateText(m_state))
             .arg(m_laserConnected ? 1 : 0)
             .arg(m_correctionSpeed->value(), 0, 'f', 1)
@@ -2420,6 +2534,8 @@ void RobotControlPanel::startAutoCorrection()
             .arg(settings.derivativeGain, 0, 'f', 3)
             .arg(speedLimit, 0, 'f', 6)
             .arg(m_settings.maximumLinearAccelerationMps2, 0, 'f', 4)
+             .arg(settings.imageTimeoutMs)
+             .arg(static_cast<int>(settings.detector.profileDetectionMode))
             .arg(QCoreApplication::applicationFilePath()));
 
     m_forward = m_reverse = m_left = m_right = false;
@@ -2451,6 +2567,8 @@ void RobotControlPanel::startAutoCorrection()
                         settings.proportionalGain);
     persistent.setValue(QStringLiteral("laserCorrection/kd"),
                         settings.derivativeGain);
+    persistent.setValue(QStringLiteral("laserCorrection/imageTimeoutMs"),
+                        settings.imageTimeoutMs);
     persistent.sync();
     QMetaObject::invokeMethod(m_sensorController, "prepareCorrectionProfile",
                               Qt::QueuedConnection);

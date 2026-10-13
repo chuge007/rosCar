@@ -8,6 +8,7 @@
 #include <QElapsedTimer>
 #include <QImage>
 #include <QObject>
+#include <QMutex>
 #include <QTimer>
 #include <QVector>
 #include <QVector3D>
@@ -129,12 +130,17 @@ class LaserCorrectionController final : public QObject {
 
  public:
   explicit LaserCorrectionController(QObject* parent = nullptr);
+  // Thread-safe mailbox entry; the sensor thread only replaces pending input.
+  void submitProfileFrame(const QVector<QVector3D>& points, quint32 sourceFrameNumber,
+                          qint64 receivedAtEpochMs);
 
  public slots:
   void setSettings(const crawling::LaserCorrectionSettings& settings);
   void setProfileTemplates(
       const QVector<crawling::ProfileWeldTemplate>& templates);
   void setProfileTuning(const crawling::ProfileWeldTuning& tuning);
+  void setProfileDetectionMode(crawling::ProfileDetectionMode mode);
+  void setProfileInputTimeout(int timeoutMs);
   void setProfileDetectionTraceEnabled(bool enabled);
   void setEnabled(bool enabled);
   void shutdown();
@@ -158,6 +164,8 @@ class LaserCorrectionController final : public QObject {
   // kept out of the operator console.
   void diagnosticLogMessage(const QString& message);
   void profileDetectionTraceBatch(const QStringList& messages);
+  void profileDiagnosticBatch(const QStringList& messages);
+  void profileInputTimeoutChanged(int timeoutMs);
   void rawFrameReady(quint64 sessionId, quint64 frameSequence,
                       const QImage& image, const QString& metadataJson);
   void cameraObservationReady(const QImage& image,
@@ -176,6 +184,12 @@ class LaserCorrectionController final : public QObject {
   void watchdogTick();
 
  private:
+  void consumeLatestProfileFrame();
+  void recordProfileDiagnostic(quint32 frame, qint64 receivedAtEpochMs,
+                               qint64 entryAgeMs, const LaserGapDetection* detection,
+                               const QString& reason, qint64 processingMs,
+                               ProfileWeldDetectionTrace& trace);
+  void flushProfileDiagnostics(const QString& reason);
   void processObservation(const QImage& image,
                           const QVector<QVector3D>* profile,
                           ProfileWeldDetectionTrace* profileTrace = nullptr);
@@ -278,6 +292,27 @@ class LaserCorrectionController final : public QObject {
   qint64 lastWatchdogTickMs_ = -1;
   qint64 lastGuidanceFitMs_ = -1;
   bool profileDetectionTraceEnabled_ = false;
+  QMutex profileInputMutex_;
+  QVector<QVector3D> pendingProfilePoints_;
+  quint32 pendingProfileFrame_ = 0;
+  qint64 pendingProfileReceivedMs_ = 0;
+  bool profileInputScheduled_ = false;
+  bool profileInputClosed_ = false;
+  quint64 pendingProfileReplaced_ = 0;
+  quint64 lastProfileReplaced_ = 0;
+  quint64 totalProfileReplaced_ = 0;
+  LaserGapDetection lastProfileDetection_;
+  qint64 lastProfileResultEpochMs_ = 0;
+  bool lastProfileMeasurementAccepted_ = false;
+  QString lastProfileControlDecision_;
+  QStringList profileSummaryRing_;
+  QString lastProfileSummarySignature_;
+  qint64 lastProfileSummaryLogMs_ = -1;
+  qint64 lastProfileDetailCaptureMs_ = -1;
+  qint64 profileTraceNextFaultFlushMs_ = -1;
+  QVector<QStringList> profileTraceRing_;
+  int profileTraceBatchCounter_ = 0;
+  qint64 profileTraceCaptureUntilMs_ = -1;
 
   bool haveTelemetry_ = false;
   double yawRad_ = 0.0;
@@ -372,6 +407,9 @@ class LaserCorrectionController final : public QObject {
   bool initialGapConfirmationContour_ = false;
   double pendingInitialGapAbsoluteCenterRatio_ = 0.5;
   double pendingInitialGapWidthRatio_ = 0.0;
+  int pendingWidthJumpConfirmationCount_ = 0;
+  double pendingWidthJumpWidthRatio_ = 0.0;
+  double pendingWidthJumpCenterRatio_ = 0.5;
   bool boundaryProtectionLogged_ = false;
   bool boundaryContainmentActive_ = false;
   // Independent raw-pixel safety observation. Reacquisition/segment changes
