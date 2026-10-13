@@ -764,6 +764,10 @@ class ProfileWeldDetector final {
     QString diagnosticName;
     double diagnosticScale = 0.0;
     double diagnosticThreshold = 0.0;
+    int diagnosticStart = -1;
+    int diagnosticEnd = -1;
+    int diagnosticCompared = 0;
+    double diagnosticPeakRatio = 0.5;
     const bool hasPrior = config.expectedAbsoluteCenterRatio >= 0.0;
     const double centerTolerance = std::max(
         0.08, config.maximumAbsoluteCenterJumpRatio * 1.5);
@@ -872,6 +876,10 @@ class ProfileWeldDetector final {
             diagnosticName = profileTemplate.name;
             diagnosticScale = scale;
             diagnosticThreshold = profileTemplate.minimumSimilarity;
+            diagnosticStart = start;
+            diagnosticEnd = end;
+            diagnosticCompared = compared;
+            diagnosticPeakRatio = candidatePeakRatio;
           }
           if (similarity < profileTemplate.minimumSimilarity) continue;
           if (similarity <= bestScore) {
@@ -887,6 +895,31 @@ class ProfileWeldDetector final {
           bestPeakRatio = candidatePeakRatio;
           bestThreshold = profileTemplate.minimumSimilarity;
         }
+      }
+    }
+    // A tracked weld can lose a small amount of shape correlation for one
+    // scan when the raised stripe is clipped or its shoulders are distorted.
+    // Recover only a high-coverage candidate that remains near the previous
+    // center; an initial search still requires the configured threshold.
+    if (bestStart < 0 && hasPrior && diagnosticStart >= 0 &&
+        diagnosticCompared >= int(std::ceil(kTemplateSamples * 0.90))) {
+      const double allowedDeficit = std::clamp(
+          0.015 + (1.0 - diagnosticThreshold) * 0.03, 0.012, 0.020);
+      const double candidatePeakX =
+          double(points[diagnosticStart].x()) +
+          (double(points[diagnosticEnd].x()) - double(points[diagnosticStart].x())) *
+              diagnosticPeakRatio;
+      const double candidateCenter = xRatio(candidatePeakX);
+      if (diagnosticScore >= diagnosticThreshold - allowedDeficit &&
+          std::abs(candidateCenter - config.expectedAbsoluteCenterRatio) <=
+              std::min(centerTolerance, 0.06)) {
+        bestScore = diagnosticScore;
+        bestName = diagnosticName;
+        bestWidthScale = diagnosticScale;
+        bestStart = diagnosticStart;
+        bestEnd = diagnosticEnd;
+        bestPeakRatio = diagnosticPeakRatio;
+        bestThreshold = diagnosticThreshold - allowedDeficit;
       }
     }
     result.templateSimilarity = bestStart >= 0 ? bestScore : std::max(0.0, diagnosticScore);
