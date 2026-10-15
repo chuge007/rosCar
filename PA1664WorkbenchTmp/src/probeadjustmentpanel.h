@@ -2,6 +2,7 @@
 
 #include "drive_settings.h"
 
+#include <QPointer>
 #include <QWidget>
 
 class QComboBox;
@@ -10,6 +11,8 @@ class QSpinBox;
 
 namespace crawling {
 class ClampMotorController;
+class ClampMotorSettingsWidget;
+class ClampMotorControlWidget;
 }
 
 class ProbeAdjustmentPanel final : public QWidget
@@ -25,17 +28,11 @@ private:
     void refreshPorts();
     void loadSettings();
     void saveSettings();
-    void applySettings();
+    bool applySettings();
 
-    crawling::ClampMotorController *m_controller = nullptr;
+    QPointer<crawling::ClampMotorController> m_controller;
     crawling::DriveSettings m_settings;
-    QComboBox *m_communicationMode = nullptr;
-    QComboBox *m_port = nullptr;
-    QComboBox *m_baud = nullptr;
-    QComboBox *m_bitrate = nullptr;
-    QSpinBox *m_nodeId = nullptr;
-    QSpinBox *m_xId = nullptr;
-    QSpinBox *m_yId = nullptr;
-    QSpinBox *m_zId = nullptr;
+    crawling::ClampMotorSettingsWidget *m_motorSettings = nullptr;
+    crawling::ClampMotorControlWidget *m_motorControls = nullptr;
     QLabel *m_status = nullptr;
 };

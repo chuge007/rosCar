@@ -4,6 +4,7 @@
 #include <QSettings>
 #include <QCoreApplication>
 #include <QDir>
+#include <QVector>
 
 #include <cmath>
 #include <algorithm>
@@ -68,6 +69,103 @@ bool isLegacyDefaultMotionProfile(const DriveSettings& value) {
 
 }  // namespace
 
+bool ClampMotorSettings::operator==(const ClampMotorSettings& other) const {
+  return communicationMode == other.communicationMode &&
+      serialPort.trimmed().compare(other.serialPort.trimmed(), Qt::CaseInsensitive) == 0 &&
+      serialBaudRate == other.serialBaudRate && canBitrate == other.canBitrate &&
+      motorId == other.motorId && sign == other.sign &&
+      zdtFirmware == other.zdtFirmware &&
+      zdtMaximumSpeedRpm == other.zdtMaximumSpeedRpm &&
+      zdtAcceleration == other.zdtAcceleration;
+}
+
+QString clampModeKey(ClampCommunicationMode mode) {
+  switch (mode) {
+    case ClampCommunicationMode::TtCanopen: return QStringLiteral("tt_canopen");
+    case ClampCommunicationMode::MwdRs485: return QStringLiteral("mwd_rs485");
+    case ClampCommunicationMode::MwdCan: return QStringLiteral("mwd_can");
+    case ClampCommunicationMode::ZdtCan: return QStringLiteral("zdt_can");
+  }
+  return {};
+}
+
+ClampCommunicationMode clampModeFromKey(const QString& key) {
+  const QString mode = key.trimmed().toLower();
+  if (mode == QStringLiteral("mwd_rs485") || mode == QStringLiteral("rs485"))
+    return ClampCommunicationMode::MwdRs485;
+  if (mode == QStringLiteral("mwd_can")) return ClampCommunicationMode::MwdCan;
+  if (mode == QStringLiteral("zdt_can")) return ClampCommunicationMode::ZdtCan;
+  return ClampCommunicationMode::TtCanopen;
+}
+
+QString clampModeName(ClampCommunicationMode mode) {
+  switch (mode) {
+    case ClampCommunicationMode::TtCanopen: return QStringLiteral("TT CANopen");
+    case ClampCommunicationMode::MwdRs485: return QStringLiteral("MWD RS485");
+    case ClampCommunicationMode::MwdCan: return QStringLiteral("MWD CAN");
+    case ClampCommunicationMode::ZdtCan: return QStringLiteral("ZDT CAN");
+  }
+  return {};
+}
+
+QString DriveSettings::clampValidationError() const {
+  QVector<ClampMotorSettings> configured;
+  const char* names[] = {"X", "Y", "Z"};
+  for (int axis = 0; axis < 3; ++axis) {
+    if (clampMotors[axis].size() > kMaximumClampMotorsPerAxis)
+      return QStringLiteral("夹子 %1 轴最多配置 %2 台电机。")
+          .arg(QString::fromLatin1(names[axis])).arg(kMaximumClampMotorsPerAxis);
+    for (int index = 0; index < clampMotors[axis].size(); ++index) {
+      const auto& motor = clampMotors[axis][index];
+      const QString label = QStringLiteral("夹子 %1%2：")
+          .arg(QString::fromLatin1(names[axis])).arg(index + 1);
+      const bool rs485 = motor.communicationMode == ClampCommunicationMode::MwdRs485;
+      const bool zdt = motor.communicationMode == ClampCommunicationMode::ZdtCan;
+      const int maximumId = zdt ? 255 :
+          motor.communicationMode == ClampCommunicationMode::TtCanopen ? 127 : 32;
+      if (motor.motorId < 1 || motor.motorId > maximumId)
+        return label + QStringLiteral("电机 ID 必须为 1..%1。").arg(maximumId);
+      if (motor.sign != 1 && motor.sign != -1)
+        return label + QStringLiteral("方向必须为 +1 或 -1。");
+      if (motor.serialBaudRate <= 0 ||
+          (rs485 && !isSupportedClampMwdRs485BaudRate(motor.serialBaudRate)))
+        return label + QStringLiteral("串口波特率无效。");
+      const bool validCanRate =
+          motor.communicationMode == ClampCommunicationMode::TtCanopen
+              ? isSupportedCanBitrate(motor.canBitrate)
+              : isSupportedMwdCanBitrate(motor.canBitrate) ||
+                  (zdt && (motor.canBitrate == 10000 || motor.canBitrate == 20000 ||
+                           motor.canBitrate == 50000));
+      if (!rs485 && !validCanRate)
+        return label + QStringLiteral("所选 CAN 波特率不受支持。");
+      if (zdt && (motor.zdtMaximumSpeedRpm < 1 || motor.zdtMaximumSpeedRpm > 3000 ||
+                  motor.zdtAcceleration < 0 ||
+                  motor.zdtAcceleration > (motor.zdtFirmware == ZdtFirmware::X ? 65535 : 255)))
+        return label + QStringLiteral("ZDT 速度或加速度超出所选固件范围。");
+      if (motor.serialPort.trimmed().isEmpty())
+        continue;
+      for (const auto& other : configured) {
+        if (motor.serialPort.trimmed().compare(other.serialPort.trimmed(), Qt::CaseInsensitive) != 0)
+          continue;
+        const bool otherRs485 = other.communicationMode == ClampCommunicationMode::MwdRs485;
+        if (rs485 != otherRs485 || motor.serialBaudRate != other.serialBaudRate ||
+            (!rs485 && motor.canBitrate != other.canBitrate))
+          return label + QStringLiteral("共用串口的电机必须使用相同总线类型及波特率。");
+        // TT and MWD use standard identifiers with potentially overlapping ranges.
+        if (!rs485 && !zdt && other.communicationMode != ClampCommunicationMode::ZdtCan &&
+            motor.communicationMode != other.communicationMode)
+          return label + QStringLiteral("TT CANopen 和 MWD CAN 请使用不同适配器端口。");
+        const bool sameAddressSpace = zdt ==
+            (other.communicationMode == ClampCommunicationMode::ZdtCan);
+        if (sameAddressSpace && motor.motorId == other.motorId)
+          return label + QStringLiteral("同一总线上存在重复的电机 ID。");
+      }
+      configured.append(motor);
+    }
+  }
+  return {};
+}
+
 QString DriveSettings::persistentFilePath() {
   const QDir base(QCoreApplication::applicationDirPath());
   base.mkpath(CRAWLING_TEXT("config"));
@@ -115,44 +213,9 @@ QString DriveSettings::validationError() const {
       (rightMotorSign != -1 && rightMotorSign != 1)) {
     return CRAWLING_TEXT("\xE6\xAF\x8F""\xE4\xB8\xAA""\xE7\x94\xB5""\xE6\x9C\xBA""\xE6\x96\xB9""\xE5\x90\x91""\xE5\xBF\x85""\xE9\xA1\xBB""\xE4\xB8\xBA"" +1 \xE6\x88\x96"" -1\xE3\x80\x82""");
   }
-  if (!clampSerialPort.trimmed().isEmpty()) {
-    if (clampCommunicationMode == ClampCommunicationMode::TtCanopen) {
-      if (clampNodeId < 0 || clampNodeId > 127) {
-        return CRAWLING_TEXT("\xE5\xA4\xB9""\xE5\xAD\x90"" CANopen \xE8\x8A\x82""\xE7\x82\xB9"" ID \xE5\xBF\x85""\xE9\xA1\xBB""\xE4\xB8\xBA"" 0 \xE5\x88\xB0"" 127\xEF\xBC\x9B""0 \xE8\xA1\xA8""\xE7\xA4\xBA""\xE6\x9C\xAA""\xE6\xA3\x80""\xE6\xB5\x8B""\xE5\x88\xB0""\xE5\xA4\xB9""\xE5\xAD\x90""\xE3\x80\x82""");
-      }
-      if (!isSupportedCanBitrate(clampCanBitrate)) {
-        return QStringLiteral(
-            "Clamp CAN bitrate must be 125000, 250000, 500000, 800000, or 1000000.");
-      }
-      for (const int motorId : {clampXMotorId, clampYMotorId, clampZMotorId}) {
-        if (motorId < 1 || motorId > 127) {
-          return QStringLiteral("Clamp CAN motor IDs must be in the range 1..127.");
-        }
-      }
-    } else if (clampCommunicationMode == ClampCommunicationMode::MwdRs485) {
-      if (!isSupportedClampMwdRs485BaudRate(clampSerialBaudRate)) {
-        return QStringLiteral(
-            "Clamp MWD RS485 baud rate must be 9600, 19200, 38400, 57600, "
-            "115200, 230400, 460800, 1000000, or 2000000.");
-      }
-      for (const int motorId : {clampXMotorId, clampYMotorId, clampZMotorId}) {
-        if (motorId < 1 || motorId > 32) {
-          return QStringLiteral("Clamp MWD RS485 motor IDs must be in the range 1..32.");
-        }
-      }
-    } else if (clampCommunicationMode == ClampCommunicationMode::MwdCan) {
-      if (!isSupportedMwdCanBitrate(clampCanBitrate)) {
-        return QStringLiteral(
-            "Clamp MWD CAN bitrate must be 100000, 125000, 250000, 500000, "
-            "800000, or 1000000.");
-      }
-      for (const int motorId : {clampXMotorId, clampYMotorId, clampZMotorId}) {
-        if (motorId < 1 || motorId > 32) {
-          return QStringLiteral("Clamp MWD CAN motor IDs must be in the range 1..32.");
-        }
-      }
-    }
-  }
+  const QString clampError = clampValidationError();
+  if (!clampError.isEmpty())
+    return clampError;
   if (!positiveFinite(wheelRadiusM) || !positiveFinite(trackWidthM) ||
       !positiveFinite(motorOutputToWheelRatio)) {
     return CRAWLING_TEXT("\xE8\xBD\xAE""\xE5\x8D\x8A""\xE5\xBE\x84""\xE3\x80\x81""\xE8\xBD\xAE""\xE8\xB7\x9D""\xE5\x92\x8C""\xE4\xBC\xA0""\xE5\x8A\xA8""\xE6\xAF\x94""\xE5\xBF\x85""\xE9\xA1\xBB""\xE4\xB8\xBA""\xE6\xAD\xA3""\xE6\x95\xB0""\xE3\x80\x82""");
@@ -200,23 +263,28 @@ void DriveSettings::save(QSettings& settings) const {
   settings.setValue(CRAWLING_TEXT("autoConnectOnStartup"),
                     autoConnectOnStartup);
   settings.setValue(CRAWLING_TEXT("manualJogPercent"), manualJogPercent);
-  settings.setValue(
-      CRAWLING_TEXT("clampCommunicationMode"),
-      clampCommunicationMode == ClampCommunicationMode::TtCanopen
-          ? CRAWLING_TEXT("tt_canopen")
-          : clampCommunicationMode == ClampCommunicationMode::MwdRs485
-                ? CRAWLING_TEXT("mwd_rs485")
-                : CRAWLING_TEXT("mwd_can"));
-  settings.setValue(CRAWLING_TEXT("clampSerialPort"), clampSerialPort);
-  settings.setValue(CRAWLING_TEXT("clampSerialBaudRate"), clampSerialBaudRate);
-  settings.setValue(CRAWLING_TEXT("clampCanBitrate"), clampCanBitrate);
-  settings.setValue(CRAWLING_TEXT("clampNodeId"), clampNodeId);
-  settings.setValue(CRAWLING_TEXT("clampXMotorId"), clampXMotorId);
-  settings.setValue(CRAWLING_TEXT("clampYMotorId"), clampYMotorId);
-  settings.setValue(CRAWLING_TEXT("clampZMotorId"), clampZMotorId);
-  settings.setValue(CRAWLING_TEXT("clampXMotorSign"), clampXMotorSign);
-  settings.setValue(CRAWLING_TEXT("clampYMotorSign"), clampYMotorSign);
-  settings.setValue(CRAWLING_TEXT("clampZMotorSign"), clampZMotorSign);
+  settings.setValue(QStringLiteral("clampAxesConfigured"), true);
+  const char* axisKeys[] = {"clampXMotors", "clampYMotors", "clampZMotors"};
+  for (int axis = 0; axis < 3; ++axis) {
+    settings.remove(QString::fromLatin1(axisKeys[axis]));
+    settings.beginWriteArray(QString::fromLatin1(axisKeys[axis]),
+                             clampMotors[axis].size());
+    for (int index = 0; index < clampMotors[axis].size(); ++index) {
+      settings.setArrayIndex(index);
+      const auto& motor = clampMotors[axis][index];
+      settings.setValue(QStringLiteral("mode"), clampModeKey(motor.communicationMode));
+      settings.setValue(QStringLiteral("serialPort"), motor.serialPort);
+      settings.setValue(QStringLiteral("serialBaudRate"), motor.serialBaudRate);
+      settings.setValue(QStringLiteral("canBitrate"), motor.canBitrate);
+      settings.setValue(QStringLiteral("motorId"), motor.motorId);
+      settings.setValue(QStringLiteral("sign"), motor.sign);
+      settings.setValue(QStringLiteral("zdtFirmware"),
+                        motor.zdtFirmware == ZdtFirmware::X ? "x" : "emm");
+      settings.setValue(QStringLiteral("zdtMaximumSpeedRpm"), motor.zdtMaximumSpeedRpm);
+      settings.setValue(QStringLiteral("zdtAcceleration"), motor.zdtAcceleration);
+    }
+    settings.endArray();
+  }
   settings.setValue(
       CRAWLING_TEXT("wheelCommunicationMode"),
       wheelCommunicationMode == WheelCommunicationMode::Can
@@ -288,13 +356,7 @@ DriveSettings DriveSettings::load(QSettings& settings) {
   const QString clampMode = settings.value(
       CRAWLING_TEXT("clampCommunicationMode"), CRAWLING_TEXT("can"))
       .toString().trimmed().toLower();
-  value.clampCommunicationMode =
-      clampMode == CRAWLING_TEXT("mwd_rs485") ||
-              clampMode == CRAWLING_TEXT("rs485")
-          ? ClampCommunicationMode::MwdRs485
-          : clampMode == CRAWLING_TEXT("mwd_can")
-                ? ClampCommunicationMode::MwdCan
-                : ClampCommunicationMode::TtCanopen;
+  value.clampCommunicationMode = clampModeFromKey(clampMode);
   value.clampSerialPort = settings.value(CRAWLING_TEXT("clampSerialPort"), value.clampSerialPort).toString();
   value.clampSerialBaudRate = settings.value(CRAWLING_TEXT("clampSerialBaudRate"), value.clampSerialBaudRate).toInt();
   value.clampCanBitrate = settings.value(CRAWLING_TEXT("clampCanBitrate"), value.clampCanBitrate).toInt();
@@ -305,6 +367,44 @@ DriveSettings DriveSettings::load(QSettings& settings) {
   value.clampXMotorSign = settings.value(CRAWLING_TEXT("clampXMotorSign"), value.clampXMotorSign).toInt() < 0 ? -1 : 1;
   value.clampYMotorSign = settings.value(CRAWLING_TEXT("clampYMotorSign"), value.clampYMotorSign).toInt() < 0 ? -1 : 1;
   value.clampZMotorSign = settings.value(CRAWLING_TEXT("clampZMotorSign"), value.clampZMotorSign).toInt() < 0 ? -1 : 1;
+  if (settings.value(QStringLiteral("clampAxesConfigured"), false).toBool()) {
+    const char* axisKeys[] = {"clampXMotors", "clampYMotors", "clampZMotors"};
+    for (int axis = 0; axis < 3; ++axis) {
+      value.clampMotors[axis].clear();
+      const int count = settings.beginReadArray(QString::fromLatin1(axisKeys[axis]));
+      for (int index = 0; index < qMin(count, kMaximumClampMotorsPerAxis); ++index) {
+        settings.setArrayIndex(index);
+        ClampMotorSettings motor;
+        motor.communicationMode = clampModeFromKey(
+            settings.value(QStringLiteral("mode"), "tt_canopen").toString());
+        motor.serialPort = settings.value(QStringLiteral("serialPort")).toString();
+        motor.serialBaudRate = settings.value(QStringLiteral("serialBaudRate"), 115200).toInt();
+        motor.canBitrate = settings.value(QStringLiteral("canBitrate"), 500000).toInt();
+        motor.motorId = settings.value(QStringLiteral("motorId"), axis + 1).toInt();
+        motor.sign = settings.value(QStringLiteral("sign"), 1).toInt();
+        motor.zdtFirmware = settings.value(QStringLiteral("zdtFirmware"), "x").toString()
+                == QStringLiteral("emm") ? ZdtFirmware::Emm : ZdtFirmware::X;
+        motor.zdtMaximumSpeedRpm = settings.value(QStringLiteral("zdtMaximumSpeedRpm"), 100).toInt();
+        motor.zdtAcceleration = settings.value(
+            QStringLiteral("zdtAcceleration"), motor.zdtFirmware == ZdtFirmware::X ? 1000 : 10).toInt();
+        value.clampMotors[axis].append(motor);
+      }
+      settings.endArray();
+    }
+  } else {
+    const int ids[] = {value.clampXMotorId, value.clampYMotorId, value.clampZMotorId};
+    const int signs[] = {value.clampXMotorSign, value.clampYMotorSign, value.clampZMotorSign};
+    for (int axis = 0; axis < 3; ++axis) {
+      ClampMotorSettings motor;
+      motor.communicationMode = value.clampCommunicationMode;
+      motor.serialPort = value.clampSerialPort;
+      motor.serialBaudRate = value.clampSerialBaudRate;
+      motor.canBitrate = value.clampCanBitrate;
+      motor.motorId = ids[axis];
+      motor.sign = signs[axis];
+      value.clampMotors[axis] = {motor};
+    }
+  }
   const QString wheelMode = settings.value(
       CRAWLING_TEXT("wheelCommunicationMode"), CRAWLING_TEXT("can"))
       .toString().trimmed().toLower();

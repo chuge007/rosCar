@@ -60,6 +60,8 @@ SOURCES += \
     $$ROBOT_SOURCE_ROOT/wheel_motor_controller.cpp \
     $$ROBOT_SOURCE_ROOT/synchronized_drive_controller.cpp \
     $$ROBOT_SOURCE_ROOT/clamp_motor_controller.cpp
+SOURCES += $$ROBOT_SOURCE_ROOT/zdt_can_protocol.cpp \
+           $$ROBOT_SOURCE_ROOT/clamp_motor_widgets.cpp
 
 HEADERS += \
     src/mainwindow.h \
@@ -101,4 +103,6 @@ HEADERS += \
     $$ROBOT_SOURCE_ROOT/wheel_motor_controller.h \
     $$ROBOT_SOURCE_ROOT/synchronized_drive_controller.h \
     $$ROBOT_SOURCE_ROOT/clamp_motor_controller.h \
+    $$ROBOT_SOURCE_ROOT/zdt_can_protocol.h \
+    $$ROBOT_SOURCE_ROOT/clamp_motor_widgets.h \
     $$ROBOT_SOURCE_ROOT/utf8_compat.h

@@ -6,6 +6,7 @@
 #include "robot_sensor_controller.h"
 #include "robot_usb_camera_controller.h"
 #include "clamp_motor_controller.h"
+#include "clamp_motor_widgets.h"
 #include "synchronized_drive_controller.h"
 
 #include <QCheckBox>
@@ -567,63 +568,11 @@ void RobotControlPanel::buildUi()
     manualLayout->addLayout(driveGrid);
 
     auto *clampGroup = new QGroupBox(QStringLiteral("夹子电机手动控制"));
-    auto *clampGrid = new QGridLayout(clampGroup);
-    clampGrid->setContentsMargins(8, 6, 8, 6);
-    clampGrid->setHorizontalSpacing(8);
-    clampGrid->setVerticalSpacing(2);
-    clampGrid->setColumnStretch(2, 1);
-    clampGrid->addWidget(new QLabel(QStringLiteral("轴")), 0, 0);
-    clampGrid->addWidget(new QLabel(QStringLiteral("← 负向")), 0, 1);
-    clampGrid->addWidget(new QLabel(QStringLiteral("速度（松开回中）")), 0, 2,
-                         Qt::AlignCenter);
-    clampGrid->addWidget(new QLabel(QStringLiteral("正向 →")), 0, 3);
-    const QStringList clampAxes = {QStringLiteral("X"), QStringLiteral("Y"),
-                                   QStringLiteral("Z")};
-    for (int row = 0; row < clampAxes.size(); ++row) {
-        auto *slider = new QSlider(Qt::Horizontal, clampGroup);
-        slider->setObjectName(QStringLiteral("clampMotorSpeed"));
-        slider->setRange(-100, 100);
-        slider->setValue(0);
-        slider->setSingleStep(5);
-        slider->setPageStep(25);
-        slider->setTickPosition(QSlider::TicksBelow);
-        slider->setTickInterval(25);
-        slider->setMinimumHeight(24);
-        slider->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        slider->setToolTip(QStringLiteral("向左为负向，向右为正向；偏移越大速度越快，松开后自动回中"));
-        clampGrid->addWidget(new QLabel(clampAxes.at(row)), row + 1, 0);
-        clampGrid->addWidget(new QLabel(QStringLiteral("−")), row + 1, 1,
-                             Qt::AlignRight | Qt::AlignVCenter);
-        clampGrid->addWidget(slider, row + 1, 2);
-        clampGrid->addWidget(new QLabel(QStringLiteral("＋")), row + 1, 3,
-                             Qt::AlignLeft | Qt::AlignVCenter);
-        const auto applyClampSettings = [this] {
-            if (m_clampController)
-                m_clampController->setSettings(settingsFromUi());
-        };
-        connect(slider, &QSlider::sliderPressed, this, applyClampSettings);
-        connect(slider, &QSlider::valueChanged, this, [this, row,
-                                                        applyClampSettings](int value) {
-            if (!m_clampController)
-                return;
-            if (value != 0)
-                applyClampSettings();
-            if (row == 0) m_clampController->setXSpeed(value);
-            else if (row == 1) m_clampController->setYSpeed(value);
-            else m_clampController->setZSpeed(value);
-        });
-        connect(slider, &QSlider::sliderReleased, this, [this, row, slider] {
-            {
-                const QSignalBlocker blocker(slider);
-                slider->setValue(0);
-            }
-            if (!m_clampController)
-                return;
-            if (row == 0) m_clampController->stopX();
-            else if (row == 1) m_clampController->stopY();
-            else m_clampController->stopZ();
-        });
-    }
+    auto *clampLayout = new QVBoxLayout(clampGroup);
+    m_clampControls = new crawling::ClampMotorControlWidget(m_clampController);
+    clampLayout->addWidget(m_clampControls);
+    connect(m_clampController, &crawling::ClampMotorController::statusChanged,
+            this, &RobotControlPanel::appendLog);
 
     auto *correctionControls = new QGroupBox(QStringLiteral("激光自动纠偏"));
     auto *correctionControlsLayout = new QVBoxLayout(correctionControls);
@@ -1058,81 +1007,26 @@ QWidget *RobotControlPanel::buildConfigurationPage()
 
     auto *clamp = new QGroupBox(QStringLiteral("夹子电机通信"), page);
     auto *clampForm = new QFormLayout(clamp);
-    m_clampCommunicationMode = new QComboBox(clamp);
-    m_clampCommunicationMode->addItem(QStringLiteral("TT CANopen CAN"),
-                                       QStringLiteral("tt_canopen"));
-    m_clampCommunicationMode->addItem(QStringLiteral("MWD RS485"),
-                                       QStringLiteral("mwd_rs485"));
-    m_clampCommunicationMode->addItem(QStringLiteral("MWD CAN"),
-                                       QStringLiteral("mwd_can"));
-    m_clampPort = new QComboBox(clamp);
-    m_clampBaud = new QComboBox(clamp);
-    for (int baud : {9600, 19200, 38400, 57600, 115200, 230400, 460800,
-                     500000, 921600, 1000000, 1500000, 2000000, 2500000,
-                     4000000})
-        m_clampBaud->addItem(QString::number(baud), baud);
-    m_clampCanBitrate = new QComboBox(clamp);
-    for (int bitrate : {100000, 125000, 250000, 500000, 800000, 1000000})
-        m_clampCanBitrate->addItem(QString::number(bitrate), bitrate);
-    m_clampNodeId = new QSpinBox(clamp);
-    m_clampNodeId->setRange(0, 127);
-    m_clampXId = new QSpinBox(clamp);
-    m_clampYId = new QSpinBox(clamp);
-    m_clampZId = new QSpinBox(clamp);
-    for (QSpinBox *box : {m_clampXId, m_clampYId, m_clampZId})
-        box->setRange(1, 127);
-    m_clampXSign = new QComboBox(clamp);
-    m_clampYSign = new QComboBox(clamp);
-    m_clampZSign = new QComboBox(clamp);
-    for (QComboBox *box : {m_clampXSign, m_clampYSign, m_clampZSign}) {
-        box->addItem(QStringLiteral("+1 正向"), 1);
-        box->addItem(QStringLiteral("-1 反向"), -1);
-    }
-    clampForm->addRow(QStringLiteral("通信方式"), m_clampCommunicationMode);
-    clampForm->addRow(QStringLiteral("通信端口"), m_clampPort);
-    clampForm->addRow(QStringLiteral("串口/适配器波特率"), m_clampBaud);
-    clampForm->addRow(QStringLiteral("CAN 波特率（CAN 模式）"), m_clampCanBitrate);
-    clampForm->addRow(QStringLiteral("TT CANopen 节点 ID"), m_clampNodeId);
-    auto *clampModeOptions = new QStackedWidget(clamp);
-    auto *clampTtCanOptions = new QLabel(
-        QStringLiteral("TT CANopen：使用上方 CAN 波特率和 CANopen 节点 ID"),
-        clampModeOptions);
-    clampTtCanOptions->setWordWrap(true);
-    auto *clampRs485Options = new QLabel(
-        QStringLiteral("MWD RS485 Modbus RTU：速度模式写入 WorkMode=2、T_Velocity=6010"),
-        clampModeOptions);
-    clampRs485Options->setWordWrap(true);
-    auto *clampMwdCanOptions = new QLabel(
-        QStringLiteral("MWD CAN：使用上方 CAN 波特率，电机 ID 范围为 1-32"),
-        clampModeOptions);
-    clampMwdCanOptions->setWordWrap(true);
-    clampModeOptions->addWidget(clampTtCanOptions);
-    clampModeOptions->addWidget(clampRs485Options);
-    clampModeOptions->addWidget(clampMwdCanOptions);
-    clampForm->addRow(QStringLiteral("模式参数"), clampModeOptions);
-    const auto updateClampModeOptions = [clampModeOptions, this](int index) {
-        clampModeOptions->setCurrentIndex(index);
-        const int maximumMotorId = index == 0 ? 127 : 32;
-        for (QSpinBox *box : {m_clampXId, m_clampYId, m_clampZId}) {
-            box->setRange(1, maximumMotorId);
-        }
-    };
-    connect(m_clampCommunicationMode,
-            QOverload<int>::of(&QComboBox::currentIndexChanged),
-            clampModeOptions, updateClampModeOptions);
-    updateClampModeOptions(m_clampCommunicationMode->currentIndex());
-    auto addClampAxis = [clamp, clampForm](const QString &name, QSpinBox *id,
-                                           QComboBox *sign) {
-        auto *row = new QWidget(clamp);
-        auto *rowLayout = new QHBoxLayout(row);
-        rowLayout->setContentsMargins(0, 0, 0, 0);
-        rowLayout->addWidget(id);
-        rowLayout->addWidget(sign);
-        clampForm->addRow(name, row);
-    };
-    addClampAxis(QStringLiteral("X 电机 ID / 方向"), m_clampXId, m_clampXSign);
-    addClampAxis(QStringLiteral("Y 电机 ID / 方向"), m_clampYId, m_clampYSign);
-    addClampAxis(QStringLiteral("Z 电机 ID / 方向"), m_clampZId, m_clampZSign);
+    m_clampSettings = new crawling::ClampMotorSettingsWidget(clamp);
+    clampForm->addRow(m_clampSettings);
+    auto *clampSave = actionButton(QStringLiteral("保存夹子配置"));
+    auto *clampRefresh = actionButton(QStringLiteral("刷新串口"));
+    clampForm->addRow(buttonRow({clampSave, clampRefresh}));
+    connect(clampSave, &QPushButton::clicked, this, [this] { saveClampSettings(); });
+    connect(clampRefresh, &QPushButton::clicked, m_clampSettings,
+            &crawling::ClampMotorSettingsWidget::refreshPorts);
+    connect(m_clampSettings, &crawling::ClampMotorSettingsWidget::edited,
+            this, [this] {
+        m_clampController->stop();
+        m_clampControls->setEnabled(false);
+        m_clampConfigState->setText(QStringLiteral("配置已修改，请保存后控制"));
+    });
+    connect(m_clampController, &crawling::ClampMotorController::settingsChanged,
+            this, [this] {
+        m_settings.clampMotors = m_clampController->settings().clampMotors;
+        m_clampSettings->setSettings(m_settings.clampMotors);
+        m_clampControls->setEnabled(true);
+    });
     auto *clampConnect = actionButton(QStringLiteral("连接夹子电机"), "primary");
     auto *clampDisconnect = actionButton(QStringLiteral("断开夹子电机"));
     m_clampConfigState = new QLabel(QStringLiteral("未连接"), clamp);
@@ -1234,15 +1128,12 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                                 m_syncMaxCorrection, m_syncMinSpeed})
         connect(box, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, markDirty);
     for (QSpinBox *box : {m_leftId, m_rightId, m_commandTimeout, m_feedbackTimeout,
-                          m_armingTimeout, m_clampNodeId, m_clampXId, m_clampYId,
-                          m_clampZId, m_cameraFps, m_laserInputTimeout})
+                          m_armingTimeout, m_cameraFps, m_laserInputTimeout})
         connect(box, QOverload<int>::of(&QSpinBox::valueChanged), this, markDirty);
     for (QComboBox *box : {m_wheelCommunicationMode, m_wheelCanPort,
                            m_wheelCanBaud, m_wheelCanBitrate, m_leftPort,
                            m_rightPort, m_leftBaud, m_rightBaud, m_leftSign,
-                           m_rightSign, m_clampCommunicationMode, m_clampPort,
-                           m_clampBaud, m_clampCanBitrate, m_clampXSign,
-                           m_clampYSign, m_clampZSign})
+                           m_rightSign})
         connect(box, QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this, [markDirty](int) { markDirty(); });
     for (QCheckBox *box : {m_cameraAutoConnect, m_cameraFlipHorizontal,
@@ -1263,6 +1154,8 @@ void RobotControlPanel::loadSettings()
                          QSettings::IniFormat);
     m_settings = crawling::DriveSettings::load(persistent);
     settingsToUi(m_settings);
+    m_clampController->setSettings(m_settings);
+    m_clampControls->setEnabled(true);
     loadProfileWeldTuning();
     loadProfileTemplates();
 }
@@ -1742,10 +1635,9 @@ void RobotControlPanel::saveSettings()
         appendLog(error);
         return;
     }
-    m_settings = current;
     QSettings persistent(crawling::DriveSettings::persistentFilePath(),
                          QSettings::IniFormat);
-    m_settings.save(persistent);
+    current.save(persistent);
     persistent.setValue(QStringLiteral("laserCorrection/speed"),
                         m_correctionSpeed->value() / kMillimetersPerMeter);
     persistent.setValue(QStringLiteral("laserCorrection/segmentLength"),
@@ -1757,6 +1649,13 @@ void RobotControlPanel::saveSettings()
     persistent.setValue(QStringLiteral("laserCorrection/imageTimeoutMs"),
                         m_laserInputTimeout->value());
     persistent.sync();
+    if (persistent.status() != QSettings::NoError) {
+        appendLog(QStringLiteral("小车配置保存失败"));
+        return;
+    }
+    m_settings = current;
+    m_clampController->setSettings(m_settings);
+    m_clampControls->setEnabled(true);
     appendLog(QStringLiteral("小车配置已保存"));
 }
 
@@ -1816,23 +1715,7 @@ crawling::DriveSettings RobotControlPanel::settingsFromUi() const
     value.usbCameraFlipVertical = m_cameraFlipVertical->isChecked();
     value.autoConnectOnStartup = m_autoConnectCheck->isChecked();
     value.manualJogPercent = m_speedSlider->value();
-    const QString clampMode = m_clampCommunicationMode->currentData().toString();
-    value.clampCommunicationMode =
-        clampMode == QStringLiteral("mwd_rs485")
-            ? crawling::ClampCommunicationMode::MwdRs485
-            : clampMode == QStringLiteral("mwd_can")
-                  ? crawling::ClampCommunicationMode::MwdCan
-                  : crawling::ClampCommunicationMode::TtCanopen;
-    value.clampSerialPort = comboText(m_clampPort, value.clampSerialPort);
-    value.clampSerialBaudRate = comboInt(m_clampBaud, value.clampSerialBaudRate);
-    value.clampCanBitrate = comboInt(m_clampCanBitrate, value.clampCanBitrate);
-    value.clampNodeId = m_clampNodeId->value();
-    value.clampXMotorId = m_clampXId->value();
-    value.clampYMotorId = m_clampYId->value();
-    value.clampZMotorId = m_clampZId->value();
-    value.clampXMotorSign = comboInt(m_clampXSign, value.clampXMotorSign);
-    value.clampYMotorSign = comboInt(m_clampYSign, value.clampYMotorSign);
-    value.clampZMotorSign = comboInt(m_clampZSign, value.clampZMotorSign);
+    value.clampMotors = m_clampSettings->settings();
     value.wheelRadiusM = m_wheelRadius->value() / kMillimetersPerMeter;
     value.trackWidthM = m_trackWidth->value() / kMillimetersPerMeter;
     value.motorOutputToWheelRatio = m_ratio->value();
@@ -1906,25 +1789,7 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
     m_laserInputTimeout->setValue(
         persistent.value(QStringLiteral("laserCorrection/imageTimeoutMs"), 180)
             .toInt());
-    setComboValue(
-        m_clampCommunicationMode,
-        settings.clampCommunicationMode ==
-                crawling::ClampCommunicationMode::TtCanopen
-            ? QStringLiteral("tt_canopen")
-            : settings.clampCommunicationMode ==
-                  crawling::ClampCommunicationMode::MwdRs485
-                  ? QStringLiteral("mwd_rs485")
-                  : QStringLiteral("mwd_can"));
-    setComboText(m_clampPort, settings.clampSerialPort);
-    setComboValue(m_clampBaud, settings.clampSerialBaudRate);
-    setComboValue(m_clampCanBitrate, settings.clampCanBitrate);
-    m_clampNodeId->setValue(settings.clampNodeId);
-    m_clampXId->setValue(settings.clampXMotorId);
-    m_clampYId->setValue(settings.clampYMotorId);
-    m_clampZId->setValue(settings.clampZMotorId);
-    setComboValue(m_clampXSign, settings.clampXMotorSign);
-    setComboValue(m_clampYSign, settings.clampYMotorSign);
-    setComboValue(m_clampZSign, settings.clampZMotorSign);
+    m_clampSettings->setSettings(settings.clampMotors);
     m_wheelRadius->setValue(settings.wheelRadiusM * kMillimetersPerMeter);
     m_trackWidth->setValue(settings.trackWidthM * kMillimetersPerMeter);
     m_ratio->setValue(settings.motorOutputToWheelRatio);
@@ -1967,12 +1832,11 @@ void RobotControlPanel::refreshPorts()
     const QString selectedRight = m_rightPort->currentData().toString();
     const QString selectedWheelCan = m_wheelCanPort->currentData().toString();
     const QString selectedImu = m_imuPort->currentData().toString();
-    const QString selectedClamp = m_clampPort->currentData().toString();
     repopulate(m_leftPort, selectedLeft, m_settings.leftMotorSerialPort);
     repopulate(m_rightPort, selectedRight, m_settings.rightMotorSerialPort);
     repopulate(m_wheelCanPort, selectedWheelCan, m_settings.wheelCanSerialPort);
     repopulate(m_imuPort, selectedImu, m_settings.imuSerialPort);
-    repopulate(m_clampPort, selectedClamp, m_settings.clampSerialPort);
+    m_clampSettings->refreshPorts();
 }
 
 void RobotControlPanel::connectDrive()
@@ -2093,19 +1957,38 @@ void RobotControlPanel::connectConfiguredUsbCamera()
                                   Q_ARG(bool, m_settings.usbCameraFlipVertical));
 }
 
+bool RobotControlPanel::saveClampSettings()
+{
+    crawling::DriveSettings current = m_settings;
+    current.clampMotors = m_clampSettings->settings();
+    const QString error = current.clampValidationError();
+    if (!error.isEmpty()) {
+        m_clampConfigState->setText(error);
+        appendLog(error);
+        return false;
+    }
+    QSettings persistent(crawling::DriveSettings::persistentFilePath(), QSettings::IniFormat);
+    auto latest = crawling::DriveSettings::load(persistent);
+    latest.clampMotors = current.clampMotors;
+    latest.save(persistent);
+    persistent.sync();
+    if (persistent.status() != QSettings::NoError) {
+        appendLog(QStringLiteral("夹子配置保存失败"));
+        return false;
+    }
+    m_settings.clampMotors = current.clampMotors;
+    m_clampController->setSettings(current);
+    m_clampControls->setEnabled(true);
+    m_clampConfigState->setText(QStringLiteral("夹子配置已保存"));
+    appendLog(QStringLiteral("夹子配置已保存"));
+    return true;
+}
+
 void RobotControlPanel::connectConfiguredClampMotor()
 {
-    m_settings = settingsFromUi();
-    saveSettings();
-    if (m_settings.clampSerialPort.trimmed().isEmpty()) {
-        appendLog(QStringLiteral("夹子电机连接已跳过：未配置通信端口"));
+    if (!saveClampSettings())
         return;
-    }
-    if (m_clampController) {
-        m_clampController->setSettings(m_settings);
-        QMetaObject::invokeMethod(m_clampController, "connectDevice",
-                                  Qt::QueuedConnection);
-    }
+    QMetaObject::invokeMethod(m_clampController, "connectDevice", Qt::QueuedConnection);
 }
 
 void RobotControlPanel::disconnectAllDevices()

@@ -4,6 +4,9 @@
 
 #include <QMetaType>
 #include <QString>
+#include <QVector>
+
+#include <array>
 
 class QSettings;
 
@@ -18,11 +21,34 @@ enum class ClampCommunicationMode {
   TtCanopen,
   MwdRs485,
   MwdCan,
+  ZdtCan,
 };
+
+enum class ZdtFirmware { X, Emm };
+
+struct ClampMotorSettings {
+  ClampCommunicationMode communicationMode = ClampCommunicationMode::TtCanopen;
+  QString serialPort;
+  int serialBaudRate = 115200;
+  int canBitrate = 500000;
+  int motorId = 1;
+  int sign = 1;
+  ZdtFirmware zdtFirmware = ZdtFirmware::X;
+  int zdtMaximumSpeedRpm = 100;
+  int zdtAcceleration = 1000; // RPM/s for X; 0..255 for Emm.
+
+  bool operator==(const ClampMotorSettings& other) const;
+};
+
+using ClampMotorAxes = std::array<QVector<ClampMotorSettings>, 3>;
+QString clampModeKey(ClampCommunicationMode mode);
+ClampCommunicationMode clampModeFromKey(const QString& key);
+QString clampModeName(ClampCommunicationMode mode);
 
 struct DriveSettings {
   static constexpr int kMinimumFeedbackTimeoutMs = 800;
-  static constexpr int kCurrentSettingsSchemaVersion = 10;
+  static constexpr int kCurrentSettingsSchemaVersion = 11;
+  static constexpr int kMaximumClampMotorsPerAxis = 16;
 
   // Legacy shared-port fields are retained for loading older settings files.
   QString serialPort;
@@ -54,6 +80,16 @@ struct DriveSettings {
   int clampXMotorSign = 1;
   int clampYMotorSign = 1;
   int clampZMotorSign = 1;
+
+  ClampMotorAxes clampMotors = [] {
+    ClampMotorAxes axes;
+    for (int axis = 0; axis < 3; ++axis) {
+      ClampMotorSettings motor;
+      motor.motorId = axis + 1;
+      axes[axis].append(motor);
+    }
+    return axes;
+  }();
 
   WheelCommunicationMode wheelCommunicationMode =
       WheelCommunicationMode::Can;
@@ -90,6 +126,7 @@ struct DriveSettings {
   SynchronizerConfig synchronizer;
 
   QString validationError() const;
+  QString clampValidationError() const;
   static QString persistentFilePath();
   void save(QSettings& settings) const;
   static DriveSettings load(QSettings& settings);

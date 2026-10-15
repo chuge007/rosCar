@@ -36,6 +36,8 @@ class RobotProfileView;
 
 namespace crawling {
 class ClampMotorController;
+class ClampMotorSettingsWidget;
+class ClampMotorControlWidget;
 class SynchronizedDriveController;
 class RobotSensorController;
 class RobotUsbCameraController;
@@ -102,6 +104,7 @@ signals:
 private:
     void buildUi();
     void loadSettings();
+    bool saveClampSettings();
     void emitVehicleStatus();
     crawling::DriveSettings settingsFromUi() const;
     void settingsToUi(const crawling::DriveSettings &settings);
@@ -218,17 +221,8 @@ private:
     QCheckBox *m_cameraAutoConnect = nullptr;
     QCheckBox *m_cameraFlipHorizontal = nullptr;
     QCheckBox *m_cameraFlipVertical = nullptr;
-    QComboBox *m_clampCommunicationMode = nullptr;
-    QComboBox *m_clampPort = nullptr;
-    QComboBox *m_clampBaud = nullptr;
-    QComboBox *m_clampCanBitrate = nullptr;
-    QSpinBox *m_clampNodeId = nullptr;
-    QSpinBox *m_clampXId = nullptr;
-    QSpinBox *m_clampYId = nullptr;
-    QSpinBox *m_clampZId = nullptr;
-    QComboBox *m_clampXSign = nullptr;
-    QComboBox *m_clampYSign = nullptr;
-    QComboBox *m_clampZSign = nullptr;
+    crawling::ClampMotorSettingsWidget *m_clampSettings = nullptr;
+    crawling::ClampMotorControlWidget *m_clampControls = nullptr;
     QDoubleSpinBox *m_syncP = nullptr;
     QDoubleSpinBox *m_syncI = nullptr;
     QDoubleSpinBox *m_syncMaxCorrection = nullptr;
