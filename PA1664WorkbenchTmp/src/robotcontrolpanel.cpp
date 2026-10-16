@@ -348,13 +348,25 @@ RobotControlPanel::RobotControlPanel(crawling::ClampMotorController *clampContro
     m_commandTimer->start();
 
     QTimer::singleShot(0, this, [this] {
-        if (m_autoConnectCheck && m_autoConnectCheck->isChecked())
+        if (m_autoConnectCheck && m_autoConnectCheck->isChecked()) {
             connectConfiguredDevices();
+            return;
+        }
+        // Clamp controls are used independently of the chassis connection.
+        // Keep their configured adapters available after startup even when the
+        // optional "connect all" preference is disabled.
+        appendLog(QStringLiteral("启动自动连接夹子电机：已配置的接口"));
+        connectConfiguredClampMotor();
     });
 }
 
 RobotControlPanel::~RobotControlPanel()
 {
+    // The clamp controller is owned by the workspace rather than this panel.
+    // Disconnect it while the controller and its adapters are still alive so
+    // serial, PCAN, and candle handles are released during application exit.
+    if (m_clampController)
+        m_clampController->disconnectDevice();
     if (m_commandTimer)
         m_commandTimer->stop();
     // Drain the producer before deleting the receiver of the direct mailbox call.
@@ -481,7 +493,8 @@ void RobotControlPanel::buildUi()
                                        padding: 3px 8px; font-size: 12px; }
         #robotConfigPage QCheckBox { color: #203247; spacing: 6px;
                                      min-height: 21px; font-size: 12px; }
-        #robotConfigPage QPlainTextEdit { font-size: 11px; }
+        #robotConfigPage QPlainTextEdit { font-size: 11px; background: white;
+                                           color: #203247; border-color: #b9c5d3; }
     )"));
 
     auto *root = new QVBoxLayout(this);
@@ -512,7 +525,8 @@ void RobotControlPanel::buildUi()
     m_connectionLabel->setProperty("role", "chip");
     m_stateLabel = new QLabel(QStringLiteral("未连接"));
     m_stateLabel->setProperty("role", "chip");
-    m_autoConnectCheck = new QCheckBox(QStringLiteral("启动时自动连接"));
+    m_autoConnectCheck = new QCheckBox(
+        QStringLiteral("启动时自动连接（夹子电机始终连接）"));
     m_autoConnectCheck->setStyleSheet(QStringLiteral("color:white;"));
     m_connectAllButton = actionButton(QStringLiteral("连接全部接口"), "primary");
     auto *disconnectAll = actionButton(QStringLiteral("断开全部接口"));
@@ -1100,8 +1114,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     m_infoLog = new QPlainTextEdit(logGroup);
     m_infoLog->setReadOnly(true);
     m_infoLog->setMaximumBlockCount(400);
-    m_infoLog->setMinimumHeight(90);
-    m_infoLog->setMaximumHeight(130);
+    m_infoLog->setMinimumHeight(170);
+    m_infoLog->setMaximumHeight(230);
     logLayout->addWidget(m_infoLog);
     compactGroup(logGroup);
     rightColumn->addWidget(logGroup);

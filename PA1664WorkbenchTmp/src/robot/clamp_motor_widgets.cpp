@@ -1,5 +1,7 @@
 #include "clamp_motor_widgets.h"
 #include "clamp_motor_controller.h"
+#include "candle_can_adapter.h"
+#include "pcan_can_adapter.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -56,14 +58,51 @@ void selectNumber(QComboBox* box, int value) {
   box->setCurrentIndex(index);
 }
 
+QString selectedPort(const QComboBox* box) {
+  const QString text = box->currentText().trimmed();
+  // Editable combos can retain the previous index while the user types a name.
+  const int index = box->findText(text, Qt::MatchFixedString);
+  if (index >= 0) {
+    const QString id = box->itemData(index).toString();
+    if (CandleCanAdapter::isCandlePort(id) || PcanCanAdapter::isPcanPort(id)) return id;
+  }
+  const QString canonical = PcanCanAdapter::canonicalPort(text);
+  return canonical.isEmpty() ? text : canonical;
+}
+
+void selectPort(QComboBox* box, const QString& id) {
+  const QString pcanId = PcanCanAdapter::canonicalPort(id);
+  int index = box->findData(pcanId.isEmpty() ? id : pcanId, Qt::UserRole, Qt::MatchFixedString);
+  if (index < 0) index = box->findText(id, Qt::MatchFixedString);
+  if (index >= 0) box->setCurrentIndex(index);
+  else if (id.startsWith(QStringLiteral("candle:"), Qt::CaseInsensitive)) {
+    box->addItem(QStringLiteral("candle（未连接）"), id);
+    box->setCurrentIndex(box->count() - 1);
+  } else if (!pcanId.isEmpty()) {
+    box->addItem(PcanCanAdapter::portName(pcanId) + QStringLiteral("（未连接）"), pcanId);
+    box->setCurrentIndex(box->count() - 1);
+  } else box->setEditText(id);
+}
+
 void populatePorts(QComboBox* box) {
   const QSignalBlocker blocker(box);
-  const QString selected = box->currentText();
+  const QString selectedId = selectedPort(box);
   box->clear();
   box->addItem(QString());
   for (const auto& port : QSerialPortInfo::availablePorts())
     box->addItem(port.portName());
-  box->setEditText(selected);
+  for (const auto& port : CandleCanAdapter::availablePorts()) {
+    box->addItem(port.name, port.id);
+    box->setItemData(box->count() - 1, QStringLiteral("原生 candleLight USB CAN\n") +
+        port.id.mid(7), Qt::ToolTipRole);
+  }
+  QString pcanError;
+  for (const auto& port : PcanCanAdapter::availablePorts(&pcanError)) {
+    box->addItem(port.name, port.id);
+    box->setItemData(box->count() - 1, port.description, Qt::ToolTipRole);
+  }
+  box->setProperty("pcanEnumerationError", pcanError);
+  selectPort(box, selectedId);
 }
 }
 
@@ -135,6 +174,18 @@ void ClampMotorSettingsWidget::updateMode(MotorForm* f) {
   const auto mode = clampModeFromKey(f->mode->currentData().toString());
   const bool rs485 = mode == ClampCommunicationMode::MwdRs485;
   const bool zdt = mode == ClampCommunicationMode::ZdtCan;
+  const bool nativeCan = CandleCanAdapter::isCandlePort(selectedPort(f->port)) ||
+      PcanCanAdapter::isPcanPort(selectedPort(f->port));
+  f->baud->setVisible(!nativeCan);
+  f->form->labelForField(f->baud)->setVisible(!nativeCan);
+  QString portHint = nativeCan
+      ? QStringLiteral("PCAN / candleLight 原生 CAN：仅使用 CAN 总线波特率，不使用串口波特率；不支持 RS485。")
+      : QStringLiteral("MWD CAN 可选择 PCAN_USBBUS1 等原生 PCAN 通道；串口用于 RS485 或 SLCAN，candle0 等为原生 USB CAN。");
+  if (mode == ClampCommunicationMode::MwdCan)
+    portHint += QStringLiteral("\nCAN 波特率必须与电机一致，MCF302CB 例程为 1000000 bit/s；使用经典 CAN。");
+  const QString pcanError = f->port->property("pcanEnumerationError").toString();
+  if (!pcanError.isEmpty()) portHint += QLatin1Char('\n') + pcanError;
+  f->port->setToolTip(portHint);
   f->id->setRange(1, zdt ? 255 : mode == ClampCommunicationMode::TtCanopen ? 127 : 32);
   f->bitrate->setVisible(!rs485);
   f->form->labelForField(f->bitrate)->setVisible(!rs485);
@@ -177,8 +228,8 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->port = new QComboBox;
   f->port->setEditable(true);
   populatePorts(f->port);
-  f->port->setEditText(motor.serialPort);
-  f->form->addRow(QStringLiteral("串口 / SLCAN 适配器"), f->port);
+  selectPort(f->port, motor.serialPort);
+  f->form->addRow(QStringLiteral("串口 / CAN 适配器"), f->port);
   f->baud = new QComboBox;
   f->form->addRow(QStringLiteral("串口 / 适配器波特率"), f->baud);
   f->bitrate = new QComboBox;
@@ -196,7 +247,8 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->acceleration = new QSpinBox;
   zdtForm->addRow(QStringLiteral("加速度"), f->acceleration);
   auto* note = new QLabel(QStringLiteral(
-      "驱动器需设置 CAN、自由协议及固定校验 6B，使用支持扩展帧的 SLCAN 适配器。"
+      "驱动器需设置 CAN、自由协议及固定校验 6B，使用 PCAN、candleLight（candle0 等）"
+      "或支持扩展帧的 SLCAN 适配器。请先关闭占用通道的其他控制程序。"
       "X 加速度单位为 RPM/s；Emm 为 0–255 档，且需关闭“速度缩小 10 倍”选项。"
       "加速度 0 为直接启动。CAN 83.333 kbit/s 暂不支持。"));
   note->setWordWrap(true);
@@ -226,7 +278,8 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   for (QComboBox* box : {f->baud, f->bitrate, f->sign})
     connect(box, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this] { notifyEdited(); });
-  connect(f->port, &QComboBox::currentTextChanged, this, [this] { notifyEdited(); });
+  connect(f->port, &QComboBox::currentTextChanged, this,
+          [this, f] { updateMode(f); notifyEdited(); });
   for (QSpinBox* box : {f->id, f->maximumRpm, f->acceleration})
     connect(box, QOverload<int>::of(&QSpinBox::valueChanged),
             this, [this] { notifyEdited(); });
@@ -269,7 +322,7 @@ ClampMotorAxes ClampMotorSettingsWidget::settings() const {
     for (const auto* f : forms_[axis]) {
       ClampMotorSettings motor;
       motor.communicationMode = clampModeFromKey(f->mode->currentData().toString());
-      motor.serialPort = f->port->currentText().trimmed();
+      motor.serialPort = selectedPort(f->port);
       motor.serialBaudRate = f->baud->currentData().toInt();
       motor.canBitrate = f->bitrate->currentData().toInt();
       motor.motorId = f->id->value();
@@ -296,7 +349,10 @@ void ClampMotorSettingsWidget::setSettings(const ClampMotorAxes& axes) {
 
 void ClampMotorSettingsWidget::refreshPorts() {
   for (const auto& axis : forms_)
-    for (auto* form : axis) populatePorts(form->port);
+    for (auto* form : axis) {
+      populatePorts(form->port);
+      updateMode(form);
+    }
 }
 
 ClampMotorControlWidget::ClampMotorControlWidget(ClampMotorController* controller,
@@ -396,9 +452,25 @@ void ClampMotorControlWidget::rebuild() {
       slider->setFixedHeight(40);
       slider->setAccessibleName(QStringLiteral("%1%2 电机双向点动")
           .arg(axisName(axis)).arg(index + 1));
-      slider->setToolTip(QStringLiteral("负向 ← 速度 → 正向；松开即停止"));
-      auto* value = new QLabel(QStringLiteral("0%"));
-      value->setMinimumWidth(56);
+      slider->setToolTip(QStringLiteral(
+          "滑块离中心的拖动幅度就是运行速度：向左负向、向右正向；松开即停止"));
+      const auto motorForUi = motor;
+      const auto speedText = [motorForUi](int percent) {
+        const QString signedPercent = percent > 0
+            ? QStringLiteral("+%1%").arg(percent)
+            : QStringLiteral("%1%").arg(percent);
+        if (motorForUi.communicationMode != ClampCommunicationMode::ZdtCan)
+          return signedPercent;
+        const int rpm = (qAbs(percent) * motorForUi.zdtMaximumSpeedRpm + 50) / 100;
+        const QString signedRpm = percent > 0
+            ? QStringLiteral("+%1 RPM").arg(rpm)
+            : QStringLiteral("%1 RPM").arg(percent < 0 ? -rpm : rpm);
+        return QStringLiteral("%1 · %2").arg(signedPercent, signedRpm);
+      };
+      auto* value = new QLabel(speedText(0));
+      value->setObjectName(QStringLiteral("clampMotorSpeedValue"));
+      value->setProperty("zeroText", speedText(0));
+      value->setMinimumWidth(112);
       value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
       auto* stop = new QPushButton(QStringLiteral("停止"));
       stop->setMinimumSize(76, 40);
@@ -407,9 +479,9 @@ void ClampMotorControlWidget::rebuild() {
       grid->addWidget(plus, row, 3);
       grid->addWidget(value, row, 4);
       grid->addWidget(stop, row, 5);
-      connect(slider, &QSlider::valueChanged, this, [this, axis, index, value](int percent) {
-        value->setText(percent > 0 ? QStringLiteral("+%1%").arg(percent)
-                                   : QStringLiteral("%1%").arg(percent));
+      connect(slider, &QSlider::valueChanged, this,
+              [this, axis, index, value, speedText](int percent) {
+        value->setText(speedText(percent));
         controller_->setMotorSpeed(axis, index, percent);
       });
       connect(slider, &QSlider::sliderReleased, slider, [slider] { slider->setValue(0); });
@@ -433,8 +505,8 @@ void ClampMotorControlWidget::resetControls() {
     slider->setValue(0);
   }
   // Value labels follow valueChanged; reset them without generating commands.
-  for (auto* label : scroll_->findChildren<QLabel*>())
-    if (label->text().endsWith(QLatin1Char('%'))) label->setText(QStringLiteral("0%"));
+  for (auto* label : scroll_->findChildren<QLabel*>(QStringLiteral("clampMotorSpeedValue")))
+    label->setText(label->property("zeroText").toString());
 }
 
 bool ClampMotorControlWidget::eventFilter(QObject* watched, QEvent* event) {

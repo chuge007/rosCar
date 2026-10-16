@@ -17,7 +17,7 @@ MV3DLP_SOURCE_ROOT = $$clean_path($$PWD/vendor/mv3dlp_laser_profile)
 INCLUDEPATH += $$PWD/vendor/phaselink/include $$PWD/src $$ROBOT_SOURCE_ROOT
 INCLUDEPATH += $$MV3DLP_SOURCE_ROOT/include
 LIBS += -L$$PWD/vendor/phaselink/lib -lclient
-win32: LIBS += Setupapi.lib
+win32: LIBS += Setupapi.lib Winusb.lib
 win32-msvc*: QMAKE_CXXFLAGS += /utf-8
 win32-msvc*: QMAKE_LFLAGS_RELEASE += /MAP:$$shell_path($$PWD/bin/PA1664Workbench.map)
 SOURCES += \
@@ -61,6 +61,8 @@ SOURCES += \
     $$ROBOT_SOURCE_ROOT/synchronized_drive_controller.cpp \
     $$ROBOT_SOURCE_ROOT/clamp_motor_controller.cpp
 SOURCES += $$ROBOT_SOURCE_ROOT/zdt_can_protocol.cpp \
+           $$ROBOT_SOURCE_ROOT/candle_can_adapter.cpp \
+           $$ROBOT_SOURCE_ROOT/pcan_can_adapter.cpp \
            $$ROBOT_SOURCE_ROOT/clamp_motor_widgets.cpp
 
 HEADERS += \
@@ -104,5 +106,7 @@ HEADERS += \
     $$ROBOT_SOURCE_ROOT/synchronized_drive_controller.h \
     $$ROBOT_SOURCE_ROOT/clamp_motor_controller.h \
     $$ROBOT_SOURCE_ROOT/zdt_can_protocol.h \
+    $$ROBOT_SOURCE_ROOT/candle_can_adapter.h \
+    $$ROBOT_SOURCE_ROOT/pcan_can_adapter.h \
     $$ROBOT_SOURCE_ROOT/clamp_motor_widgets.h \
     $$ROBOT_SOURCE_ROOT/utf8_compat.h

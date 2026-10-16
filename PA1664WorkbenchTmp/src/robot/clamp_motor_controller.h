@@ -5,9 +5,13 @@
 #include <QHash>
 #include <QObject>
 #include <QSerialPort>
+#include <QSet>
 #include <cstdint>
 
 namespace crawling {
+
+class CandleCanAdapter;
+class PcanCanAdapter;
 
 class ClampMotorController final : public QObject {
   Q_OBJECT
@@ -36,16 +40,38 @@ class ClampMotorController final : public QObject {
   void move(int axis, int direction);
   void move(int axis, int direction, int speedPercent);
   void setSpeed(int axis, int percent);
-  QSerialPort* ensureOpen(const ClampMotorSettings& motor);
+  bool ensureOpen(const ClampMotorSettings& motor);
   QByteArray encodeFrame(std::uint32_t id, const QByteArray& data,
                          bool extended = false) const;
-  bool sendCanFrame(QSerialPort* port, std::uint32_t id, const QByteArray& data,
-                    bool extended = false);
-  bool sendMwdModbusFrame(QSerialPort* port, const QByteArray& frame);
-  bool sendMwdModbusSpeed(QSerialPort* port, int motorId, int speed);
-  bool sendMotorCommand(const ClampMotorSettings& motor, QSerialPort* port, int percent);
+  bool sendCanFrame(const ClampMotorSettings& motor, std::uint32_t id,
+                    const QByteArray& data,
+                    bool extended = false,
+                    const QString& context = {});
+  bool sendMwdModbusFrame(QSerialPort* port, const QByteArray& frame,
+                          const QString& context = {});
+  bool sendMwdModbusSpeed(QSerialPort* port, int motorId, int speed,
+                          const QString& context = {});
+  bool sendMotorCommand(const ClampMotorSettings& motor, int percent,
+                        int axis = -1, int index = -1);
+  QString motorContext(const ClampMotorSettings& motor, int axis,
+                       int index) const;
+  QString zdtMotorKey(const ClampMotorSettings& motor, int axis,
+                      int index) const;
+  void onCanFrame(const QString& port, std::uint32_t id,
+                  const QByteArray& data, bool extended);
+  void logSpeedStatus(const QString& key, const QString& message);
   void closePorts();
   QHash<QString, QSerialPort*> ports_;
+  QHash<QString, CandleCanAdapter*> candlePorts_;
+  QHash<QString, PcanCanAdapter*> pcanPorts_;
+  QSet<QString> zdtEnabledMotors_;
+  QSet<QString> zdtEnablePending_;
+  QSet<QString> zdtProbePending_;
+  QHash<QString, int> zdtRequestedPercent_;
+  QHash<QString, int> zdtSpeedTickets_;
+  QHash<QString, qint64> speedLogTime_;
+  quint64 zdtSession_ = 0;
+  int nextSpeedTicket_ = 0;
   DriveSettings settings_;
   bool connectionEnabled_ = true;
 };

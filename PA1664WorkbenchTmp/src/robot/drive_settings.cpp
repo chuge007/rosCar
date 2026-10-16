@@ -1,5 +1,7 @@
 ﻿#include "drive_settings.h"
 #include "utf8_compat.h"
+#include "candle_can_adapter.h"
+#include "pcan_can_adapter.h"
 
 #include <QSettings>
 #include <QCoreApplication>
@@ -121,13 +123,20 @@ QString DriveSettings::clampValidationError() const {
           .arg(QString::fromLatin1(names[axis])).arg(index + 1);
       const bool rs485 = motor.communicationMode == ClampCommunicationMode::MwdRs485;
       const bool zdt = motor.communicationMode == ClampCommunicationMode::ZdtCan;
+      const bool pcan = PcanCanAdapter::isPcanPort(motor.serialPort);
+      const bool nativeCan = CandleCanAdapter::isCandlePort(motor.serialPort) || pcan;
+      if (rs485 && nativeCan)
+        return label + QStringLiteral("PCAN / candleLight 是 CAN 适配器，不能用于 RS485。");
+      const QString pcanId = PcanCanAdapter::canonicalPort(motor.serialPort);
+      if (pcan && pcanId.isEmpty())
+        return label + QStringLiteral("PCAN 通道无效，请选择 PCAN_USBBUS1 等实际通道。");
       const int maximumId = zdt ? 255 :
           motor.communicationMode == ClampCommunicationMode::TtCanopen ? 127 : 32;
       if (motor.motorId < 1 || motor.motorId > maximumId)
         return label + QStringLiteral("电机 ID 必须为 1..%1。").arg(maximumId);
       if (motor.sign != 1 && motor.sign != -1)
         return label + QStringLiteral("方向必须为 +1 或 -1。");
-      if (motor.serialBaudRate <= 0 ||
+      if ((!nativeCan && motor.serialBaudRate <= 0) ||
           (rs485 && !isSupportedClampMwdRs485BaudRate(motor.serialBaudRate)))
         return label + QStringLiteral("串口波特率无效。");
       const bool validCanRate =
@@ -144,13 +153,16 @@ QString DriveSettings::clampValidationError() const {
         return label + QStringLiteral("ZDT 速度或加速度超出所选固件范围。");
       if (motor.serialPort.trimmed().isEmpty())
         continue;
+      const QString key = pcan ? pcanId : motor.serialPort.trimmed();
       for (const auto& other : configured) {
-        if (motor.serialPort.trimmed().compare(other.serialPort.trimmed(), Qt::CaseInsensitive) != 0)
+        const QString otherKey = PcanCanAdapter::isPcanPort(other.serialPort)
+            ? PcanCanAdapter::canonicalPort(other.serialPort) : other.serialPort.trimmed();
+        if (key.compare(otherKey, Qt::CaseInsensitive) != 0)
           continue;
         const bool otherRs485 = other.communicationMode == ClampCommunicationMode::MwdRs485;
-        if (rs485 != otherRs485 || motor.serialBaudRate != other.serialBaudRate ||
+        if (rs485 != otherRs485 || (!nativeCan && motor.serialBaudRate != other.serialBaudRate) ||
             (!rs485 && motor.canBitrate != other.canBitrate))
-          return label + QStringLiteral("共用串口的电机必须使用相同总线类型及波特率。");
+          return label + QStringLiteral("共用端口的电机必须使用相同总线类型及波特率。");
         // TT and MWD use standard identifiers with potentially overlapping ranges.
         if (!rs485 && !zdt && other.communicationMode != ClampCommunicationMode::ZdtCan &&
             motor.communicationMode != other.communicationMode)
