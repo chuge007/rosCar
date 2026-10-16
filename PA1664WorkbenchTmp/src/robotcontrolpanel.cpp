@@ -355,6 +355,10 @@ RobotControlPanel::RobotControlPanel(crawling::ClampMotorController *clampContro
         // Clamp controls are used independently of the chassis connection.
         // Keep their configured adapters available after startup even when the
         // optional "connect all" preference is disabled.
+        if (m_cameraAutoConnect && m_cameraAutoConnect->isChecked()) {
+            appendLog(QStringLiteral("启动自动连接 USB 摄像头：已配置的网络地址"));
+            connectConfiguredUsbCamera();
+        }
         appendLog(QStringLiteral("启动自动连接夹子电机：已配置的接口"));
         connectConfiguredClampMotor();
     });
