@@ -168,6 +168,7 @@ int DeviceController::takeCScanPackets(QVector<RawPacketBuffer> &packets,
 bool DeviceController::connectDevice(const QString &address, int deviceId)
 {
     auto &sdk = Client::getInstance();
+    m_coldStartCycleAttempted = false;
     m_deviceId = deviceId;
     m_groupsSynchronized = false;
     if (m_sdkSessionEstablished) {
@@ -231,6 +232,7 @@ void DeviceController::cycleUsbForColdStart()
     if (!UsbBootstrap::cycleStreamerPort(&error)) {
         m_expectedUsbCycle = false;
         emit message(error, true);
+        scheduleUsbRecovery(QStringLiteral("Windows 重新枚举未启动，改用 SDK 内部恢复"));
         return;
     }
     // The watchdog observes Missing -> Streamer and owns the remaining
@@ -439,6 +441,9 @@ void DeviceController::tryStart()
     } else if (m_startAttempts < 3) {
         emit message(QStringLiteral("设备仍在初始化，1.5 秒后自动重试（第 %1 次未成功）").arg(m_startAttempts), false);
         m_startRetry.start();
+    } else if (!m_coldStartCycleAttempted) {
+        m_coldStartCycleAttempted = true;
+        cycleUsbForColdStart();
     } else {
         // A local Connect() can succeed while the SDK still has physical id
         // -1. Re-synchronizing the full configuration is the operation that
@@ -461,11 +466,14 @@ void DeviceController::confirmFrameArrival()
     } catch (...) {
         // 后续重试仍可重新建立采集状态，停止异常不应终止程序。
     }
+    m_startRequested = true;
     if (m_startAttempts < 3) {
-        m_startRequested = true;
         emit message(QStringLiteral("启动命令未产生数据帧，1.5 秒后自动重新启动（第 %1 次）")
                          .arg(m_startAttempts), false);
         m_startRetry.start();
+    } else if (!m_coldStartCycleAttempted) {
+        m_coldStartCycleAttempted = true;
+        cycleUsbForColdStart();
     } else {
         scheduleUsbRecovery(QStringLiteral("启动命令未产生真实硬件帧"));
     }

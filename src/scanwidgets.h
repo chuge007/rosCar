@@ -127,6 +127,8 @@ public:
     void appendFrame(const DecodedFrame &frame, double scale, int sourceBeam = 0);
     void appendFrameAtColumn(const DecodedFrame &frame, double scale, int column,
                              int sourceBeam = 0);
+    bool appendFrameAtColumnDeferred(const DecodedFrame &frame, double scale,
+                                     int column, int sourceBeam = 0);
     void appendFrames(const QVector<DecodedFrame> &frames, double scale,
                       int sourceBeam = 0);
     void setEncoderPrecision(int countsPerColumn);
@@ -239,6 +241,8 @@ class CScanWidget : public QWidget
 public:
     explicit CScanWidget(QWidget *parent = nullptr);
     void appendFrame(const DecodedFrame &frame, double scale, int sourceBeam = 0);
+    bool appendFrameDeferred(const DecodedFrame &frame, double scale,
+                             int sourceBeam, int gateMask);
     void appendFrames(const QVector<DecodedFrame> &frames, double scale,
                       int sourceBeam = 0);
     void setEncoderPrecision(int countsPerCell);
@@ -258,7 +262,7 @@ protected:
 
 private:
     bool appendFrameInternal(const DecodedFrame &frame, double scale,
-                             int sourceBeam);
+                             int sourceBeam, int gateMask);
 
     QVector<QHash<QPoint, quint32>> m_gateCells = QVector<QHash<QPoint, quint32>>(4);
     int m_imagingGate = 0;

@@ -5,6 +5,8 @@
 #include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
+#include <QMutex>
+#include <QQueue>
 
 class AScanWidget;
 class BScanWidget;
@@ -77,6 +79,8 @@ private:
     void setScanSessionActive(bool active);
     void setScanCachingPaused(bool paused);
     void startAcquisitionFromUi();
+    void enqueueGroupScanBatch(const GroupScanFrameBatch &frames, int deviceId);
+    void drainPendingGroupScanBatches();
 
 signals:
     void decoderSettingsChanged(QVector<GroupScanSettings> groups,
@@ -175,6 +179,11 @@ private:
     bool m_scanCachingPaused = false;
     bool m_waitingForTrackingStart = false;
     bool m_captureWasActiveBeforeApply = false;
+    QMutex m_pendingScanMutex;
+    QHash<QString, GroupScanFrame> m_pendingScanFrames;
+    QHash<QString, int> m_pendingScanScores;
+    QQueue<QString> m_pendingScanOrder;
+    int m_pendingScanDeviceId = -1;
     int m_activePresetId = 0;
     QString m_scanCachePath;
 };

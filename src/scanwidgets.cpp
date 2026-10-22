@@ -910,6 +910,13 @@ void BScanWidget::appendFrameAtColumn(const DecodedFrame &frame, double scale,
         update();
 }
 
+bool BScanWidget::appendFrameAtColumnDeferred(const DecodedFrame &frame,
+                                               double scale, int column,
+                                               int sourceBeam)
+{
+    return appendFrameAtColumnInternal(frame, scale, column, sourceBeam);
+}
+
 void BScanWidget::appendFrames(const QVector<DecodedFrame> &frames, double scale,
                                int sourceBeam)
 {
@@ -1513,8 +1520,14 @@ void CScanWidget::setMmPerCount(double mmPerCount)
 void CScanWidget::appendFrame(const DecodedFrame &frame, double scale,
                               int sourceBeam)
 {
-    if (appendFrameInternal(frame, scale, sourceBeam) && isVisible())
+    if (appendFrameInternal(frame, scale, sourceBeam, 0xF) && isVisible())
         update();
+}
+
+bool CScanWidget::appendFrameDeferred(const DecodedFrame &frame, double scale,
+                                      int sourceBeam, int gateMask)
+{
+    return appendFrameInternal(frame, scale, sourceBeam, gateMask);
 }
 
 void CScanWidget::appendFrames(const QVector<DecodedFrame> &frames, double scale,
@@ -1522,13 +1535,13 @@ void CScanWidget::appendFrames(const QVector<DecodedFrame> &frames, double scale
 {
     bool changed = false;
     for (const DecodedFrame &frame : frames)
-        changed = appendFrameInternal(frame, scale, sourceBeam) || changed;
+        changed = appendFrameInternal(frame, scale, sourceBeam, 0xF) || changed;
     if (changed && isVisible())
         update();
 }
 
 bool CScanWidget::appendFrameInternal(const DecodedFrame &frame, double scale,
-                                      int sourceBeam)
+                                      int sourceBeam, int gateMask)
 {
     if (frame.beams.isEmpty() && frame.measurements.isEmpty())
         return false;
@@ -1581,6 +1594,8 @@ bool CScanWidget::appendFrameInternal(const DecodedFrame &frame, double scale,
         hadAnyCell = hadAnyCell || !gateCells.isEmpty();
     bool changed = false;
     for (int gate = 0; gate < m_gateCells.size(); ++gate) {
+        if ((gateMask & (1 << gate)) == 0)
+            continue;
         const quint32 amplitude = quint32(qMax(0, amplitudes[gate]));
         auto &cells = m_gateCells[gate];
         const auto existing = cells.constFind(cell);

@@ -4,10 +4,12 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QMap>
+#include <QMutexLocker>
 #include <QSaveFile>
 #include <QSet>
 #include <QStorageInfo>
 #include <QStringList>
+#include <QTimer>
 #include <algorithm>
 #include <cmath>
 
@@ -34,6 +36,16 @@ bool copyBytes(QIODevice &source, QIODevice &target, qint64 byteCount)
     }
     return true;
 }
+
+int cachedWaveformScore(const GroupScanFrame &item)
+{
+    if (item.frame.beams.isEmpty())
+        return -1;
+    int score = 0;
+    for (qint16 sample : item.frame.beams.first())
+        score = qMax(score, qAbs(int(sample)));
+    return score;
+}
 }
 
 ScanWaveformCache::ScanWaveformCache(const QString &filePath, QObject *parent)
@@ -44,6 +56,14 @@ ScanWaveformCache::ScanWaveformCache(const QString &filePath, QObject *parent)
 void ScanWaveformCache::initialize()
 {
     close();
+    if (!m_drainTimer) {
+        m_drainTimer = new QTimer(this);
+        m_drainTimer->setTimerType(Qt::CoarseTimer);
+        m_drainTimer->setInterval(40);
+        connect(m_drainTimer, &QTimer::timeout,
+                this, &ScanWaveformCache::drainPendingBatches);
+        m_drainTimer->start();
+    }
     m_bIndex.clear();
     m_cIndex.clear();
     m_bGroupCounts.clear();
@@ -127,35 +147,89 @@ void ScanWaveformCache::setCachingEnabled(bool enabled)
     emitStatistics(true);
 }
 
-qint64 ScanWaveformCache::appendRecord(const GroupScanFrame &item)
+void ScanWaveformCache::enqueueBatch(const GroupScanFrameBatch &batch,
+                                     int deviceId)
 {
-    if (item.frame.beams.isEmpty() || item.frame.beams.first().isEmpty())
-        return -1;
-    const QVector<qint16> &samples = item.frame.beams.first();
-    const qint64 estimated = 64 + qint64(samples.size()) * qint64(sizeof(qint16));
-    if (!ensureCapacity(estimated))
-        return -1;
-
-    if (!m_file.seek(m_file.size()))
-        return -1;
-    const qint64 offset = m_file.pos();
-    QDataStream out(&m_file);
-    out.setByteOrder(QDataStream::LittleEndian);
-    out << RecordMagic << RecordVersion
-        << qint32(item.groupId) << qint32(item.amplitudeScale)
-        << item.rangeStart << item.rangeEnd
-        << quint64(item.frame.tail.timestamp) << quint32(samples.size());
-    const qint64 written = m_file.write(
-        reinterpret_cast<const char *>(samples.constData()),
-        qint64(samples.size()) * qint64(sizeof(qint16)));
-    if (out.status() != QDataStream::Ok
-        || written != qint64(samples.size()) * qint64(sizeof(qint16))) {
-        disableCaching(QStringLiteral("写入成像 A 扫缓存失败：%1")
-                           .arg(m_file.errorString()));
-        return -1;
+    if (batch.isEmpty())
+        return;
+    QMutexLocker locker(&m_pendingMutex);
+    if (m_pendingDeviceId != -1 && m_pendingDeviceId != deviceId) {
+        m_pendingFrames.clear();
+        m_pendingScores.clear();
+        m_pendingOrder.clear();
     }
-    ++m_recordCount;
-    return offset;
+    m_pendingDeviceId = deviceId;
+
+    const auto merge = [this](const QString &key, GroupScanFrame item, int score) {
+        if (m_pendingFrames.contains(key)) {
+            if (score > m_pendingScores.value(key, -1)) {
+                m_pendingFrames.insert(key, std::move(item));
+                m_pendingScores.insert(key, score);
+            }
+            return;
+        }
+        while (m_pendingFrames.size() >= 4096 && !m_pendingOrder.isEmpty()) {
+            const QString oldest = m_pendingOrder.dequeue();
+            m_pendingFrames.remove(oldest);
+            m_pendingScores.remove(oldest);
+        }
+        m_pendingOrder.enqueue(key);
+        m_pendingFrames.insert(key, std::move(item));
+        m_pendingScores.insert(key, score);
+    };
+
+    for (const GroupScanFrame &source : batch) {
+        if ((source.triggeredModes & 0x2) != 0 && source.bColumn >= 0) {
+            GroupScanFrame item = source;
+            item.triggeredModes = 0x2;
+            item.cGateMask = 0;
+            merge(QStringLiteral("B:%1:%2").arg(item.groupId).arg(item.bColumn),
+                  std::move(item), cachedWaveformScore(source));
+        }
+        if ((source.triggeredModes & 0x4) == 0
+            || source.frame.measurements.isEmpty())
+            continue;
+        const BeamMeasurement &measurement = source.frame.measurements.first();
+        const int amplitudes[4] = {int(measurement.amplitudeA),
+                                   int(measurement.amplitudeB),
+                                   int(measurement.amplitudeC),
+                                   int(measurement.amplitudeI)};
+        for (int gate = 0; gate < 4; ++gate) {
+            if ((source.cGateMask & (1 << gate)) == 0)
+                continue;
+            GroupScanFrame item = source;
+            item.triggeredModes = 0x4;
+            item.bColumn = -1;
+            item.cGateMask = 1 << gate;
+            merge(QStringLiteral("C:%1:%2:%3:%4")
+                      .arg(item.groupId).arg(gate)
+                      .arg(item.cColumn).arg(item.cRow),
+                  std::move(item), amplitudes[gate]);
+        }
+    }
+}
+
+void ScanWaveformCache::drainPendingBatches()
+{
+    GroupScanFrameBatch batch;
+    int deviceId = -1;
+    {
+        QMutexLocker locker(&m_pendingMutex);
+        batch.reserve(m_pendingFrames.size());
+        while (!m_pendingOrder.isEmpty()) {
+            const QString key = m_pendingOrder.dequeue();
+            const auto it = m_pendingFrames.find(key);
+            if (it == m_pendingFrames.end())
+                continue;
+            batch.append(std::move(it.value()));
+            m_pendingFrames.erase(it);
+            m_pendingScores.remove(key);
+        }
+        deviceId = m_pendingDeviceId;
+        m_pendingDeviceId = -1;
+    }
+    if (!batch.isEmpty())
+        storeBatch(std::move(batch), deviceId);
 }
 
 void ScanWaveformCache::storeBatch(GroupScanFrameBatch batch, int deviceId)
@@ -163,14 +237,25 @@ void ScanWaveformCache::storeBatch(GroupScanFrameBatch batch, int deviceId)
     Q_UNUSED(deviceId)
     if (!m_cachingEnabled || m_disabled)
         return;
+
+    struct PendingRecord {
+        qint64 relativeOffset = -1;
+        int groupId = 0;
+        bool updateB = false;
+        quint64 bIndexKey = 0;
+        int bScore = -1;
+        QVector<QPair<ScanCacheCKey, int>> cUpdates;
+    };
+    QByteArray writeBuffer;
+    QVector<PendingRecord> pendingRecords;
+    pendingRecords.reserve(batch.size());
+
     for (const GroupScanFrame &item : qAsConst(batch)) {
         if (item.frame.beams.isEmpty() || item.frame.beams.first().isEmpty())
             continue;
 
         const QVector<qint16> &samples = item.frame.beams.first();
-        int waveformScore = 0;
-        for (qint16 sample : samples)
-            waveformScore = qMax(waveformScore, qAbs(int(sample)));
+        const int waveformScore = cachedWaveformScore(item);
 
         const quint64 currentBKey = item.bColumn >= 0
             ? bKey(item.groupId, item.bColumn) : 0;
@@ -188,6 +273,8 @@ void ScanWaveformCache::storeBatch(GroupScanFrameBatch batch, int deviceId)
                                        int(measurement.amplitudeC),
                                        int(measurement.amplitudeI)};
             for (int gate = 0; gate < 4; ++gate) {
+                if ((item.cGateMask & (1 << gate)) == 0)
+                    continue;
                 const ScanCacheCKey key{item.groupId, gate,
                                         item.cColumn, item.cRow};
                 if (!m_cIndex.contains(key)
@@ -198,22 +285,54 @@ void ScanWaveformCache::storeBatch(GroupScanFrameBatch batch, int deviceId)
         if (!updateB && cUpdates.isEmpty())
             continue;
 
-        // B and every updated C gate from the same spatial trigger share one
-        // file record.  Only their tiny offset indexes are kept in memory.
-        const qint64 offset = appendRecord(item);
-        if (offset < 0)
+        QByteArray record;
+        QDataStream out(&record, QIODevice::WriteOnly);
+        out.setByteOrder(QDataStream::LittleEndian);
+        out << RecordMagic << RecordVersion
+            << qint32(item.groupId) << qint32(item.amplitudeScale)
+            << item.rangeStart << item.rangeEnd
+            << quint64(item.frame.tail.timestamp) << quint32(samples.size());
+        record.append(reinterpret_cast<const char *>(samples.constData()),
+                      qsizetype(samples.size()) * qsizetype(sizeof(qint16)));
+        if (out.status() != QDataStream::Ok)
             continue;
-        if (updateB) {
-            const quint64 key = bKey(item.groupId, item.bColumn);
-            if (!m_bIndex.contains(key))
-                ++m_bGroupCounts[item.groupId];
-            m_bIndex.insert(key, RecordMeta{offset, waveformScore});
+        PendingRecord pending;
+        pending.relativeOffset = writeBuffer.size();
+        pending.groupId = item.groupId;
+        pending.updateB = updateB;
+        pending.bIndexKey = currentBKey;
+        pending.bScore = waveformScore;
+        pending.cUpdates = std::move(cUpdates);
+        pendingRecords.append(std::move(pending));
+        writeBuffer.append(record);
+    }
+
+    if (!writeBuffer.isEmpty()) {
+        if (!ensureCapacity(writeBuffer.size()))
+            return;
+        const qint64 baseOffset = m_file.size();
+        if (!m_file.seek(baseOffset)
+            || m_file.write(writeBuffer) != writeBuffer.size()) {
+            disableCaching(QStringLiteral("批量写入成像 A 扫缓存失败：%1")
+                               .arg(m_file.errorString()));
+            return;
         }
-        for (const auto &update : qAsConst(cUpdates)) {
-            if (!m_cIndex.contains(update.first))
-                ++m_cGroupCounts[item.groupId];
-            m_cIndex.insert(update.first, RecordMeta{offset, update.second});
+        for (const PendingRecord &pending : qAsConst(pendingRecords)) {
+            const qint64 offset = baseOffset + pending.relativeOffset;
+            if (pending.updateB) {
+                if (!m_bIndex.contains(pending.bIndexKey))
+                    ++m_bGroupCounts[pending.groupId];
+                m_bIndex.insert(pending.bIndexKey,
+                                RecordMeta{offset, pending.bScore});
+            }
+            for (const auto &update : pending.cUpdates) {
+                if (!m_cIndex.contains(update.first))
+                    ++m_cGroupCounts[pending.groupId];
+                m_cIndex.insert(update.first,
+                                RecordMeta{offset, update.second});
+            }
         }
+        m_recordCount += quint64(pendingRecords.size());
     }
     // Flushing every decoder batch can stall the cache thread and grow its
     // queued connection backlog at high PRF. One flush per second preserves
@@ -284,11 +403,25 @@ void ScanWaveformCache::requestCWaveform(int groupId, int gate, int x, int y)
 
 void ScanWaveformCache::resetAll()
 {
+    {
+        QMutexLocker locker(&m_pendingMutex);
+        m_pendingFrames.clear();
+        m_pendingScores.clear();
+        m_pendingOrder.clear();
+        m_pendingDeviceId = -1;
+    }
     initialize();
 }
 
 void ScanWaveformCache::resetGroupMode(int groupId, int mode)
 {
+    {
+        QMutexLocker locker(&m_pendingMutex);
+        m_pendingFrames.clear();
+        m_pendingScores.clear();
+        m_pendingOrder.clear();
+        m_pendingDeviceId = -1;
+    }
     if (mode & 0x2) {
         for (auto it = m_bIndex.begin(); it != m_bIndex.end();) {
             if (int(quint32(it.key() >> 32)) == groupId)

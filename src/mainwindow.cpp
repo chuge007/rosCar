@@ -90,6 +90,16 @@ bool copyDeviceBytes(QIODevice &source, QIODevice &target, qint64 byteCount)
     }
     return true;
 }
+
+int waveformScore(const GroupScanFrame &item)
+{
+    if (item.frame.beams.isEmpty())
+        return -1;
+    int score = 0;
+    for (qint16 sample : item.frame.beams.first())
+        score = qMax(score, qAbs(int(sample)));
+    return score;
+}
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
@@ -126,6 +136,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     qRegisterMetaType<GroupScanFrameBatch>("GroupScanFrameBatch");
     qRegisterMetaType<QVector<GroupScanSettings>>("QVector<GroupScanSettings>");
     qRegisterMetaType<RawPacketBuffer>("RawPacketBuffer");
+
+    auto *scanUiTimer = new QTimer(this);
+    scanUiTimer->setTimerType(Qt::CoarseTimer);
+    scanUiTimer->setInterval(40);
+    connect(scanUiTimer, &QTimer::timeout,
+            this, &MainWindow::drainPendingGroupScanBatches);
+    scanUiTimer->start();
 
     m_waveformCacheThread = new QThread(this);
     m_waveformCache = new ScanWaveformCache(m_scanCachePath);
@@ -218,10 +235,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     connect(m_decoder, &FrameDecoderWorker::frameDecoded,
             this, &MainWindow::acceptDecodedFrame, Qt::QueuedConnection);
     connect(m_decoder, &FrameDecoderWorker::groupScanBatchDecoded,
-            this, &MainWindow::acceptGroupScanBatch, Qt::QueuedConnection);
+            this, &MainWindow::enqueueGroupScanBatch, Qt::DirectConnection);
     connect(m_decoder, &FrameDecoderWorker::groupScanBatchDecoded,
-            m_waveformCache, &ScanWaveformCache::storeBatch,
-            Qt::QueuedConnection);
+            m_waveformCache, &ScanWaveformCache::enqueueBatch,
+            Qt::DirectConnection);
     connect(m_decoder, &FrameDecoderWorker::decodeFailed, this, [this](const QString &error) {
         statusBar()->showMessage(error, 2000);
     }, Qt::QueuedConnection);
@@ -1187,6 +1204,14 @@ void MainWindow::setScanSessionActive(bool active)
         return;
     }
 
+    {
+        QMutexLocker locker(&m_pendingScanMutex);
+        m_pendingScanFrames.clear();
+        m_pendingScanScores.clear();
+        m_pendingScanOrder.clear();
+        m_pendingScanDeviceId = -1;
+    }
+
     m_scanSessionActive = active;
     m_scanCachingPaused = false;
     if (m_robotPanel)
@@ -1317,18 +1342,35 @@ void MainWindow::acceptGroupScanBatch(GroupScanFrameBatch frames, int deviceId)
 {
     if (!m_scanSessionActive || deviceId != m_deviceId->value() || frames.isEmpty())
         return;
+    QSet<BScanWidget *> changedBScans;
+    QSet<CScanWidget *> changedCScans;
     for (const GroupScanFrame &item : qAsConst(frames)) {
         const double scale = PacketDecoder::amplitudeScale(item.amplitudeScale);
         if (item.triggeredModes & 0x2) {
             BScanWidget *bScan = ensureBScan(item.groupId);
             bScan->setRange(item.rangeStart, item.rangeEnd);
-            bScan->appendFrameAtColumn(item.frame, scale, item.bColumn, 0);
+            if (bScan->appendFrameAtColumnDeferred(item.frame, scale,
+                                                   item.bColumn, 0))
+                changedBScans.insert(bScan);
         }
-        if (item.triggeredModes & 0x4)
-            ensureCScan(item.groupId)->appendFrame(item.frame, scale, 0);
+        if (item.triggeredModes & 0x4) {
+            CScanWidget *cScan = ensureCScan(item.groupId);
+            if (cScan->appendFrameDeferred(item.frame, scale, 0,
+                                           item.cGateMask))
+                changedCScans.insert(cScan);
+        }
         m_groupLastFrames.insert(item.groupId, item.frame);
         if (item.groupId == currentGroupId())
             m_lastFrame = item.frame;
+    }
+
+    for (BScanWidget *scan : qAsConst(changedBScans)) {
+        if (scan->isVisible())
+            scan->update();
+    }
+    for (CScanWidget *scan : qAsConst(changedCScans)) {
+        if (scan->isVisible())
+            scan->update();
     }
 
     if (m_lastFrame.beams.isEmpty())
@@ -1351,6 +1393,92 @@ void MainWindow::acceptGroupScanBatch(GroupScanFrameBatch frames, int deviceId)
         m_encoderStatus->setText(QStringLiteral("编码器 A %1 / B %2")
                                      .arg(t.encoder[0]).arg(t.encoder[1]));
     }
+}
+
+void MainWindow::enqueueGroupScanBatch(const GroupScanFrameBatch &frames,
+                                       int deviceId)
+{
+    if (frames.isEmpty())
+        return;
+    QMutexLocker locker(&m_pendingScanMutex);
+    if (m_pendingScanDeviceId != -1 && m_pendingScanDeviceId != deviceId) {
+        m_pendingScanFrames.clear();
+        m_pendingScanScores.clear();
+        m_pendingScanOrder.clear();
+    }
+    m_pendingScanDeviceId = deviceId;
+
+    const auto merge = [this](const QString &key, GroupScanFrame item, int score) {
+        if (m_pendingScanFrames.contains(key)) {
+            if (score > m_pendingScanScores.value(key, -1)) {
+                m_pendingScanFrames.insert(key, std::move(item));
+                m_pendingScanScores.insert(key, score);
+            }
+            return;
+        }
+        while (m_pendingScanFrames.size() >= 4096
+               && !m_pendingScanOrder.isEmpty()) {
+            const QString oldest = m_pendingScanOrder.dequeue();
+            m_pendingScanFrames.remove(oldest);
+            m_pendingScanScores.remove(oldest);
+        }
+        m_pendingScanOrder.enqueue(key);
+        m_pendingScanFrames.insert(key, std::move(item));
+        m_pendingScanScores.insert(key, score);
+    };
+
+    for (const GroupScanFrame &source : frames) {
+        if ((source.triggeredModes & 0x2) != 0 && source.bColumn >= 0) {
+            GroupScanFrame item = source;
+            item.triggeredModes = 0x2;
+            item.cGateMask = 0;
+            merge(QStringLiteral("B:%1:%2").arg(item.groupId).arg(item.bColumn),
+                  std::move(item), waveformScore(source));
+        }
+        if ((source.triggeredModes & 0x4) == 0
+            || source.frame.measurements.isEmpty())
+            continue;
+        const BeamMeasurement &measurement = source.frame.measurements.first();
+        const int amplitudes[4] = {int(measurement.amplitudeA),
+                                   int(measurement.amplitudeB),
+                                   int(measurement.amplitudeC),
+                                   int(measurement.amplitudeI)};
+        for (int gate = 0; gate < 4; ++gate) {
+            if ((source.cGateMask & (1 << gate)) == 0)
+                continue;
+            GroupScanFrame item = source;
+            item.triggeredModes = 0x4;
+            item.bColumn = -1;
+            item.cGateMask = 1 << gate;
+            merge(QStringLiteral("C:%1:%2:%3:%4")
+                      .arg(item.groupId).arg(gate)
+                      .arg(item.cColumn).arg(item.cRow),
+                  std::move(item), amplitudes[gate]);
+        }
+    }
+}
+
+void MainWindow::drainPendingGroupScanBatches()
+{
+    GroupScanFrameBatch batch;
+    int deviceId = -1;
+    {
+        QMutexLocker locker(&m_pendingScanMutex);
+        batch.reserve(m_pendingScanFrames.size());
+        while (!m_pendingScanOrder.isEmpty()) {
+            const QString key = m_pendingScanOrder.dequeue();
+            const auto it = m_pendingScanFrames.find(key);
+            if (it == m_pendingScanFrames.end())
+                continue;
+            batch.append(std::move(it.value()));
+            m_pendingScanFrames.erase(it);
+            m_pendingScanScores.remove(key);
+        }
+        deviceId = m_pendingScanDeviceId;
+        m_pendingScanDeviceId = -1;
+    }
+    if (!batch.isEmpty())
+        acceptGroupScanBatch(std::move(batch), deviceId);
 }
 
 void MainWindow::renderCurrentFrame(bool newlyAcquired)

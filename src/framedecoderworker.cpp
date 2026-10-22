@@ -189,6 +189,7 @@ void FrameDecoderWorker::processEncoderTriggeredPackets()
             int bColumn = -1;
             int cColumn = 0;
             int cRow = 0;
+            int cGateMask = 0;
             bool inspectBColumn = false;
             if (bEnabled) {
                 const qint64 delta = encoderA - state.originA;
@@ -217,15 +218,15 @@ void FrameDecoderWorker::processEncoderTriggeredPackets()
                 if (column != state.lastCColumn || row != state.lastCRow) {
                     state.lastCColumn = column;
                     state.lastCRow = row;
-                    cColumn = int(qBound<qint64>(qint64(INT_MIN), column,
-                                                  qint64(INT_MAX)));
-                    cRow = int(qBound<qint64>(qint64(INT_MIN), row,
-                                              qint64(INT_MAX)));
-                    triggeredModes |= 0x4;
+                    state.lastCGateScores = {{-1, -1, -1, -1}};
                 }
+                cColumn = int(qBound<qint64>(qint64(INT_MIN), column,
+                                              qint64(INT_MAX)));
+                cRow = int(qBound<qint64>(qint64(INT_MIN), row,
+                                          qint64(INT_MAX)));
             }
-            if (inspectBColumn) {
-                BeamMeasurement measurement;
+            BeamMeasurement measurement;
+            if (inspectBColumn || cEnabled) {
                 if (!PacketDecoder::decodeSelectedMeasurement(
                         packetView, settings.groupOffsetWords,
                         settings.beamCount, settings.pointCount,
@@ -233,6 +234,8 @@ void FrameDecoderWorker::processEncoderTriggeredPackets()
                     emit decodeFailed(error);
                     continue;
                 }
+            }
+            if (inspectBColumn) {
                 const int score = int(qMax(qMax(measurement.amplitudeA,
                                                 measurement.amplitudeB),
                                            qMax(measurement.amplitudeC,
@@ -245,6 +248,20 @@ void FrameDecoderWorker::processEncoderTriggeredPackets()
                     state.lastBScore = score;
                     triggeredModes |= 0x2;
                 }
+            }
+            if (cEnabled) {
+                const int amplitudes[4] = {int(measurement.amplitudeA),
+                                           int(measurement.amplitudeB),
+                                           int(measurement.amplitudeC),
+                                           int(measurement.amplitudeI)};
+                for (int gate = 0; gate < 4; ++gate) {
+                    if (amplitudes[gate] <= state.lastCGateScores[gate])
+                        continue;
+                    state.lastCGateScores[gate] = amplitudes[gate];
+                    cGateMask |= 1 << gate;
+                }
+                if (cGateMask != 0)
+                    triggeredModes |= 0x4;
             }
             if (triggeredModes == 0)
                 continue;
@@ -265,6 +282,7 @@ void FrameDecoderWorker::processEncoderTriggeredPackets()
             item.bColumn = bColumn;
             item.cColumn = cColumn;
             item.cRow = cRow;
+            item.cGateMask = cGateMask;
             item.amplitudeScale = settings.amplitudeScale;
             item.rangeStart = settings.rangeStart;
             item.rangeEnd = settings.rangeEnd;

@@ -5,6 +5,10 @@
 #include <QHash>
 #include <QElapsedTimer>
 #include <QObject>
+#include <QMutex>
+#include <QQueue>
+
+class QTimer;
 
 struct ScanCacheCKey
 {
@@ -37,6 +41,7 @@ public slots:
     void initialize();
     void close();
     void setCachingEnabled(bool enabled);
+    void enqueueBatch(const GroupScanFrameBatch &batch, int deviceId);
     void storeBatch(GroupScanFrameBatch batch, int deviceId);
     void requestBWaveform(int groupId, int column, double depth);
     void requestCWaveform(int groupId, int gate, int x, int y);
@@ -69,7 +74,7 @@ private:
     };
 
     static quint64 bKey(int groupId, int column);
-    qint64 appendRecord(const GroupScanFrame &item);
+    void drainPendingBatches();
     bool readRecord(qint64 offset, LoadedRecord &record);
     bool compactReferencedRecords();
     bool ensureCapacity(qint64 bytesToAppend);
@@ -82,6 +87,12 @@ private:
     QHash<ScanCacheCKey, RecordMeta> m_cIndex;
     QHash<int, int> m_bGroupCounts;
     QHash<int, int> m_cGroupCounts;
+    QMutex m_pendingMutex;
+    QHash<QString, GroupScanFrame> m_pendingFrames;
+    QHash<QString, int> m_pendingScores;
+    QQueue<QString> m_pendingOrder;
+    int m_pendingDeviceId = -1;
+    QTimer *m_drainTimer = nullptr;
     bool m_disabled = false;
     bool m_cachingEnabled = false;
     quint64 m_recordCount = 0;

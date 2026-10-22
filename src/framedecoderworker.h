@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QObject>
 #include <QVector>
+#include <array>
 
 class DeviceController;
 class QTimer;
@@ -33,6 +34,7 @@ struct GroupScanFrame
     int bColumn = -1;
     int cColumn = 0;
     int cRow = 0;
+    int cGateMask = 0xF;
     int amplitudeScale = 4096;
     double rangeStart = 0.0;
     double rangeEnd = 50.0;
@@ -67,6 +69,7 @@ private:
         int lastBScore = -1;
         qint64 lastCColumn = -1;
         qint64 lastCRow = -1;
+        std::array<int, 4> lastCGateScores{{-1, -1, -1, -1}};
         int direction = 0;
         bool hasOrigin = false;
     };

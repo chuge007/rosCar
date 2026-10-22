@@ -2,6 +2,7 @@
 #include "devicecontroller.h"
 #include "parameterpanel.h"
 #include "client.h"
+#include "usbbootstrap.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -156,6 +157,10 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("PA1664Workbench");
     QDir::setCurrent(QCoreApplication::applicationDirPath());
     prepareSessionLogs();
+    QString usbPreparationWarning;
+    UsbBootstrap::prepare(app, &usbPreparationWarning);
+    if (!usbPreparationWarning.isEmpty())
+        qWarning().noquote() << "USB_PREPARE:" << usbPreparationWarning;
     // The combo SDK keeps a second, server-side configuration repository in
     // configs/ultrasound_device_0.  Merely loading default_config.json does not
     // remove old group directories, so the USB mapper otherwise restores and
