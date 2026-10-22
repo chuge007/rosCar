@@ -76,7 +76,10 @@ bool ClampMotorSettings::operator==(const ClampMotorSettings& other) const {
   return communicationMode == other.communicationMode &&
       serialPort.trimmed().compare(other.serialPort.trimmed(), Qt::CaseInsensitive) == 0 &&
       serialBaudRate == other.serialBaudRate && canBitrate == other.canBitrate &&
-      motorId == other.motorId && sign == other.sign &&
+      motorId == other.motorId && sign == other.sign && alias == other.alias &&
+      gearRatio == other.gearRatio &&
+      upperLimit == other.upperLimit && lowerLimit == other.lowerLimit &&
+      upperLimitEnabled == other.upperLimitEnabled && lowerLimitEnabled == other.lowerLimitEnabled &&
       zdtFirmware == other.zdtFirmware &&
       zdtMaximumSpeedRpm == other.zdtMaximumSpeedRpm &&
       zdtAcceleration == other.zdtAcceleration;
@@ -300,12 +303,23 @@ void DriveSettings::save(QSettings& settings) const {
       settings.setValue(QStringLiteral("canBitrate"), motor.canBitrate);
       settings.setValue(QStringLiteral("motorId"), motor.motorId);
       settings.setValue(QStringLiteral("sign"), motor.sign);
+      settings.setValue(QStringLiteral("alias"), motor.alias);
+      settings.setValue(QStringLiteral("gearRatio"), motor.gearRatio);
+      settings.setValue(QStringLiteral("upperLimit"), motor.upperLimit);
+      settings.setValue(QStringLiteral("lowerLimit"), motor.lowerLimit);
+      settings.setValue(QStringLiteral("upperLimitEnabled"), motor.upperLimitEnabled);
+      settings.setValue(QStringLiteral("lowerLimitEnabled"), motor.lowerLimitEnabled);
       settings.setValue(QStringLiteral("zdtFirmware"),
                         motor.zdtFirmware == ZdtFirmware::X ? "x" : "emm");
       settings.setValue(QStringLiteral("zdtMaximumSpeedRpm"), motor.zdtMaximumSpeedRpm);
       settings.setValue(QStringLiteral("zdtAcceleration"), motor.zdtAcceleration);
     }
     settings.endArray();
+  }
+  {
+    const char* syncKeys[] = {"clampXMotorsSync", "clampYMotorsSync", "clampZMotorsSync"};
+    for (int axis = 0; axis < 3; ++axis)
+      settings.setValue(QString::fromLatin1(syncKeys[axis]), clampMotorSyncEnabled[axis]);
   }
   settings.setValue(
       CRAWLING_TEXT("wheelCommunicationMode"),
@@ -430,6 +444,12 @@ DriveSettings DriveSettings::load(QSettings& settings) {
         motor.canBitrate = settings.value(QStringLiteral("canBitrate"), 500000).toInt();
         motor.motorId = settings.value(QStringLiteral("motorId"), axis + 1).toInt();
         motor.sign = settings.value(QStringLiteral("sign"), 1).toInt();
+        motor.alias = settings.value(QStringLiteral("alias")).toString();
+        motor.gearRatio = settings.value(QStringLiteral("gearRatio"), 10.0).toDouble();
+        motor.upperLimit = settings.value(QStringLiteral("upperLimit"), 36000.0).toDouble();
+        motor.lowerLimit = settings.value(QStringLiteral("lowerLimit"), 0.0).toDouble();
+        motor.upperLimitEnabled = settings.value(QStringLiteral("upperLimitEnabled"), false).toBool();
+        motor.lowerLimitEnabled = settings.value(QStringLiteral("lowerLimitEnabled"), false).toBool();
         motor.zdtFirmware = settings.value(QStringLiteral("zdtFirmware"), "x").toString()
                 == QStringLiteral("emm") ? ZdtFirmware::Emm : ZdtFirmware::X;
         motor.zdtMaximumSpeedRpm = settings.value(QStringLiteral("zdtMaximumSpeedRpm"), 100).toInt();
@@ -452,6 +472,12 @@ DriveSettings DriveSettings::load(QSettings& settings) {
       motor.sign = signs[axis];
       value.clampMotors[axis] = {motor};
     }
+  }
+  {
+    const char* syncKeys[] = {"clampXMotorsSync", "clampYMotorsSync", "clampZMotorsSync"};
+    for (int axis = 0; axis < 3; ++axis)
+      value.clampMotorSyncEnabled[axis] =
+          settings.value(QString::fromLatin1(syncKeys[axis]), false).toBool();
   }
   const QString wheelMode = settings.value(
       CRAWLING_TEXT("wheelCommunicationMode"), CRAWLING_TEXT("can"))

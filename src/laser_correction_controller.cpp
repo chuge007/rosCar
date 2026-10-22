@@ -58,8 +58,8 @@ constexpr double kMaximumGuidanceWidthDriftM = 0.012;
 // Cruise remains constant while a measured seam can still be steered inward.
 constexpr double kBoundaryRecoveryCurvatureRadPerM = 3.20;
 constexpr double kMinimumContainmentAngularRadps = 0.04;
-constexpr double kScanContainmentMarginRatio = 0.25;
-constexpr double kScanContainmentReleaseRatio = 0.29;
+constexpr double kScanContainmentMarginRatio = 0.30;
+constexpr double kScanContainmentReleaseRatio = 0.35;
 constexpr double kScanStopMarginRatio = 0.04;
 // A live source frame and a positive measured margin are enough to keep a
 // short recovery window alive. Predicted margin is steering guidance only;
@@ -924,9 +924,16 @@ void LaserCorrectionController::processObservation(
     if (reacquisitionPending_) {
       // Reacquire within the last measured corridor, not anywhere in the
       // image. A stable speckle at the other edge is not the same weld.
-      detectorConfig.referenceAbsoluteCenterRatio = trackedGapAbsoluteCenterRatio_;
+      const qint64 reacqAgeMs = lastValidDetectionMs_ >= enabledAtMs_
+          ? std::max<qint64>(0, now - lastValidDetectionMs_)
+          : 0;
+      const double reacqDriftHorizonS = clamp(reacqAgeMs / 1000.0, 0.0, 2.0);
+      const double reacqPredictedDrift = boundarySignedRateRatioPerS_ * reacqDriftHorizonS;
+      detectorConfig.referenceAbsoluteCenterRatio =
+          clamp(trackedGapAbsoluteCenterRatio_ + reacqPredictedDrift, 0.0, 1.0);
       detectorConfig.maximumReferenceCenterDriftRatio = std::min(
-          0.15, std::max(0.08, detectorConfig.maximumAbsoluteCenterJumpRatio * 2.0));
+          0.18, std::max(0.08, detectorConfig.maximumAbsoluteCenterJumpRatio * 2.0 +
+                               reacqAgeMs * 0.00004));
       const double previousAbsoluteWidth = trackedGapWidthRatio_ *
           std::max(0.0, trackedLineEndRatio_ - trackedLineStartRatio_);
       detectorConfig.minimumGapRatio = std::max(
@@ -936,11 +943,23 @@ void LaserCorrectionController::processObservation(
     }
   }
   if (gapTrackerValid_ && !reacquisitionPending_) {
+    const qint64 heldAgeMs = lastValidDetectionMs_ >= enabledAtMs_
+        ? std::max<qint64>(0, now - lastValidDetectionMs_)
+        : 0;
+    const double driftHorizonS = clamp(heldAgeMs / 1000.0, 0.0, 1.5);
+    const double predictedDrift = boundarySignedRateRatioPerS_ * driftHorizonS;
+    const double adaptiveJumpGrowth = clamp(heldAgeMs * 0.00005, 0.0, 0.08);
     detectorConfig.expectedCenterRatio = trackedGapCenterRatio_;
     detectorConfig.expectedGapWidthRatio = trackedGapWidthRatio_;
     detectorConfig.expectedAbsoluteCenterRatio =
         liveContourTrack ? lastObservedGapAbsoluteCenterRatio_
                          : trackedGapAbsoluteCenterRatio_;
+    detectorConfig.expectedAbsoluteCenterRatio =
+        clamp(detectorConfig.expectedAbsoluteCenterRatio + predictedDrift, 0.0, 1.0);
+    detectorConfig.maximumAbsoluteCenterJumpRatio = std::max(
+        settings_.detector.maximumAbsoluteCenterJumpRatio,
+        std::min(settings_.detector.maximumAbsoluteCenterJumpRatio + adaptiveJumpGrowth,
+                 0.14));
     if (liveContourTrack) {
       detectorConfig.expectedCenterRatio = detectorConfig.expectedAbsoluteCenterRatio;
     }
@@ -2790,10 +2809,11 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
                                !detectionEdgeBreakFallback_;
       const double predictedCenterErrorM = centerErrorM +
           (usableTrend ? clamp(filteredSignedCenterRateMps_ * 0.20, -0.008, 0.008) : 0.0);
-      double centerErrorForControl =
-          std::abs(predictedCenterErrorM) <= kLaserCenterDeadbandM
-              ? 0.0
-              : predictedCenterErrorM;
+      // Soft deadband avoids step discontinuities from abrupt zero-clamping.
+      constexpr double kSoftScale = 3.0;
+      const double softFactor = std::tanh(
+          kSoftScale * std::abs(predictedCenterErrorM) / kLaserCenterDeadbandM);
+      double centerErrorForControl = predictedCenterErrorM * softFactor;
       // Do not let one-pixel quantization reverse the differential pair while
       // the weld is already within a few millimetres of the optical center.
       // A large opposite error is still accepted immediately; only the small
@@ -3683,6 +3703,8 @@ void LaserCorrectionController::resetSession() {
   lastImageMs_ = -1;
   lastValidDetectionMs_ = -1;
   lastObservedGapAbsoluteCenterRatio_ = 0.5;
+  searchBiasLossMs_ = -1;
+  searchBiasDirection_ = 1;
   lastObservedWasContour_ = false;
   lastTelemetryMs_ = -1;
   lastStartupDiagnosticMs_ = -1;
@@ -4163,8 +4185,28 @@ void LaserCorrectionController::applyCommand(double targetLinearMps,
         lastValidDetectionMs_);
     if (heldAgeMs >= kDetectionSearchDelayMs) {
       const qint64 searchAgeMs = heldAgeMs - kDetectionSearchDelayMs;
+      if (searchBiasLossMs_ != lastValidDetectionMs_) {
+        searchBiasLossMs_ = lastValidDetectionMs_;
+        const double seamOffsetRatio =
+            (lastObservedGapAbsoluteCenterRatio_ - 0.5) +
+            clamp(boundarySignedRateRatioPerS_ * 0.30, -0.10, 0.10);
+        searchBiasDirection_ = std::abs(seamOffsetRatio) >= 0.01
+            ? (seamOffsetRatio < 0.0 ? -1 : 1)
+            : (currentAngularRadps_ < 0.0 ? -1 : 1);
+        emit diagnosticLogMessage(QStringLiteral(
+            "event=detection_search_bias session=%1 camera_seq=%2 "
+            "last_center_ratio=%3 drift_ratio_per_s=%4 direction=%5")
+            .arg(trajectorySessionId_).arg(cameraFrameSequence_)
+            .arg(lastObservedGapAbsoluteCenterRatio_, 0, 'f', 6)
+            .arg(boundarySignedRateRatioPerS_, 0, 'f', 6)
+            .arg(searchBiasDirection_));
+      }
+      const qint64 searchLobe = searchAgeMs < kDetectionSearchHalfCycleMs
+          ? 0
+          : 1 + (searchAgeMs - kDetectionSearchHalfCycleMs) /
+                    (2 * kDetectionSearchHalfCycleMs);
       const int searchDirection =
-          ((searchAgeMs / kDetectionSearchHalfCycleMs) % 2 == 0) ? 1 : -1;
+          searchBiasDirection_ * (searchLobe % 2 == 0 ? 1 : -1);
       const double searchWeight = clamp(
           (heldAgeMs - kDetectionSearchDelayMs) / 350.0, 0.0, 1.0);
       targetAngularRadps += searchDirection *

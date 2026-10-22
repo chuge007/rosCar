@@ -139,7 +139,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
     auto *scanUiTimer = new QTimer(this);
     scanUiTimer->setTimerType(Qt::CoarseTimer);
-    scanUiTimer->setInterval(40);
+    scanUiTimer->setInterval(20);
     connect(scanUiTimer, &QTimer::timeout,
             this, &MainWindow::drainPendingGroupScanBatches);
     scanUiTimer->start();

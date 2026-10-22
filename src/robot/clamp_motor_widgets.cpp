@@ -5,18 +5,24 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QHBoxLayout>
+#include <QTimer>
 #include <QEvent>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHideEvent>
 #include <QKeyEvent>
+#include <QCheckBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QPalette>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSerialPortInfo>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
@@ -24,6 +30,9 @@
 #include <QtAlgorithms>
 #include <QVBoxLayout>
 #include <QWheelEvent>
+
+#include <memory>
+#include <utility>
 
 namespace crawling {
 namespace {
@@ -150,6 +159,10 @@ ClampMotorSettingsWidget::ClampMotorSettingsWidget(QWidget* parent) : QWidget(pa
     tabs_[axis] = new QTabWidget;
     tabs_[axis]->setObjectName(QStringLiteral("clampMotorTabs"));
     column->addWidget(tabs_[axis]);
+    syncCheckboxes_[axis] = new QCheckBox(QStringLiteral("同步运动"));
+    syncCheckboxes_[axis]->setToolTip(QStringLiteral("勾选后，在主控页面拖动该轴组内任意电机滑条，组内其他电机同步运动"));
+    column->addWidget(syncCheckboxes_[axis]);
+    connect(syncCheckboxes_[axis], &QCheckBox::toggled, this, [this] { notifyEdited(); });
     axes->addTab(page, axisName(axis) + QStringLiteral(" 轴"));
     connect(counts_[axis], QOverload<int>::of(&QSpinBox::valueChanged),
             this, [this, axis](int count) {
@@ -164,6 +177,89 @@ ClampMotorSettingsWidget::ClampMotorSettingsWidget(QWidget* parent) : QWidget(pa
 ClampMotorSettingsWidget::~ClampMotorSettingsWidget() {
   for (auto& axis : forms_)
     qDeleteAll(axis);
+}
+
+void ClampMotorSettingsWidget::setController(ClampMotorController* controller) {
+  if (controller_ == controller) return;
+  if (controller_) disconnect(controller_, nullptr, this, nullptr);
+  controller_ = controller;
+  if (!controller_) return;
+  connect(controller_, &ClampMotorController::positionReceived, this,
+          [this](int axis, int index, double degrees) {
+    const int key = axis * 1000 + index;
+    if (!pendingLimitRecords_.contains(key)) return;
+    const bool upper = pendingLimitRecords_.take(key);
+    if (axis < 0 || axis >= 3 || index < 0 || index >= forms_[axis].size()) return;
+    auto* f = forms_[axis][index];
+    if (upper) { f->upperLimit = degrees; f->upperLimitEnabled = true; }
+    else { f->lowerLimit = degrees; f->lowerLimitEnabled = true; }
+    if (f->upperLimitEnabled && f->lowerLimitEnabled && f->upperLimit < f->lowerLimit)
+      std::swap(f->upperLimit, f->lowerLimit);
+    updateLimitStatus(f);
+    // Apply limit immediately without marking edited, to avoid stop+reconnect.
+    applyLimitsNow(axis, index, f);
+  });
+}
+
+void ClampMotorSettingsWidget::beginRecordLimit(MotorForm* f, bool upper) {
+  int axis = -1, index = -1;
+  for (int a = 0; a < 3 && axis < 0; ++a) {
+    const int i = forms_[a].indexOf(f);
+    if (i >= 0) { axis = a; index = i; }
+  }
+  if (axis < 0) return;
+  if (!controller_) {
+    f->limitStatus->setText(QStringLiteral("控制器不可用，无法读取位置"));
+    return;
+  }
+  const auto& saved = controller_->settings().clampMotors[axis];
+  if (index >= saved.size()) {
+    f->limitStatus->setText(QStringLiteral("请先保存夹子配置并连接电机，再记录限位"));
+    return;
+  }
+  const int key = axis * 1000 + index;
+  pendingLimitRecords_.insert(key, upper);
+  f->limitStatus->setText(QStringLiteral("正在读取电机当前位置…"));
+  controller_->requestPosition(axis, index);
+  QTimer::singleShot(1200, this, [this, key, axis, index] {
+    if (!pendingLimitRecords_.remove(key)) return;
+    if (index < forms_[axis].size())
+      forms_[axis][index]->limitStatus->setText(
+          QStringLiteral("读取位置超时：请确认已保存配置、已连接电机，且协议支持位置读取（MWD CAN / ZDT CAN）"));
+  });
+}
+
+void ClampMotorSettingsWidget::updateLimitStatus(MotorForm* f) {
+  const auto text = [](bool enabled, double degrees) {
+    return enabled ? QStringLiteral("%1°").arg(degrees, 0, 'f', 2) : QStringLiteral("未设置");
+  };
+  f->limitStatus->setText(QStringLiteral("上限 %1 / 下限 %2（电机角度）")
+      .arg(text(f->upperLimitEnabled, f->upperLimit), text(f->lowerLimitEnabled, f->lowerLimit)));
+}
+
+void ClampMotorSettingsWidget::applyLimitsNow(int axis, int index, MotorForm* f) {
+  // Limits only change travel checks, so apply and persist them immediately
+  // without emitting edited(): that would stop motors and disable controls.
+  if (!controller_) return;
+  auto current = controller_->settings();
+  if (axis < 0 || axis >= 3 || index < 0 || index >= current.clampMotors[axis].size()) return;
+  auto& motor = current.clampMotors[axis][index];
+  motor.upperLimit = f->upperLimit;
+  motor.lowerLimit = f->lowerLimit;
+  motor.upperLimitEnabled = f->upperLimitEnabled;
+  motor.lowerLimitEnabled = f->lowerLimitEnabled;
+  QSettings store(DriveSettings::persistentFilePath(), QSettings::IniFormat);
+  auto latest = DriveSettings::load(store);
+  if (index < latest.clampMotors[axis].size()) {
+    auto& saved = latest.clampMotors[axis][index];
+    saved.upperLimit = motor.upperLimit;
+    saved.lowerLimit = motor.lowerLimit;
+    saved.upperLimitEnabled = motor.upperLimitEnabled;
+    saved.lowerLimitEnabled = motor.lowerLimitEnabled;
+    latest.save(store);
+    store.sync();
+  }
+  controller_->setSettings(current);
 }
 
 void ClampMotorSettingsWidget::notifyEdited() {
@@ -221,6 +317,47 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->form->addRow(QStringLiteral("通信方式"), f->mode);
   f->id = new QSpinBox;
   f->form->addRow(QStringLiteral("电机 ID"), f->id);
+  f->alias = new QLineEdit;
+  f->alias->setPlaceholderText(QStringLiteral("可选，主控页面显示此名称"));
+  f->alias->setText(motor.alias);
+  f->form->addRow(QStringLiteral("别名"), f->alias);
+  f->gearRatio = new QDoubleSpinBox;
+  f->gearRatio->setRange(0.001, 10000.0);
+  f->gearRatio->setDecimals(3);
+  f->gearRatio->setSuffix(QStringLiteral(" mm/圈"));
+  f->gearRatio->setValue(motor.gearRatio);
+  f->gearRatio->setToolTip(QStringLiteral("电机转一圈，探头实际移动的距离"));
+  f->form->addRow(QStringLiteral("传动比"), f->gearRatio);
+  auto* limitRow = new QHBoxLayout;
+  f->recordUpper = new QPushButton(QStringLiteral("记录上限位"));
+  f->recordLower = new QPushButton(QStringLiteral("记录下限位"));
+  auto* clearLimits = new QPushButton(QStringLiteral("清除限位"));
+  f->limitStatus = new QLabel(QStringLiteral("未设置限位"));
+  f->limitStatus->setStyleSheet(QStringLiteral("color:#52606d;"));
+  f->limitStatus->setWordWrap(true);
+  f->upperLimit = motor.upperLimit;
+  f->lowerLimit = motor.lowerLimit;
+  f->upperLimitEnabled = motor.upperLimitEnabled;
+  f->lowerLimitEnabled = motor.lowerLimitEnabled;
+  f->recordUpper->setToolTip(QStringLiteral("先在手动控制里把电机移动到上限位置，再点击记录"));
+  f->recordLower->setToolTip(QStringLiteral("先在手动控制里把电机移动到下限位置，再点击记录"));
+  limitRow->addWidget(f->recordUpper);
+  limitRow->addWidget(f->recordLower);
+  limitRow->addWidget(clearLimits);
+  connect(f->recordUpper, &QPushButton::clicked, this, [this, f] { beginRecordLimit(f, true); });
+  connect(f->recordLower, &QPushButton::clicked, this, [this, f] { beginRecordLimit(f, false); });
+  connect(clearLimits, &QPushButton::clicked, this, [this, f] {
+    f->upperLimitEnabled = false;
+    f->lowerLimitEnabled = false;
+    updateLimitStatus(f);
+    for (int a = 0; a < 3; ++a) {
+      const int i = forms_[a].indexOf(f);
+      if (i >= 0) { applyLimitsNow(a, i, f); break; }
+    }
+  });
+  limitRow->addWidget(f->limitStatus);
+  limitRow->addStretch();
+  f->form->addRow(QStringLiteral("限位"), limitRow);
   f->sign = new QComboBox;
   f->sign->addItem(QStringLiteral("正向 +1"), 1);
   f->sign->addItem(QStringLiteral("反向 -1"), -1);
@@ -263,6 +400,7 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->maximumRpm->setValue(motor.zdtMaximumSpeedRpm);
   f->acceleration->setRange(0, motor.zdtFirmware == ZdtFirmware::X ? 65535 : 255);
   f->acceleration->setValue(motor.zdtAcceleration);
+  updateLimitStatus(f);
   forms_[axis].append(f);
   tabs_[axis]->addTab(f->page, axisName(axis) + QString::number(forms_[axis].size()));
   connect(f->mode, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -283,6 +421,9 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   for (QSpinBox* box : {f->id, f->maximumRpm, f->acceleration})
     connect(box, QOverload<int>::of(&QSpinBox::valueChanged),
             this, [this] { notifyEdited(); });
+  connect(f->alias, &QLineEdit::textChanged, this, [this] { notifyEdited(); });
+  connect(f->gearRatio, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+          this, [this] { notifyEdited(); });
 }
 
 void ClampMotorSettingsWidget::resizeAxis(int axis, int count) {
@@ -327,6 +468,12 @@ ClampMotorAxes ClampMotorSettingsWidget::settings() const {
       motor.canBitrate = f->bitrate->currentData().toInt();
       motor.motorId = f->id->value();
       motor.sign = f->sign->currentData().toInt();
+      motor.alias = f->alias->text().trimmed();
+      motor.gearRatio = f->gearRatio->value();
+      motor.upperLimit = f->upperLimit;
+      motor.lowerLimit = f->lowerLimit;
+      motor.upperLimitEnabled = f->upperLimitEnabled;
+      motor.lowerLimitEnabled = f->lowerLimitEnabled;
       motor.zdtFirmware = ZdtFirmware(f->firmware->currentData().toInt());
       motor.zdtMaximumSpeedRpm = f->maximumRpm->value();
       motor.zdtAcceleration = f->acceleration->value();
@@ -337,7 +484,12 @@ ClampMotorAxes ClampMotorSettingsWidget::settings() const {
 }
 
 void ClampMotorSettingsWidget::setSettings(const ClampMotorAxes& axes) {
-  if (settings() == axes) return;
+  const auto current = settings();
+  bool same = current == axes;
+  for (int axis = 0; same && axis < 3; ++axis)
+    for (int index = 0; index < axes[axis].size(); ++index)
+      if (current[axis][index].alias != axes[axis][index].alias) { same = false; break; }
+  if (same) return;
   loading_ = true;
   for (int axis = 0; axis < 3; ++axis) {
     resizeAxis(axis, 0);
@@ -345,6 +497,16 @@ void ClampMotorSettingsWidget::setSettings(const ClampMotorAxes& axes) {
     counts_[axis]->setValue(forms_[axis].size());
   }
   loading_ = false;
+}
+
+void ClampMotorSettingsWidget::setSyncEnabled(int axis, bool enabled) {
+  if (axis < 0 || axis >= 3) return;
+  const QSignalBlocker blocker(syncCheckboxes_[axis]);
+  syncCheckboxes_[axis]->setChecked(enabled);
+}
+
+bool ClampMotorSettingsWidget::syncEnabled(int axis) const {
+  return axis >= 0 && axis < 3 && syncCheckboxes_[axis]->isChecked();
 }
 
 void ClampMotorSettingsWidget::refreshPorts() {
@@ -410,8 +572,22 @@ ClampMotorControlWidget::ClampMotorControlWidget(ClampMotorController* controlle
   connect(controller_.data(), &ClampMotorController::connectionChanged,
           this, [this](bool connected, const QString&) { if (!connected) resetControls(); });
   connect(controller_.data(), &QObject::destroyed, this, [this] { setEnabled(false); });
+  connect(controller_.data(), &ClampMotorController::limitReached,
+          this, &ClampMotorControlWidget::onLimitReached);
   qApp->installEventFilter(this);
   rebuild();
+}
+
+void ClampMotorControlWidget::onLimitReached(int axis, int index, bool upper) {
+  const int key = axis * 1000 + index;
+  if (auto hint = limitHints_.value(key)) {
+    hint->setText(upper ? QStringLiteral("已到上限位") : QStringLiteral("已到下限位"));
+    hint->setProperty("limitDirection", upper ? 1 : -1);
+  }
+  if (auto slider = sliders_.value(key)) {
+    const QSignalBlocker blocker(slider);
+    slider->setValue(0);
+  }
 }
 
 void ClampMotorControlWidget::rebuild() {
@@ -429,15 +605,24 @@ void ClampMotorControlWidget::rebuild() {
   grid->setHorizontalSpacing(10);
   grid->setVerticalSpacing(8);
   grid->setColumnStretch(2, 1);
+  sliders_.clear();
+  limitHints_.clear();
   int row = 0;
   const auto& axes = controller_->settings().clampMotors;
+  const auto& syncEnabled = controller_->settings().clampMotorSyncEnabled;
   for (int axis = 0; axis < 3; ++axis) {
+    auto group = std::make_shared<QVector<QPointer<QSlider>>>();
     for (int index = 0; index < axes[axis].size(); ++index, ++row) {
       const auto& motor = axes[axis][index];
-      auto* label = new QLabel(QStringLiteral("%1%2 · ID %3\n%4")
-          .arg(axisName(axis)).arg(index + 1).arg(motor.motorId)
-          .arg(clampModeName(motor.communicationMode)));
-      label->setToolTip(motor.serialPort);
+      const QString defaultName = QStringLiteral("%1%2").arg(axisName(axis)).arg(index + 1);
+      const QString name = motor.alias.trimmed().isEmpty()
+          ? QStringLiteral("%1 · ID %2\n%3").arg(defaultName).arg(motor.motorId)
+                .arg(clampModeName(motor.communicationMode))
+          : motor.alias.trimmed();
+      auto* label = new QLabel(name);
+      label->setToolTip(QStringLiteral("%1 · ID %2 · %3 · %4")
+          .arg(defaultName).arg(motor.motorId)
+          .arg(clampModeName(motor.communicationMode), motor.serialPort));
       grid->addWidget(label, row, 0);
       auto* minus = new QLabel(QStringLiteral("−"));
       auto* plus = new QLabel(QStringLiteral("+"));
@@ -450,48 +635,37 @@ void ClampMotorControlWidget::rebuild() {
       slider->setPageStep(10);
       slider->setMinimumWidth(240);
       slider->setFixedHeight(40);
-      slider->setAccessibleName(QStringLiteral("%1%2 电机双向点动")
-          .arg(axisName(axis)).arg(index + 1));
+      slider->setAccessibleName(QStringLiteral("%1 电机双向点动").arg(name));
       slider->setToolTip(QStringLiteral(
           "滑块离中心的拖动幅度就是运行速度：向左负向、向右正向；松开即停止"));
-      const auto motorForUi = motor;
-      const auto speedText = [motorForUi](int percent) {
-        const QString signedPercent = percent > 0
-            ? QStringLiteral("+%1%").arg(percent)
-            : QStringLiteral("%1%").arg(percent);
-        if (motorForUi.communicationMode != ClampCommunicationMode::ZdtCan)
-          return signedPercent;
-        const int rpm = (qAbs(percent) * motorForUi.zdtMaximumSpeedRpm + 50) / 100;
-        const QString signedRpm = percent > 0
-            ? QStringLiteral("+%1 RPM").arg(rpm)
-            : QStringLiteral("%1 RPM").arg(percent < 0 ? -rpm : rpm);
-        return QStringLiteral("%1 · %2").arg(signedPercent, signedRpm);
-      };
-      auto* value = new QLabel(speedText(0));
-      value->setObjectName(QStringLiteral("clampMotorSpeedValue"));
-      value->setProperty("zeroText", speedText(0));
-      value->setMinimumWidth(112);
-      value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-      auto* stop = new QPushButton(QStringLiteral("停止"));
-      stop->setMinimumSize(76, 40);
       grid->addWidget(minus, row, 1);
       grid->addWidget(slider, row, 2);
       grid->addWidget(plus, row, 3);
-      grid->addWidget(value, row, 4);
-      grid->addWidget(stop, row, 5);
+      auto* limitHint = new QLabel;
+      limitHint->setStyleSheet(QStringLiteral("color: #c62828; font-size: 12px;"));
+      limitHint->setMinimumWidth(72);
+      grid->addWidget(limitHint, row, 4);
+      const int key = axis * 1000 + index;
+      sliders_.insert(key, slider);
+      limitHints_.insert(key, limitHint);
+      const bool sync = syncEnabled[axis];
       connect(slider, &QSlider::valueChanged, this,
-              [this, axis, index, value, speedText](int percent) {
-        value->setText(speedText(percent));
+              [this, axis, index, slider, group, sync, limitHint](int percent) {
+        // Clear first; the controller re-emits limitReached synchronously if still blocked.
+        if (percent != 0) {
+          limitHint->clear();
+          limitHint->setProperty("limitDirection", 0);
+        }
         controller_->setMotorSpeed(axis, index, percent);
+        if (!sync || syncing_) return;
+        syncing_ = true;
+        for (const auto& other : *group)
+          if (other && other != slider && other->isEnabled()) other->setValue(percent);
+        syncing_ = false;
       });
       connect(slider, &QSlider::sliderReleased, slider, [slider] { slider->setValue(0); });
-      connect(stop, &QPushButton::clicked, this, [this, axis, index, slider] {
-        slider->setValue(0);
-        controller_->stopMotor(axis, index);
-      });
-      const bool assigned = !motor.serialPort.trimmed().isEmpty();
-      slider->setEnabled(assigned);
-      stop->setEnabled(assigned);
+      slider->setEnabled(!motor.serialPort.trimmed().isEmpty());
+      group->append(slider);
     }
   }
   if (row == 0) grid->addWidget(new QLabel(QStringLiteral("尚未配置夹子电机")), 0, 0);
@@ -504,9 +678,6 @@ void ClampMotorControlWidget::resetControls() {
     const QSignalBlocker blocker(slider);
     slider->setValue(0);
   }
-  // Value labels follow valueChanged; reset them without generating commands.
-  for (auto* label : scroll_->findChildren<QLabel*>(QStringLiteral("clampMotorSpeedValue")))
-    label->setText(label->property("zeroText").toString());
 }
 
 bool ClampMotorControlWidget::eventFilter(QObject* watched, QEvent* event) {

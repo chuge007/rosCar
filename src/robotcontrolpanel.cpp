@@ -1180,6 +1180,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     auto *clamp = new QGroupBox(QStringLiteral("夹子电机通信"), page);
     auto *clampForm = new QFormLayout(clamp);
     m_clampSettings = new crawling::ClampMotorSettingsWidget(clamp);
+    m_clampSettings->setController(m_clampController);
     clampForm->addRow(m_clampSettings);
     auto *clampSave = actionButton(QStringLiteral("保存夹子配置"));
     auto *clampRefresh = actionButton(QStringLiteral("刷新串口"));
@@ -1196,7 +1197,9 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     connect(m_clampController, &crawling::ClampMotorController::settingsChanged,
             this, [this] {
         m_settings.clampMotors = m_clampController->settings().clampMotors;
+        m_settings.clampMotorSyncEnabled = m_clampController->settings().clampMotorSyncEnabled;
         m_clampSettings->setSettings(m_settings.clampMotors);
+        for (int axis = 0; axis < 3; ++axis) m_clampSettings->setSyncEnabled(axis, m_settings.clampMotorSyncEnabled[axis]);
         m_clampControls->setEnabled(true);
     });
     auto *clampConnect = actionButton(QStringLiteral("连接夹子电机"), "primary");
@@ -1920,6 +1923,7 @@ crawling::DriveSettings RobotControlPanel::settingsFromUi() const
     value.autoConnectOnStartup = m_autoConnectCheck->isChecked();
     value.manualJogPercent = m_speedSlider->value();
     value.clampMotors = m_clampSettings->settings();
+    for (int axis = 0; axis < 3; ++axis) value.clampMotorSyncEnabled[axis] = m_clampSettings->syncEnabled(axis);
     value.wheelRadiusM = m_wheelRadius->value() / kMillimetersPerMeter;
     value.trackWidthM = m_trackWidth->value() / kMillimetersPerMeter;
     value.motorOutputToWheelRatio = m_ratio->value();
@@ -1999,6 +2003,7 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
         persistent.value(QStringLiteral("laserCorrection/imageTimeoutMs"), 500)
             .toInt());
     m_clampSettings->setSettings(settings.clampMotors);
+    for (int axis = 0; axis < 3; ++axis) m_clampSettings->setSyncEnabled(axis, settings.clampMotorSyncEnabled[axis]);
     m_wheelRadius->setValue(settings.wheelRadiusM * kMillimetersPerMeter);
     m_trackWidth->setValue(settings.trackWidthM * kMillimetersPerMeter);
     m_ratio->setValue(settings.motorOutputToWheelRatio);
@@ -2188,6 +2193,7 @@ bool RobotControlPanel::saveClampSettings()
 {
     crawling::DriveSettings current = m_settings;
     current.clampMotors = m_clampSettings->settings();
+    for (int axis = 0; axis < 3; ++axis) current.clampMotorSyncEnabled[axis] = m_clampSettings->syncEnabled(axis);
     const QString error = current.clampValidationError();
     if (!error.isEmpty()) {
         m_clampConfigState->setText(error);
@@ -2197,6 +2203,7 @@ bool RobotControlPanel::saveClampSettings()
     QSettings persistent(crawling::DriveSettings::persistentFilePath(), QSettings::IniFormat);
     auto latest = crawling::DriveSettings::load(persistent);
     latest.clampMotors = current.clampMotors;
+    latest.clampMotorSyncEnabled = current.clampMotorSyncEnabled;
     latest.save(persistent);
     persistent.sync();
     if (persistent.status() != QSettings::NoError) {
@@ -2204,6 +2211,7 @@ bool RobotControlPanel::saveClampSettings()
         return false;
     }
     m_settings.clampMotors = current.clampMotors;
+    m_settings.clampMotorSyncEnabled = current.clampMotorSyncEnabled;
     m_clampController->setSettings(current);
     m_clampControls->setEnabled(true);
     m_clampConfigState->setText(QStringLiteral("夹子配置已保存"));

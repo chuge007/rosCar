@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "wheel_synchronizer.h"
 
@@ -37,6 +37,12 @@ struct ClampMotorSettings {
   int canBitrate = 500000;
   int motorId = 1;
   int sign = 1;
+  QString alias;
+  double gearRatio = 10.0;      // mm of probe travel per motor revolution.
+  double upperLimit = 0.0;      // Motor multi-turn angle, degrees.
+  double lowerLimit = 0.0;
+  bool upperLimitEnabled = false;
+  bool lowerLimitEnabled = false;
   ZdtFirmware zdtFirmware = ZdtFirmware::X;
   int zdtMaximumSpeedRpm = 100;
   int zdtAcceleration = 1000; // RPM/s for X; 0..255 for Emm.
@@ -101,6 +107,7 @@ struct DriveSettings {
     }
     return axes;
   }();
+  std::array<bool, 3> clampMotorSyncEnabled = {false, false, false};
 
   WheelCommunicationMode wheelCommunicationMode =
       WheelCommunicationMode::Can;

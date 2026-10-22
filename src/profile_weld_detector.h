@@ -312,7 +312,147 @@ class ProfileWeldDetector final {
       deviations.push_back(std::abs(
           zAt(rightIndex) - offset - slope * points[rightIndex].x()));
     }
-    const double noise = std::max(differenceNoise, 1.4826 * median(deviations));
+    double noise = std::max(differenceNoise, 1.4826 * median(deviations));
+    // The two-edge fit assumes both scan ends rest on parent metal. When the
+    // weld (or a raised plate) reaches one end, that fit tilts toward the
+    // bead, inflates the noise estimate and hides an obvious raised region.
+    // A weld only rises above the parent surface, so compare one-sided fits
+    // and keep the line that leaves the fewest samples clearly below it.
+    QString baselineSource = QStringLiteral("both_edges");
+    {
+      const int sideCount = std::max(edgeCount, static_cast<int>(
+          std::ceil(valid.size() * 0.25)));
+      const auto robustFit = [&](int firstPosition, int lastPosition,
+                                 double& fitSlope, double& fitOffset) {
+        std::vector<int> members;
+        for (int position = firstPosition; position < lastPosition; ++position)
+          if (std::isfinite(zAt(valid[position]))) members.push_back(valid[position]);
+        if (members.size() < 12) return false;
+        const double originX = points[members.front()].x();
+        const auto leastSquares = [&](const std::vector<int>& indices) {
+          double sx = 0, sz = 0, sxx = 0, sxz = 0;
+          for (int index : indices) {
+            const double x = points[index].x() - originX;
+            sx += x; sz += zAt(index); sxx += x * x; sxz += x * zAt(index);
+          }
+          const double count = double(indices.size());
+          const double denominator = count * sxx - sx * sx;
+          if (indices.size() < 12 || denominator <= 1e-12) return false;
+          fitSlope = (count * sxz - sx * sz) / denominator;
+          fitOffset = (sz - fitSlope * sx) / count - fitSlope * originX;
+          return true;
+        };
+        if (!leastSquares(members)) return false;
+        for (int pass = 0; pass < 4; ++pass) {
+          std::vector<double> errors;
+          errors.reserve(members.size());
+          for (int index : members)
+            errors.push_back(std::abs(zAt(index) - fitOffset -
+                                      fitSlope * points[index].x()));
+          const double sideNoise = std::max(differenceNoise, 1.4826 * median(errors));
+          std::vector<int> inliers;
+          for (int index : members)
+            if (std::abs(zAt(index) - fitOffset - fitSlope * points[index].x()) <=
+                sideNoise * 3.0) inliers.push_back(index);
+          if (!leastSquares(inliers)) break;
+        }
+        // Extend the side fit across the whole scan through its own inliers
+        // so a mildly tilted plate is followed beyond the seed quarter.
+        for (int pass = 0; pass < 3; ++pass) {
+          std::vector<double> errors;
+          for (int position = firstPosition; position < lastPosition; ++position) {
+            const int index = valid[position];
+            if (std::isfinite(zAt(index)))
+              errors.push_back(std::abs(zAt(index) - fitOffset -
+                                        fitSlope * points[index].x()));
+          }
+          const double sideNoise = std::max(differenceNoise, 1.4826 * median(errors));
+          std::vector<int> inliers;
+          for (int index : valid)
+            if (std::isfinite(zAt(index)) &&
+                std::abs(zAt(index) - fitOffset - fitSlope * points[index].x()) <=
+                    sideNoise * 3.0) inliers.push_back(index);
+          if (!leastSquares(inliers)) break;
+        }
+        return true;
+      };
+      struct BaselineCandidate {
+        QString name;
+        double slope;
+        double offset;
+        double noise = 0.0;
+        int below = 0;
+        int inliers = 0;
+      };
+      std::vector<BaselineCandidate> candidates;
+      candidates.push_back({QStringLiteral("both_edges"), slope, offset});
+      double fitSlope = 0.0, fitOffset = 0.0;
+      if (robustFit(0, sideCount, fitSlope, fitOffset))
+        candidates.push_back({QStringLiteral("left_side"), fitSlope, fitOffset});
+      if (robustFit(static_cast<int>(valid.size()) - sideCount,
+                    static_cast<int>(valid.size()), fitSlope, fitOffset))
+        candidates.push_back({QStringLiteral("right_side"), fitSlope, fitOffset});
+      for (BaselineCandidate& candidate : candidates) {
+        std::vector<double> errors;
+        errors.reserve(valid.size());
+        for (int index : valid)
+          if (std::isfinite(zAt(index)))
+            errors.push_back(zAt(index) - candidate.offset -
+                             candidate.slope * points[index].x());
+        std::vector<double> absolute;
+        absolute.reserve(errors.size());
+        for (double error : errors) absolute.push_back(std::abs(error));
+        // Parent-surface noise: the MAD of the quieter half of the scan, so a
+        // raised region covering most of the scan cannot dominate it.
+        std::sort(absolute.begin(), absolute.end());
+        const double quietMedian = absolute.empty() ? 0.0
+            : absolute[absolute.size() / 4];
+        candidate.noise = std::max(differenceNoise, 1.4826 * quietMedian * 1.5);
+        for (double error : errors) {
+          if (error < -candidate.noise * 4.0) ++candidate.below;
+          if (std::abs(error) <= candidate.noise * 3.0) ++candidate.inliers;
+        }
+      }
+      const auto quality = [](const BaselineCandidate& candidate) {
+        return double(candidate.inliers) - 4.0 * candidate.below;
+      };
+      const BaselineCandidate& reference = candidates.front();
+      const BaselineCandidate* chosen = &reference;
+      for (const BaselineCandidate& candidate : candidates)
+        if (quality(candidate) > quality(*chosen)) chosen = &candidate;
+      // Switch only on a clear structural improvement; a centred weld on a
+      // flat plate keeps the established two-edge result unchanged.
+      const double margin = 0.10 * double(valid.size());
+      if (chosen != &reference &&
+          quality(*chosen) > quality(reference) + margin) {
+        slope = chosen->slope;
+        offset = chosen->offset;
+        baselineSource = chosen->name;
+        std::vector<double> parentErrors;
+        for (int index : valid)
+          if (std::isfinite(zAt(index))) {
+            const double error = zAt(index) - offset - slope * points[index].x();
+            if (std::abs(error) <= chosen->noise * 3.0)
+              parentErrors.push_back(std::abs(error));
+          }
+        noise = std::max(differenceNoise, parentErrors.size() >= 12
+            ? 1.4826 * median(parentErrors) : chosen->noise);
+      }
+      if (trace && trace->enabled) {
+        for (const BaselineCandidate& candidate : candidates)
+          trace->append(QStringLiteral(
+              "event=baseline_hypothesis name=%1 slope=%2 offset=%3 noise=%4 "
+              "inliers=%5 below=%6 quality=%7 selected=%8")
+                            .arg(candidate.name)
+                            .arg(candidate.slope, 0, 'g', 10)
+                            .arg(candidate.offset, 0, 'g', 10)
+                            .arg(candidate.noise, 0, 'g', 10)
+                            .arg(candidate.inliers)
+                            .arg(candidate.below)
+                            .arg(quality(candidate), 0, 'g', 10)
+                            .arg(candidate.name == baselineSource ? 1 : 0));
+      }
+    }
     result.profileNoise = noise;
     result.profileBaselineSlope = slope;
     result.profileBaselineOffset = offset;

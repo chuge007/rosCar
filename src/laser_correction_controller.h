@@ -272,6 +272,9 @@ class LaserCorrectionController final : public QObject {
   qint64 lastImageMs_ = -1;
   qint64 lastValidDetectionMs_ = -1;
   double lastObservedGapAbsoluteCenterRatio_ = 0.5;
+  // Detection-loss search starts toward the side the seam was leaving.
+  qint64 searchBiasLossMs_ = -1;
+  int searchBiasDirection_ = 1;
   bool lastObservedWasContour_ = false;
   qint64 lastTelemetryMs_ = -1;
   qint64 lastStartupDiagnosticMs_ = -1;
@@ -362,6 +365,7 @@ class LaserCorrectionController final : public QObject {
   bool trajectoryPredictionActive_ = false;
   double desiredHeadingRad_ = 0.0;
   double filteredYawRateRadps_ = 0.0;
+  double smoothedTargetAngularRadps_ = 0.0;
   // Camera-center feedback is short-filtered and measured relative to the
   // optical scan center. Path heading comes from a longer odometry-
   // frame cloud retained across tracking segments.

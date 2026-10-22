@@ -11,6 +11,7 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <cmath>
 
 namespace crawling {
 namespace {
@@ -39,7 +40,32 @@ QString axisName(int axis) {
 }
 }
 
-ClampMotorController::ClampMotorController(QObject* parent) : QObject(parent) {}
+ClampMotorController::ClampMotorController(QObject* parent) : QObject(parent) {
+  pollTimer_ = new QTimer(this);
+  pollTimer_->setInterval(100);
+  connect(pollTimer_, &QTimer::timeout, this, &ClampMotorController::pollPositions);
+}
+
+namespace {
+bool sameRouting(const ClampMotorAxes& left, const ClampMotorAxes& right) {
+  for (int axis = 0; axis < 3; ++axis) {
+    if (left[axis].size() != right[axis].size()) return false;
+    for (int index = 0; index < left[axis].size(); ++index) {
+      ClampMotorSettings a = left[axis][index];
+      ClampMotorSettings b = right[axis][index];
+      // Display and travel parameters do not affect bus routing.
+      b.alias = a.alias;
+      b.gearRatio = a.gearRatio;
+      b.upperLimit = a.upperLimit;
+      b.lowerLimit = a.lowerLimit;
+      b.upperLimitEnabled = a.upperLimitEnabled;
+      b.lowerLimitEnabled = a.lowerLimitEnabled;
+      if (!(a == b)) return false;
+    }
+  }
+  return true;
+}
+}  // namespace
 
 ClampMotorController::~ClampMotorController() {
   stop();
@@ -47,7 +73,7 @@ ClampMotorController::~ClampMotorController() {
 }
 
 void ClampMotorController::setSettings(const DriveSettings& settings) {
-  const bool changed = settings_.clampMotors != settings.clampMotors;
+  const bool changed = !sameRouting(settings_.clampMotors, settings.clampMotors);
   if (changed) {
     // Stop with the old routing before replacing IDs or protocols.
     stop();
@@ -58,8 +84,17 @@ void ClampMotorController::setSettings(const DriveSettings& settings) {
       emit connectionChanged(false, QStringLiteral("夹子配置已更改，原连接已关闭"));
     }
   }
+  bool displayChanged = settings_.clampMotorSyncEnabled != settings.clampMotorSyncEnabled;
+  if (!changed && settings_.clampMotors != settings.clampMotors) displayChanged = true;
+  if (changed) {
+    positions_.clear();
+    movingPercent_.clear();
+    pendingSpeedPercent_.clear();
+    moveTargets_.clear();
+    moveDeadlines_.clear();
+  }
   settings_ = settings;
-  if (changed) emit settingsChanged();
+  if (changed || displayChanged) emit settingsChanged();
 }
 
 void ClampMotorController::closePorts() {
@@ -261,6 +296,23 @@ void ClampMotorController::onCanFrame(const QString& port, std::uint32_t id,
       }
     }
   }
+  if (!extended && data.size() == 8 && quint8(data[0]) == 0x92 &&
+      (commandId || feedbackId)) {
+    const int address = int(commandId ? id - ServoProtocol::kCommandIdBase
+                                      : id - ServoProtocol::kFeedbackIdBase);
+    // int64 multi-turn angle, 0.01 deg/LSB, little-endian in DATA[1..7].
+    qint64 raw = 0;
+    for (int byte = 7; byte >= 1; --byte) raw = (raw << 8) | quint8(data[byte]);
+    if (raw & (qint64(1) << 55)) raw -= (qint64(1) << 56);
+    for (int axis = 0; axis < 3; ++axis)
+      for (int index = 0; index < settings_.clampMotors[axis].size(); ++index) {
+        const auto& motor = settings_.clampMotors[axis][index];
+        if (motor.communicationMode == ClampCommunicationMode::MwdCan &&
+            motor.motorId == address && portKey(motor.serialPort) == port)
+          handlePosition(axis, index, raw / 100.0);
+      }
+    return;
+  }
   if (!extended && data.size() == 8 && data[0] == char(ServoProtocol::kBrakeControl) &&
       (commandId || feedbackId)) {
     CanFrame frame;
@@ -278,7 +330,7 @@ void ClampMotorController::onCanFrame(const QString& port, std::uint32_t id,
         const QString key = zdtMotorKey(motor, axis, index);
         const QString context = motorContext(motor, axis, index);
         const bool pendingQuery = mwdBrakeQueryTickets_.contains(key);
-        const bool removed = mwdBrakeQueryTickets_.remove(key) > 0;
+        const bool removed = mwdBrakeQueryTickets_.remove(key) != 0;
         const bool actualBrakeReleased = brakeStatus.value();
         const bool requestedBrakeReleased =
             mwdBrakeReleased_.value(key, actualBrakeReleased);
@@ -337,6 +389,14 @@ void ClampMotorController::onCanFrame(const QString& port, std::uint32_t id,
               .arg(static_cast<qulonglong>(id), 0, 16)
               .arg(QString::fromLatin1(data.toHex().toUpper())));
       if (command == 0x36 && data.size() == 7) {
+        // Sign byte + big-endian uint32. X: 0.1 deg/LSB; Emm: 65536 = 360 deg.
+        const quint32 value = (quint32(quint8(data[2])) << 24) |
+            (quint32(quint8(data[3])) << 16) | (quint32(quint8(data[4])) << 8) |
+            quint32(quint8(data[5]));
+        double degrees = motor.zdtFirmware == ZdtFirmware::X
+            ? value / 10.0 : value * 360.0 / 65536.0;
+        if (quint8(data[1]) == 0x01) degrees = -degrees;
+        handlePosition(axis, index, degrees);
         if (zdtProbePending_.remove(key))
           emit statusChanged(label + QStringLiteral("：RX ID=0x%1 DATA=%2；电机通信正常（不代表已使能）")
               .arg(static_cast<qulonglong>(id), 0, 16)
@@ -364,7 +424,7 @@ void ClampMotorController::onCanFrame(const QString& port, std::uint32_t id,
               .arg(result, 2, 16, QLatin1Char('0')));
         }
       } else if (command == 0xF6 && data.size() == 3 &&
-                 zdtSpeedTickets_.remove(key) > 0) {
+                 zdtSpeedTickets_.remove(key) != 0) {
         if (result == 0x02) {
           logSpeedStatus(key + QStringLiteral("/ack"),
                          label + QStringLiteral("：RX ID=0x%1 DATA=F6 02 6B；电机已接收速度指令")
@@ -909,6 +969,29 @@ void ClampMotorController::setMotorSpeed(int axis, int index, int percent) {
   if (percent == 0) { stopMotor(axis, index); return; }
   const auto& motor = settings_.clampMotors[axis][index];
   const QString context = motorContext(motor, axis, index);
+  const int key = slot(axis, index);
+  moveTargets_.remove(key);
+  moveDeadlines_.remove(key);
+  if ((motor.upperLimitEnabled || motor.lowerLimitEnabled) && connectionEnabled_) {
+    if (!supportsPosition(motor)) {
+      emit statusChanged(QStringLiteral("%1：该协议不支持位置读取，限位无法生效").arg(context));
+    } else if (!positions_.contains(key)) {
+      // Never move toward an unknown position while limits are configured.
+      pendingSpeedPercent_.insert(key, percent);
+      requestPosition(axis, index);
+      if (!pollTimer_->isActive()) pollTimer_->start();
+      return;
+    } else {
+      const int blocked = limitBlockedDirection(motor, axis, index, percent);
+      if (blocked != 0) {
+        pendingSpeedPercent_.remove(key);
+        movingPercent_.remove(key);
+        emit limitReached(axis, index, blocked > 0);
+        return;
+      }
+    }
+  }
+  pendingSpeedPercent_.remove(key);
   AppLogger::write(QStringLiteral("CLAMP.MOTOR"),
       QStringLiteral("event=slider_change %1 slider_percent=%2")
           .arg(context).arg(percent));
@@ -942,13 +1025,17 @@ void ClampMotorController::setMotorSpeed(int axis, int index, int percent) {
   AppLogger::write(QStringLiteral("CLAMP.MOTOR"),
       QStringLiteral("event=command_complete %1 slider_percent=%2")
           .arg(context).arg(percent));
-  const QString key = zdtMotorKey(motor, axis, index);
+  if (supportsPosition(motor) && (motor.upperLimitEnabled || motor.lowerLimitEnabled)) {
+    movingPercent_.insert(key, percent);
+    if (!pollTimer_->isActive()) pollTimer_->start();
+  }
+  const QString zdtKey = zdtMotorKey(motor, axis, index);
   if (motor.communicationMode == ClampCommunicationMode::ZdtCan) {
-    if (zdtEnablePending_.contains(key))
-      logSpeedStatus(key, QStringLiteral("夹子 %1：等待使能确认，暂缓速度 %2%")
+    if (zdtEnablePending_.contains(zdtKey))
+      logSpeedStatus(zdtKey, QStringLiteral("夹子 %1：等待使能确认，暂缓速度 %2%")
           .arg(label).arg(percent));
   } else {
-    logSpeedStatus(key, QStringLiteral("夹子 %1：速度 %2% 已写入接口，电机未验证")
+    logSpeedStatus(zdtKey, QStringLiteral("夹子 %1：速度 %2% 已写入接口，电机未验证")
         .arg(label).arg(percent));
   }
 }
@@ -957,6 +1044,10 @@ void ClampMotorController::stopMotor(int axis, int index) {
   if (axis < 0 || axis >= 3 || index < 0 || index >= settings_.clampMotors[axis].size())
     return;
   const auto& motor = settings_.clampMotors[axis][index];
+  movingPercent_.remove(slot(axis, index));
+  pendingSpeedPercent_.remove(slot(axis, index));
+  moveTargets_.remove(slot(axis, index));
+  moveDeadlines_.remove(slot(axis, index));
   auto* port = ports_.value(portKey(motor.serialPort), nullptr);
   auto* adapter = candlePorts_.value(portKey(motor.serialPort), nullptr);
   auto* pcan = pcanPorts_.value(portKey(motor.serialPort), nullptr);
@@ -1000,4 +1091,232 @@ void ClampMotorController::setZSpeed(int percent){setSpeed(2, percent);}
 void ClampMotorController::moveXPositive(){move(0,1);} void ClampMotorController::moveXNegative(){move(0,-1);}
 void ClampMotorController::moveYPositive(){move(1,1);} void ClampMotorController::moveYNegative(){move(1,-1);}
 void ClampMotorController::moveZPositive(){move(2,1);} void ClampMotorController::moveZNegative(){move(2,-1);}
+
+void ClampMotorController::requestPosition(int axis, int index) {
+  if (axis < 0 || axis >= 3 || index < 0 || index >= settings_.clampMotors[axis].size())
+    return;
+  const auto& motor = settings_.clampMotors[axis][index];
+  if (!connectionEnabled_ || !ensureOpen(motor)) return;
+  const QString context = motorContext(motor, axis, index);
+  if (motor.communicationMode == ClampCommunicationMode::MwdCan) {
+    QByteArray data(8, char(0));
+    data[0] = char(0x92);
+    if (!sendCanFrame(motor, ServoProtocol::kCommandIdBase +
+                          static_cast<std::uint32_t>(motor.motorId),
+                      data, false, context + QStringLiteral(" command=read_position")))
+      AppLogger::error(QStringLiteral("CLAMP.POSITION"),
+          QStringLiteral("event=read_position_failed %1").arg(context));
+  } else if (motor.communicationMode == ClampCommunicationMode::ZdtCan) {
+    const auto frames = ZdtCanProtocol::packetize(motor.motorId, QByteArray::fromHex("366B"));
+    for (const auto& frame : frames)
+      sendCanFrame(motor, frame.id, frame.data, true,
+                   context + QStringLiteral(" protocol=ZDT command=read_position"));
+  }
+}
+
+int ClampMotorController::limitBlockedDirection(const ClampMotorSettings& motor,
+                                                int axis, int index,
+                                                int percent) const {
+  const int key = slot(axis, index);
+  if (percent == 0 || !positions_.contains(key)) return 0;
+  if (!motor.upperLimitEnabled && !motor.lowerLimitEnabled) return 0;
+  // Speed commands are scaled by motor.sign; the reported angle is raw.
+  const int rawDirection = (percent * motor.sign) > 0 ? 1 : -1;
+  const double position = positions_.value(key);
+  // Use a 1° tolerance so motors can move away from the limit without being blocked.
+  // Both limits form an allowed interval; if only one exists, block that direction.
+  if (motor.upperLimitEnabled && motor.lowerLimitEnabled) {
+    const double minLimit = std::min(motor.upperLimit, motor.lowerLimit);
+    const double maxLimit = std::max(motor.upperLimit, motor.lowerLimit);
+    if (rawDirection > 0 && position >= maxLimit - 1.0) return 1;
+    if (rawDirection < 0 && position <= minLimit + 1.0) return -1;
+  } else {
+    if (motor.upperLimitEnabled && rawDirection > 0 && position >= motor.upperLimit - 1.0) return 1;
+    if (motor.lowerLimitEnabled && rawDirection < 0 && position <= motor.lowerLimit + 1.0) return -1;
+  }
+  return 0;
+}
+
+void ClampMotorController::handlePosition(int axis, int index, double degrees) {
+  if (axis < 0 || axis >= 3 || index < 0 || index >= settings_.clampMotors[axis].size())
+    return;
+  const int key = slot(axis, index);
+  positions_.insert(key, degrees);
+  emit positionReceived(axis, index, degrees);
+  const auto& motor = settings_.clampMotors[axis][index];
+  if (pendingSpeedPercent_.contains(key)) {
+    setMotorSpeed(axis, index, pendingSpeedPercent_.take(key));
+    return;
+  }
+  if (movingPercent_.contains(key)) {
+    const int blocked = limitBlockedDirection(motor, axis, index, movingPercent_.value(key));
+    if (blocked != 0) {
+      stopMotor(axis, index);
+      emit limitReached(axis, index, blocked > 0);
+      emit statusChanged(QStringLiteral("%1：已到%2限位，电机已停止")
+          .arg(motorContext(motor, axis, index),
+               blocked > 0 ? QStringLiteral("上") : QStringLiteral("下")));
+    }
+  }
+  if (moveTargets_.contains(key)) {
+    const double target = moveTargets_.value(key);
+    const bool timedOut = QDateTime::currentMSecsSinceEpoch() > moveDeadlines_.value(key);
+    if (qAbs(degrees - target) <= 0.5 || timedOut) {
+      moveTargets_.remove(key);
+      moveDeadlines_.remove(key);
+      if (motor.communicationMode == ClampCommunicationMode::MwdCan)
+        setMwdBrake(motor, false, axis, index);
+      emit statusChanged(timedOut
+          ? QStringLiteral("%1：定位超时，当前 %2°，目标 %3°")
+                .arg(motorContext(motor, axis, index))
+                .arg(degrees, 0, 'f', 2).arg(target, 0, 'f', 2)
+          : QStringLiteral("%1：已到达目标位置 %2°")
+                .arg(motorContext(motor, axis, index)).arg(degrees, 0, 'f', 2));
+    }
+  }
+}
+
+void ClampMotorController::pollPositions() {
+  if (!connectionEnabled_ ||
+      (movingPercent_.isEmpty() && pendingSpeedPercent_.isEmpty() && moveTargets_.isEmpty())) {
+    pollTimer_->stop();
+    return;
+  }
+  QSet<int> keys;
+  for (auto it = movingPercent_.cbegin(); it != movingPercent_.cend(); ++it) keys.insert(it.key());
+  for (auto it = pendingSpeedPercent_.cbegin(); it != pendingSpeedPercent_.cend(); ++it)
+    keys.insert(it.key());
+  for (auto it = moveTargets_.cbegin(); it != moveTargets_.cend(); ++it) keys.insert(it.key());
+  for (const int key : keys) requestPosition(key / 1000, key % 1000);
+}
+
+void ClampMotorController::moveToPosition(int axis, int index, double targetDegrees) {
+  if (axis < 0 || axis >= 3 || index < 0 || index >= settings_.clampMotors[axis].size())
+    return;
+  const auto& motor = settings_.clampMotors[axis][index];
+  const QString context = motorContext(motor, axis, index);
+  if (!connectionEnabled_) {
+    emit statusChanged(QStringLiteral("请先连接夹子电机"));
+    return;
+  }
+  if (!supportsPosition(motor)) {
+    emit statusChanged(QStringLiteral("%1：%2 暂不支持位置控制，请使用 MWD CAN 或 ZDT CAN")
+        .arg(context, clampModeName(motor.communicationMode)));
+    return;
+  }
+  // Check if target is outside the allowed limit interval.
+  if (motor.upperLimitEnabled && motor.lowerLimitEnabled) {
+    const double minLimit = std::min(motor.upperLimit, motor.lowerLimit);
+    const double maxLimit = std::max(motor.upperLimit, motor.lowerLimit);
+    if (targetDegrees < minLimit || targetDegrees > maxLimit) {
+      emit statusChanged(QStringLiteral("%1：目标 %2° 超出限位范围 [%3°, %4°]，已取消")
+          .arg(context).arg(targetDegrees, 0, 'f', 2)
+          .arg(minLimit, 0, 'f', 2).arg(maxLimit, 0, 'f', 2));
+      return;
+    }
+  } else if (motor.upperLimitEnabled && targetDegrees > motor.upperLimit) {
+    emit statusChanged(QStringLiteral("%1：目标 %2° 超过上限位 %3°，已取消")
+        .arg(context).arg(targetDegrees, 0, 'f', 2).arg(motor.upperLimit, 0, 'f', 2));
+    return;
+  } else if (motor.lowerLimitEnabled && targetDegrees < motor.lowerLimit) {
+    emit statusChanged(QStringLiteral("%1：目标 %2° 低于下限位 %3°，已取消")
+        .arg(context).arg(targetDegrees, 0, 'f', 2).arg(motor.lowerLimit, 0, 'f', 2));
+    return;
+  }
+  if (!ensureOpen(motor)) {
+    emit statusChanged(QStringLiteral("%1：端口打开失败").arg(context));
+    return;
+  }
+  movingPercent_.remove(slot(axis, index));
+  pendingSpeedPercent_.remove(slot(axis, index));
+  if (motor.communicationMode == ClampCommunicationMode::MwdCan) {
+    if (!setMwdBrake(motor, true, axis, index)) {
+      emit statusChanged(QStringLiteral("%1：抱闸释放失败，未发送定位").arg(context));
+      return;
+    }
+    // Give the brake time to release before the position loop starts.
+    const quint64 session = zdtSession_;
+    QTimer::singleShot(80, this, [this, axis, index, targetDegrees, session] {
+      if (session == zdtSession_) sendPositionCommand(axis, index, targetDegrees);
+    });
+    return;
+  }
+  const QString key = zdtMotorKey(motor, axis, index);
+  if (!zdtEnabledMotors_.contains(key)) {
+    for (const auto& frame : ZdtCanProtocol::enableCommand(motor.motorId))
+      sendCanFrame(motor, frame.id, frame.data, true,
+                   context + QStringLiteral(" protocol=ZDT command=enable_for_position"));
+    const quint64 session = zdtSession_;
+    QTimer::singleShot(80, this, [this, axis, index, targetDegrees, session] {
+      if (session == zdtSession_) sendPositionCommand(axis, index, targetDegrees);
+    });
+    return;
+  }
+  sendPositionCommand(axis, index, targetDegrees);
+}
+
+void ClampMotorController::sendPositionCommand(int axis, int index, double targetDegrees) {
+  if (!connectionEnabled_ || axis < 0 || axis >= 3 || index < 0 ||
+      index >= settings_.clampMotors[axis].size())
+    return;
+  const auto& motor = settings_.clampMotors[axis][index];
+  const QString context = motorContext(motor, axis, index);
+  bool sent = false;
+  if (motor.communicationMode == ClampCommunicationMode::MwdCan) {
+    // 0xA4: maxSpeed uint16 dps in DATA[2..3], angle int32 0.01 deg in DATA[4..7].
+    const auto target = static_cast<std::int32_t>(std::llround(targetDegrees * 100.0));
+    const std::uint16_t maxSpeed = 360;
+    QByteArray data(8, char(0));
+    data[0] = char(0xA4);
+    data[2] = char(maxSpeed & 0xFF);
+    data[3] = char((maxSpeed >> 8) & 0xFF);
+    for (int byte = 0; byte < 4; ++byte)
+      data[4 + byte] = char((static_cast<std::uint32_t>(target) >> (8 * byte)) & 0xFF);
+    sent = sendCanFrame(motor, ServoProtocol::kCommandIdBase +
+                            static_cast<std::uint32_t>(motor.motorId),
+                        data, false, context + QStringLiteral(" command=move_to_position"));
+  } else if (motor.communicationMode == ClampCommunicationMode::ZdtCan) {
+    // FD absolute position, big-endian fields, direction byte carries the sign.
+    const bool negative = targetDegrees < 0;
+    const double magnitude = qAbs(targetDegrees);
+    const auto appendWord = [](QByteArray& out, quint32 value) {
+      out.append(char((value >> 8) & 0xFF));
+      out.append(char(value & 0xFF));
+    };
+    const auto appendLong = [](QByteArray& out, quint32 value) {
+      for (int shift = 24; shift >= 0; shift -= 8) out.append(char((value >> shift) & 0xFF));
+    };
+    QByteArray cmd;
+    cmd.append(char(0xFD));
+    cmd.append(char(negative ? 0x01 : 0x00));
+    if (motor.zdtFirmware == ZdtFirmware::X) {
+      const quint32 accel = quint32(qBound(1, motor.zdtAcceleration, 65535));
+      appendWord(cmd, accel);
+      appendWord(cmd, accel);
+      appendWord(cmd, quint32(qBound(1, motor.zdtMaximumSpeedRpm * 10, 30000)));
+      appendLong(cmd, quint32(std::llround(magnitude * 10.0)));
+    } else {
+      appendWord(cmd, quint32(qBound(1, motor.zdtMaximumSpeedRpm, 3000)));
+      cmd.append(char(qBound(0, motor.zdtAcceleration, 255)));
+      appendLong(cmd, quint32(std::llround(magnitude * 3200.0 / 360.0)));
+    }
+    cmd.append(char(0x01));  // Absolute to coordinate zero.
+    cmd.append(char(0x00));  // Execute immediately.
+    cmd.append(char(0x6B));
+    const auto frames = ZdtCanProtocol::packetize(motor.motorId, cmd);
+    sent = !frames.isEmpty();
+    for (const auto& frame : frames)
+      sent = sendCanFrame(motor, frame.id, frame.data, true,
+                          context + QStringLiteral(" protocol=ZDT command=move_to_position")) && sent;
+  }
+  if (!sent) {
+    emit statusChanged(QStringLiteral("%1：定位指令发送失败").arg(context));
+    return;
+  }
+  const int key = slot(axis, index);
+  moveTargets_.insert(key, targetDegrees);
+  moveDeadlines_.insert(key, QDateTime::currentMSecsSinceEpoch() + 30000);
+  if (!pollTimer_->isActive()) pollTimer_->start();
+  emit statusChanged(QStringLiteral("%1：定位到 %2°").arg(context).arg(targetDegrees, 0, 'f', 2));
+}
 } // namespace crawling

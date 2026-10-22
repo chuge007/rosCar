@@ -59,7 +59,7 @@ void ScanWaveformCache::initialize()
     if (!m_drainTimer) {
         m_drainTimer = new QTimer(this);
         m_drainTimer->setTimerType(Qt::CoarseTimer);
-        m_drainTimer->setInterval(40);
+        m_drainTimer->setInterval(20);
         connect(m_drainTimer, &QTimer::timeout,
                 this, &ScanWaveformCache::drainPendingBatches);
         m_drainTimer->start();
