@@ -1,0 +1,78 @@
+# Qt Creator and local project state
+.qtc_clangd/
+.qtcreator/
+*.pro.user
+*.qmake.stash
+
+# Build and generated output
+build/
+**/build/
+install/
+log/
+logs/
+build64/
+bin/
+debug/
+release/
+runtime/
+Makefile
+Makefile.*
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.o
+*.a
+*.so
+*.dylib
+*.lib
+*.exp
+*.idb
+*.ipdb
+*.tlog/
+*.lastbuildstate
+*.suo
+*.user
+*.autosave
+
+# Runtime logs and local artifacts
+*.log
+*.dmp
+*.idx
+__pycache__/
+*.py[cod]
+
+# Local release bundles and temporary workspaces
+tmp/
+target_board_release/runtime/
+target_board_release/install/
+target_board_release/vendor/
+target_board_release/run.pid
+target_board_release.previous*.zip
+target_board_release.zip
+**/dist/*.zip
+*.zip
+
+# Local IDE and analysis state
+.gitnexus/
+.vs/
+.vscode/
+
+# Large reference documents and vendored SDK binaries
+*.pdf
+*.xlsx
+modules/**/bin/
+modules/**/lib/*.lib
+
+# Local non-source artifacts kept outside the repository
+README.md
+docs/
+config_backups/
+protocol_pages_*.txt
+
+# Local project/build entry files
+PA1664Workbench.pro
+opencv.pri
+build.cmd
+deploy-runtime.ps1
