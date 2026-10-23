@@ -1,5 +1,7 @@
 #include "robot_usb_camera_controller.h"
 
+#include "camera_frame_processor.h"
+#include "camera_server_client.h"
 #include "robot_app_logger.h"
 #include "utf8_compat.h"
 
@@ -13,6 +15,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QSize>
+#include <QVariant>
 #include <QVideoFrame>
 #include <QVideoSink>
 
@@ -33,13 +36,47 @@ QString slotLabel(int slot) {
 
 }  // namespace
 
-RobotUsbCameraController::RobotUsbCameraController(QObject* parent) : QObject(parent) {
+RobotUsbCameraController::RobotUsbCameraController(QObject* parent, CameraProcessMode mode)
+    : QObject(parent), mode_(mode) {
   clock_.start();
+
+  if (mode_ == CameraProcessMode::IsolatedProcess) {
+    // Use isolated camera server process
+    cameraClient_ = new CameraServerClient(this);
+    connect(cameraClient_, &CameraServerClient::frameReady,
+            this, &RobotUsbCameraController::frameChanged);
+    connect(cameraClient_, &CameraServerClient::cameraStatusChanged,
+            this, &RobotUsbCameraController::connectionChanged);
+
+    if (!cameraClient_->start()) {
+      qCritical() << "Failed to start camera server, falling back to in-process mode";
+      delete cameraClient_;
+      cameraClient_ = nullptr;
+      mode_ = CameraProcessMode::InProcess;
+    } else {
+      qInfo() << "Camera controller using ISOLATED PROCESS mode";
+    }
+  }
+
+  if (mode_ == CameraProcessMode::InProcess) {
+    // Use in-process worker threads
+    frameProcessor_ = new CameraFrameProcessor(this);
+    connect(frameProcessor_, &CameraFrameProcessor::frameReady,
+            this, &RobotUsbCameraController::frameChanged);
+    qInfo() << "Camera controller using IN-PROCESS mode";
+  }
 }
 
-RobotUsbCameraController::~RobotUsbCameraController() = default;
+RobotUsbCameraController::~RobotUsbCameraController() {
+  if (frameProcessor_)
+    frameProcessor_->shutdown();
+  if (cameraClient_)
+    cameraClient_->stop();
+}
 
 void RobotUsbCameraController::scanDevices() {
+  // Isolated process mode does not support device scanning yet.
+  // Always use in-process enumeration via QMediaDevices.
   const QList<QCameraDevice> cameras = QMediaDevices::videoInputs();
   QStringList devices;
   for (int index = 0; index < cameras.size(); ++index) {
@@ -90,6 +127,15 @@ void RobotUsbCameraController::teardownSlot(UsbSlot& slot) const {
 void RobotUsbCameraController::disconnectCamera(int slot) {
   if (slot < 0 || slot >= kUsbCameraChannelCount)
     return;
+
+  // Use isolated process mode if available
+  if (mode_ == CameraProcessMode::IsolatedProcess && cameraClient_) {
+    cameraClient_->disconnectCamera(slot);
+    emit connectionChanged(slot, false, CRAWLING_TEXT("%1 未连接").arg(slotLabel(slot)));
+    return;
+  }
+
+  // Fallback to in-process mode
   UsbSlot& target = slots_[slot];
   const bool wasCamera = target.camera && target.camera->isActive();
   const bool wasNetwork = target.networkPlayer != nullptr;
@@ -127,18 +173,17 @@ void RobotUsbCameraController::applyFrame(UsbSlot& slot, int slotIndex,
     return;
   if (!slot.frameProcessing.testAndSetAcquire(0, 1))
     return;
-  QImage image = frame.toImage();
-  if (image.isNull()) {
-    slot.frameProcessing.storeRelease(0);
-    return;
+
+  // Delegate heavy processing to worker thread
+  const int targetWidth = slot.targetWidth.loadAcquire();
+  const int targetHeight = slot.targetHeight.loadAcquire();
+
+  if (frameProcessor_) {
+    frameProcessor_->submitFrame(frame, slotIndex, targetWidth, targetHeight,
+                                 slot.flipHorizontal, slot.flipVertical);
   }
-  const QSize target(slot.targetWidth.loadAcquire(), slot.targetHeight.loadAcquire());
-  if (target.width() > 0 && target.height() > 0 &&
-      (image.width() > target.width() || image.height() > target.height()))
-    image = image.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-  if (slot.flipHorizontal || slot.flipVertical)
-    image = image.mirrored(slot.flipHorizontal, slot.flipVertical);
-  emit frameChanged(slotIndex, image);
+
+  slot.frameProcessing.storeRelease(0);
 }
 
 void RobotUsbCameraController::connectCamera(int slot, int deviceIndex, int fps,
@@ -150,6 +195,14 @@ void RobotUsbCameraController::connectCamera(int slot, int deviceIndex, int fps,
     AppLogger::error(QStringLiteral("USB_CAMERA.CONNECTION"), message);
     return;
   }
+
+  // Use isolated process mode if available
+  if (mode_ == CameraProcessMode::IsolatedProcess && cameraClient_) {
+    cameraClient_->connectUsbCamera(slot, deviceIndex, fps, flipHorizontal, flipVertical);
+    return;
+  }
+
+  // Fallback to in-process mode
   UsbSlot& target = slots_[slot];
   teardownSlot(target);
 
@@ -204,7 +257,8 @@ void RobotUsbCameraController::connectCamera(int slot, int deviceIndex, int fps,
                                  : std::min(std::abs(format.minFrameRate() - requestedFps),
                                             std::abs(format.maxFrameRate() - requestedFps));
     const int pixels = resolution.width() * resolution.height();
-    const int targetPixels = 1280 * 720;
+    // Prefer lower resolution (640x480 or 800x600) to reduce CPU load
+    const int targetPixels = 640 * 480;
     const double resolutionPenalty =
         pixels <= targetPixels
             ? static_cast<double>(targetPixels - pixels) / targetPixels
@@ -253,6 +307,17 @@ void RobotUsbCameraController::connectNetworkCamera(int slot, const QString& add
     emit logMessage(CRAWLING_TEXT("%1 槽位参数无效").arg(slotLabel(slot)));
     return;
   }
+
+  // Use isolated process mode if available
+  if (mode_ == CameraProcessMode::IsolatedProcess && cameraClient_) {
+    QString value = address.trimmed();
+    if (!value.contains(QStringLiteral("://")))
+      value.prepend(QStringLiteral("rtsp://"));
+    cameraClient_->connectNetworkCamera(slot, value, flipHorizontal, flipVertical);
+    return;
+  }
+
+  // Fallback to in-process mode
   UsbSlot& target = slots_[slot];
   teardownSlot(target);
   target.flipHorizontal = flipHorizontal;
@@ -316,6 +381,16 @@ void RobotUsbCameraController::startNetworkStream(int slot) {
   target.networkPlayer = new QMediaPlayer(this);
   target.networkVideoSink = new QVideoSink(this);
   target.networkPlayer->setVideoOutput(target.networkVideoSink);
+
+  // Aggressive low-latency configuration for network streams
+  target.networkPlayer->setProperty("bufferSize", 1);        // Minimal buffer (was 50)
+  target.networkPlayer->setProperty("rtsp_transport", "tcp"); // TCP for stability
+  target.networkPlayer->setProperty("rtsp_flags", "prefer_tcp");
+  target.networkPlayer->setProperty("fflags", "nobuffer");    // Disable FFmpeg buffering
+  target.networkPlayer->setProperty("flags", "low_delay");    // Low delay mode
+  target.networkPlayer->setProperty("probesize", 32);         // Small probe
+  target.networkPlayer->setProperty("analyzeduration", 0);    // Skip analysis
+
   connect(target.networkVideoSink, &QVideoSink::videoFrameChanged, this,
           [this, slot](const QVideoFrame& frame) {
             UsbSlot& current = slots_[slot];

@@ -96,6 +96,7 @@ private:
     void refreshGateTree();
     int selectedGroupId() const;
     void scheduleAutoApply();
+    void recomputeTofdPcs();
     bool switchPreset(int presetId);
 
     QVector<Field> m_fields;
@@ -112,6 +113,10 @@ private:
     QLabel *m_surfaceStatus = nullptr;
     QDoubleSpinBox *m_wheelDiameter = nullptr;
     QSpinBox *m_encoderResolution = nullptr;
+    QDoubleSpinBox *m_tofdDepthFraction = nullptr;
+    QLabel *m_tofdAngleLabel = nullptr;
+    QLabel *m_tofdDepthLabel = nullptr;
+    QLabel *m_tofdPcsLabel = nullptr;
     bool m_syncingGateUi = false;
     int m_currentPresetId = 0;
     bool m_switchingPreset = false;

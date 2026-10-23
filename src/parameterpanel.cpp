@@ -21,6 +21,7 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QtMath>
 #include <QVBoxLayout>
 #include <QStringList>
 #include <exception>
@@ -199,6 +200,36 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     addDouble(probe, QStringLiteral("主轴间距"), 0.001, 100, 3, [this] { return Client::getInstance().getProbePrimaryElementsPitch(selectedGroupId()); }, [this](double v) { return Client::getInstance().setProbePrimaryElementsPitch(v, selectedGroupId()); }, QStringLiteral(" mm"));
     addInt(probe, QStringLiteral("次轴阵元数"), 1, 1024, [this] { return Client::getInstance().getProbeSecondaryElements(selectedGroupId()); }, [this](int v) { return Client::getInstance().setProbeSecondaryElements(v, selectedGroupId()); });
     addDouble(probe, QStringLiteral("次轴间距"), 0.001, 100, 3, [this] { return Client::getInstance().getProbeSecondaryElementsPitch(selectedGroupId()); }, [this](double v) { return Client::getInstance().setProbeSecondaryElementsPitch(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    addDouble(probe, QStringLiteral("工件厚度"), 0, 100000, 3, [this] { return Client::getInstance().getThickness(selectedGroupId()); }, [this](double v) { return Client::getInstance().setThickness(v, selectedGroupId()); }, QStringLiteral(" mm"));
+
+    // TOFD 探头中心距（PCS）计算：交汇深度比例是纯界面参数，不写入 SDK。
+    m_tofdDepthFraction = new QDoubleSpinBox;
+    m_tofdDepthFraction->setRange(0.1, 1.0);
+    m_tofdDepthFraction->setDecimals(3);
+    m_tofdDepthFraction->setSingleStep(0.05);
+    m_tofdDepthFraction->setValue(2.0 / 3.0);
+    m_tofdDepthFraction->setKeyboardTracking(false);
+    m_tofdDepthFraction->setToolTip(QStringLiteral("交汇深度 = 比例 × 工件厚度（TOFD 常用 2/3 板厚）"));
+    probe->addRow(QStringLiteral("交汇深度比例"), m_tofdDepthFraction);
+    connect(m_tofdDepthFraction, &QDoubleSpinBox::valueChanged,
+            this, &ParameterPanel::recomputeTofdPcs);
+
+    auto *tofdGroup = new QGroupBox(QStringLiteral("TOFD 探头中心距（PCS）"));
+    auto *tofdForm = new QFormLayout(tofdGroup);
+    tofdForm->setContentsMargins(8, 6, 8, 6);
+    m_tofdAngleLabel = new QLabel(QStringLiteral("--"));
+    m_tofdDepthLabel = new QLabel(QStringLiteral("--"));
+    m_tofdPcsLabel = new QLabel(QStringLiteral("--"));
+    m_tofdPcsLabel->setStyleSheet(QStringLiteral("font-weight:700;color:#174a75;"));
+    tofdForm->addRow(QStringLiteral("钢内折射角 θ"), m_tofdAngleLabel);
+    tofdForm->addRow(QStringLiteral("交汇深度 d"), m_tofdDepthLabel);
+    tofdForm->addRow(QStringLiteral("PCS"), m_tofdPcsLabel);
+    auto *tofdHint = new QLabel(QStringLiteral("PCS = 2 × d × tanθ；θ 由楔块角度经斯涅尔定律换算"));
+    tofdHint->setWordWrap(true);
+    tofdHint->setStyleSheet(QStringLiteral("color:#52606d;"));
+    tofdForm->addRow(tofdHint);
+    probe->addRow(tofdGroup);
+
     tabs->addTab(pageFor(probe), QStringLiteral("探头"));
 
     auto *wedge = new QFormLayout;
@@ -220,9 +251,6 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     auto *other = new QFormLayout;
     addEnum(other, QStringLiteral("编码器方向"), {{QStringLiteral("正向"),0},{QStringLiteral("反向"),1}},
             [] { return int(Client::getInstance().getScannerDirection()); }, [](int v) { return Client::getInstance().setScannerDirection(ScannerDir(v)); });
-    addDouble(other, QStringLiteral("工件厚度"), 0, 100000, 3,
-              [this] { return Client::getInstance().getThickness(selectedGroupId()); },
-              [this](double v) { return Client::getInstance().setThickness(v, selectedGroupId()); }, QStringLiteral(" mm"));
     m_wheelDiameter = new QDoubleSpinBox;
     m_wheelDiameter->setRange(1.0, 100000.0);
     m_wheelDiameter->setDecimals(2);
@@ -654,7 +682,48 @@ void ParameterPanel::reload()
         else if (auto *w = qobject_cast<QComboBox *>(field.editor)) field.loadedValue = w->currentData();
     }
     refreshGateTree();
+    recomputeTofdPcs();
     emit configurationChanged();
+}
+
+void ParameterPanel::recomputeTofdPcs()
+{
+    if (!m_tofdAngleLabel || !m_tofdDepthLabel || !m_tofdPcsLabel)
+        return;
+    double thickness = 0.0;
+    double wedgeAngle = 0.0;
+    double wedgeVelocity = 0.0;
+    double workpieceVelocity = 0.0;
+    try {
+        thickness = Client::getInstance().getThickness(selectedGroupId());
+        wedgeAngle = Client::getInstance().getWedgeAngle(selectedGroupId());
+        wedgeVelocity = Client::getInstance().getWedgeVelocity(selectedGroupId());
+        workpieceVelocity = Client::getInstance().getWorkpieceVelocity(selectedGroupId());
+    } catch (...) {
+        m_tofdAngleLabel->setText(QStringLiteral("--"));
+        m_tofdDepthLabel->setText(QStringLiteral("--"));
+        m_tofdPcsLabel->setText(QStringLiteral("--"));
+        return;
+    }
+    const double fraction = m_tofdDepthFraction ? m_tofdDepthFraction->value()
+                                                : (2.0 / 3.0);
+
+    // 斯涅尔定律：楔块入射角 → 钢内折射角。sinθ_钢 = sinθ_楔 × c_钢 / c_楔。
+    const double ratio = qSin(qDegreesToRadians(wedgeAngle))
+                         * workpieceVelocity / qMax(1.0, wedgeVelocity);
+    if (ratio > 1.0) {
+        m_tofdAngleLabel->setText(QStringLiteral("全反射（无折射角）"));
+        m_tofdDepthLabel->setText(QStringLiteral("--"));
+        m_tofdPcsLabel->setText(QStringLiteral("--"));
+        return;
+    }
+    const double thetaSteel = qAsin(ratio);
+    const double depth = fraction * thickness;
+    const double pcs = 2.0 * depth * qTan(thetaSteel);
+
+    m_tofdAngleLabel->setText(QStringLiteral("%1°").arg(qRadiansToDegrees(thetaSteel), 0, 'f', 1));
+    m_tofdDepthLabel->setText(QStringLiteral("%1 mm").arg(depth, 0, 'f', 1));
+    m_tofdPcsLabel->setText(QStringLiteral("%1 mm").arg(pcs, 0, 'f', 1));
 }
 
 void ParameterPanel::apply()

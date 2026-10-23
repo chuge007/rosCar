@@ -39,12 +39,16 @@ SOURCES += \
     src/robot_app_logger.cpp \
     src/robot_sensor_controller.cpp \
     src/robot_usb_camera_controller.cpp \
+    src/camera_frame_processor.cpp \
+    src/camera_server_client.cpp \
+    src/camera_server_client.cpp \
     src/robot_profile_view.cpp \
     src/laser_correction_controller.cpp \
     src/laser_trajectory_renderer.cpp \
     src/laser_gap_detector.cpp \
     src/laser_path_estimator.cpp \
     src/laser_seam_trajectory.cpp \
+    src/seam_state_machine.cpp \
     src/opencv_laser_contour.cpp \
     src/probeadjustmentpanel.cpp \
     src/robot_hardware_discovery_qt6.cpp \
@@ -84,12 +88,16 @@ HEADERS += \
     src/robot_app_logger.h \
     src/robot_sensor_controller.h \
     src/robot_usb_camera_controller.h \
+    src/camera_frame_processor.h \
+    src/camera_server_client.h \
+    src/camera_server_client.h \
     src/robot_profile_view.h \
     src/laser_correction_controller.h \
     src/laser_trajectory_renderer.h \
     src/laser_gap_detector.h \
     src/laser_path_estimator.h \
     src/laser_seam_trajectory.h \
+    src/seam_state_machine.h \
     src/profile_weld_detector.h \
     src/opencv_laser_contour.h \
     src/probeadjustmentpanel.h \

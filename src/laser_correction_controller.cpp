@@ -163,6 +163,46 @@ LaserCorrectionController::LaserCorrectionController(QObject* parent)
           &LaserCorrectionController::watchdogTick);
   status_.phase = phaseName(phase_);
   status_.reason = CRAWLING_TEXT("自动纠偏未启动");
+
+  // ========== 初始化焊道跟踪优化组件 ==========
+  // 配置状态机参数
+  seamStateMachine_.setConfirmationFrames(3);
+  seamStateMachine_.setStabilityTolerance(0.002);  // 2mm
+  seamStateMachine_.setCandidateConfidenceThreshold(0.10);
+  seamStateMachine_.setLostConfidenceThreshold(0.05);
+
+  // 配置自适应PID
+  adaptivePID_.setThresholds(2.0, 5.0, 10.0);
+  adaptivePID_.setLargeErrorParams(2.5, 3.0);
+  adaptivePID_.setMediumErrorParams(1.5, 2.0);
+  adaptivePID_.setSmallErrorParams(0.5, 1.0);
+
+  // 配置滤波器
+  centerFilter_.setAlpha(0.3);
+
+  // 连接状态机信号
+  connect(&seamStateMachine_, &SeamStateMachine::stateChanged,
+          this, [this](SeamLocalizationState state) {
+            QString desc = seamStateMachine_.getStateDescription();
+            qint64 now = clock_.elapsed();
+            if (now - lastSeamStateLogMs_ > 500) {
+              qInfo() << "[LASER.STATE] 焊道状态变更:" << desc;
+              lastSeamStateLogMs_ = now;
+            }
+            emit seamStateChanged(state, desc);
+          });
+
+  connect(&seamStateMachine_, &SeamStateMachine::seamLocated,
+          this, [this]() {
+            qInfo() << "[LASER.STATE] 焊道已定位，可以启动纠偏";
+            emit seamLocated();
+          });
+
+  connect(&seamStateMachine_, &SeamStateMachine::seamLost,
+          this, [this]() {
+            qWarning() << "[LASER.STATE] 焊道丢失";
+            emit seamLost();
+          });
 }
 
 void LaserCorrectionController::setSettings(
@@ -784,6 +824,13 @@ void LaserCorrectionController::processProfileFrame(
     // Live inspection is independent of robot enable and the stop latch.
     // Do not refresh control state or reuse old tracking priors while idle.
     auto config = settings_.detector;
+
+    // 调整原算法参数，使其对低矮焊道更敏感
+    config.profileTuning.growNoiseSigma = 1.5;      // 从2.0降到1.5 - 更容易生长
+    config.profileTuning.seedNoiseSigma = 2.0;      // 从3.0降到2.0 - 更容易识别种子点
+    config.profileTuning.minimumWidthRatio = 0.003; // 从0.005降到0.003 - 接受更窄的焊道
+    config.profileTuning.minimumSupportRatio = 0.15; // 从0.20降到0.15 - 降低支撑要求
+
     config.profileAxisHalfSpanX = profileAxisHalfSpanX_;
     config.profileAxisLocked = false;
     config.expectedAbsoluteCenterRatio = -1;
@@ -792,7 +839,115 @@ void LaserCorrectionController::processProfileFrame(
     config.profileDetectionTrace = trace.enabled ? &trace : nullptr;
     QElapsedTimer detectorTimer;
     detectorTimer.start();
-    const LaserGapDetection detection = ProfileWeldDetector::detect(points, config);
+
+    LaserGapDetection detection = ProfileWeldDetector::detect(points, config);
+
+    // 根据配置选择焊道定位算法
+    if (settings_.weldLocatorType == LaserCorrectionSettings::WeldLocatorType::SIMPLE) {
+      // 使用极简算法（推荐）
+      SimpleWeldResult simpleResult = simpleWeldLocator_.locate(points);
+
+      // 对比日志(每秒一次)
+      if (now - lastEnhancedAlgorithmComparisonMs_ >= 1000) {
+        lastEnhancedAlgorithmComparisonMs_ = now;
+        emit diagnosticLogMessage(
+            QStringLiteral(
+                "event=weld_locator_comparison algorithm=SIMPLE sdk_frame=%1 "
+                "old_valid=%2 old_center_x=%3 simple_valid=%4 simple_center_x=%5 diff=%6 "
+                "old_confidence=%7 simple_confidence=%8 "
+                "simple_width=%9 simple_height=%10 simple_noise=%11 "
+                "peak_index=%12")
+                .arg(sourceFrameNumber)
+                .arg(detection.valid)
+                .arg(detection.profileCenterX, 0, 'f', 2)
+                .arg(simpleResult.valid)
+                .arg(simpleResult.centerX, 0, 'f', 2)
+                .arg(detection.valid && simpleResult.valid ?
+                     std::abs(simpleResult.centerX - detection.profileCenterX) : -1.0, 0, 'f', 2)
+                .arg(detection.confidence, 0, 'f', 3)
+                .arg(simpleResult.confidence, 0, 'f', 3)
+                .arg(simpleResult.weldWidth, 0, 'f', 1)
+                .arg(simpleResult.weldHeight, 0, 'f', 2)
+                .arg(simpleResult.noiseLevel, 0, 'f', 2)
+                .arg(simpleResult.peakIndex));
+      }
+
+      // 使用极简算法的结果（置信度>0.4即可）
+      if (simpleResult.valid && simpleResult.confidence > 0.4) {
+        detection.valid = true;
+        detection.profileCenterX = simpleResult.centerX;
+        detection.absoluteCenterRatio =
+            0.5 + simpleResult.centerX / (2.0 * detection.profileAxisHalfSpanX);
+        detection.absoluteCenterRatio = std::max(0.0, std::min(1.0, detection.absoluteCenterRatio));
+        detection.gapStartPx = simpleResult.startIndex;
+        detection.gapEndPx = simpleResult.endIndex;
+        detection.confidence = simpleResult.confidence;
+        detection.profileNoise = simpleResult.noiseLevel;
+
+        if (trace.enabled) {
+          trace.append(QStringLiteral(
+              "event=simple_locator_applied center_x=%1 confidence=%2 width=%3 height=%4 peak_idx=%5")
+                  .arg(simpleResult.centerX, 0, 'g', 10)
+                  .arg(simpleResult.confidence, 0, 'g', 10)
+                  .arg(simpleResult.weldWidth, 0, 'g', 10)
+                  .arg(simpleResult.weldHeight, 0, 'g', 10)
+                  .arg(simpleResult.peakIndex));
+        }
+      }
+
+    } else if (settings_.weldLocatorType == LaserCorrectionSettings::WeldLocatorType::ENHANCED &&
+               detection.valid) {
+      // 使用增强型算法
+      WeldLocationResult enhancedResult = enhancedWeldLocator_.locate(points);
+
+      // 对比日志(每秒一次)
+      if (now - lastEnhancedAlgorithmComparisonMs_ >= 1000) {
+        lastEnhancedAlgorithmComparisonMs_ = now;
+        if (enhancedResult.valid) {
+          double centerDiff = std::abs(enhancedResult.centerX - detection.profileCenterX);
+          emit diagnosticLogMessage(
+              QStringLiteral(
+                  "event=weld_locator_comparison algorithm=ENHANCED sdk_frame=%1 "
+                  "old_center_x=%2 new_center_x=%3 diff=%4 "
+                  "old_confidence=%5 new_confidence=%6 "
+                  "new_width=%7 new_height=%8 new_noise=%9 new_method=%10")
+                  .arg(sourceFrameNumber)
+                  .arg(detection.profileCenterX, 0, 'f', 2)
+                  .arg(enhancedResult.centerX, 0, 'f', 2)
+                  .arg(centerDiff, 0, 'f', 2)
+                  .arg(detection.confidence, 0, 'f', 3)
+                  .arg(enhancedResult.confidence, 0, 'f', 3)
+                  .arg(enhancedResult.weldWidth, 0, 'f', 1)
+                  .arg(enhancedResult.weldHeight, 0, 'f', 2)
+                  .arg(enhancedResult.noiseLevel, 0, 'f', 2)
+                  .arg(enhancedResult.detectionMethod));
+        }
+      }
+
+      // 使用增强算法的结果替换
+      if (enhancedResult.valid && enhancedResult.confidence > 0.5) {
+        detection.profileCenterX = enhancedResult.centerX;
+        detection.absoluteCenterRatio =
+            0.5 + enhancedResult.centerX / (2.0 * detection.profileAxisHalfSpanX);
+        detection.absoluteCenterRatio = std::max(0.0, std::min(1.0, detection.absoluteCenterRatio));
+        detection.gapStartPx = enhancedResult.startIndex;
+        detection.gapEndPx = enhancedResult.endIndex;
+        detection.confidence = std::max(detection.confidence, enhancedResult.confidence);
+        detection.profileNoise = enhancedResult.noiseLevel;
+
+        if (trace.enabled) {
+          trace.append(QStringLiteral(
+              "event=enhanced_locator_applied center_x=%1 confidence=%2 width=%3 height=%4")
+                  .arg(enhancedResult.centerX, 0, 'g', 10)
+                  .arg(enhancedResult.confidence, 0, 'g', 10)
+                  .arg(enhancedResult.weldWidth, 0, 'g', 10)
+                  .arg(enhancedResult.weldHeight, 0, 'g', 10));
+        }
+      }
+    }
+    // 否则使用原始算法(ORIGINAL)，不做任何修改
+
+
     lastDetectorDurationMs_ = detectorTimer.elapsed();
     lastProfileResultEpochMs_ = QDateTime::currentMSecsSinceEpoch();
     profileAxisHalfSpanX_ = detection.profileAxisHalfSpanX;
@@ -912,6 +1067,13 @@ void LaserCorrectionController::processObservation(
     beginSeamReacquisition(CRAWLING_TEXT("真实双边缘持续缺失，解除旧候选锁定"));
   }
   LaserGapDetectorConfig detectorConfig = settings_.detector;
+
+  // 调整原算法参数，使其对低矮焊道更敏感
+  detectorConfig.profileTuning.growNoiseSigma = 1.5;      // 从2.0降到1.5 - 更容易生长
+  detectorConfig.profileTuning.seedNoiseSigma = 2.0;      // 从3.0降到2.0 - 更容易识别种子点
+  detectorConfig.profileTuning.minimumWidthRatio = 0.003; // 从0.005降到0.003 - 接受更窄的焊道
+  detectorConfig.profileTuning.minimumSupportRatio = 0.15; // 从0.20降到0.15 - 降低支撑要求
+
   detectorConfig.profileDetectionTrace =
       profileTrace && profileTrace->enabled ? profileTrace : nullptr;
   detectorConfig.profileAxisHalfSpanX = profileAxisHalfSpanX_;
@@ -1072,9 +1234,71 @@ void LaserCorrectionController::processObservation(
       status_.active ? &rawFrameDiagnostic : nullptr;
   QElapsedTimer detectorTimer;
   detectorTimer.start();
-  const LaserGapDetection detection =
+  LaserGapDetection detection =
       profile ? ProfileWeldDetector::detect(*profile, detectorConfig) :
                 LaserGapDetector::detect(image, detectorConfig, rawFrameDiagnosticOutput);
+
+  // 如果是profile模式，根据配置选择焊道定位算法
+  if (profile) {
+    if (settings_.weldLocatorType == LaserCorrectionSettings::WeldLocatorType::SIMPLE) {
+      // 使用极简算法（推荐）
+      SimpleWeldResult simpleResult = simpleWeldLocator_.locate(*profile);
+
+      if (simpleResult.valid && simpleResult.confidence > 0.4) {
+        // 使用极简算法的结果
+        detection.valid = true;
+        detection.profileCenterX = simpleResult.centerX;
+        detection.absoluteCenterRatio =
+            0.5 + simpleResult.centerX / (2.0 * detection.profileAxisHalfSpanX);
+        detection.absoluteCenterRatio = std::max(0.0, std::min(1.0, detection.absoluteCenterRatio));
+        detection.gapStartPx = simpleResult.startIndex;
+        detection.gapEndPx = simpleResult.endIndex;
+        detection.confidence = simpleResult.confidence;
+        detection.profileNoise = simpleResult.noiseLevel;
+
+        if (profileTrace && profileTrace->enabled) {
+          profileTrace->append(QStringLiteral(
+              "event=simple_locator_idle_mode center_x=%1 confidence=%2 "
+              "width=%3 height=%4 peak_idx=%5")
+                  .arg(simpleResult.centerX, 0, 'g', 10)
+                  .arg(simpleResult.confidence, 0, 'g', 10)
+                  .arg(simpleResult.weldWidth, 0, 'g', 10)
+                  .arg(simpleResult.weldHeight, 0, 'g', 10)
+                  .arg(simpleResult.peakIndex));
+        }
+      }
+
+    } else if (settings_.weldLocatorType == LaserCorrectionSettings::WeldLocatorType::ENHANCED &&
+               detection.valid) {
+      // 使用增强型算法
+      WeldLocationResult enhancedResult = enhancedWeldLocator_.locate(*profile);
+
+      if (enhancedResult.valid && enhancedResult.confidence > 0.5) {
+        // 使用增强算法的结果
+        detection.profileCenterX = enhancedResult.centerX;
+        detection.absoluteCenterRatio =
+            0.5 + enhancedResult.centerX / (2.0 * detection.profileAxisHalfSpanX);
+        detection.absoluteCenterRatio = std::max(0.0, std::min(1.0, detection.absoluteCenterRatio));
+        detection.gapStartPx = enhancedResult.startIndex;
+        detection.gapEndPx = enhancedResult.endIndex;
+        detection.confidence = std::max(detection.confidence, enhancedResult.confidence);
+        detection.profileNoise = enhancedResult.noiseLevel;
+
+        if (profileTrace && profileTrace->enabled) {
+          profileTrace->append(QStringLiteral(
+              "event=enhanced_locator_idle_mode center_x=%1 confidence=%2 "
+              "width=%3 height=%4 method=%5")
+                  .arg(enhancedResult.centerX, 0, 'g', 10)
+                  .arg(enhancedResult.confidence, 0, 'g', 10)
+                  .arg(enhancedResult.weldWidth, 0, 'g', 10)
+                  .arg(enhancedResult.weldHeight, 0, 'g', 10)
+                  .arg(enhancedResult.detectionMethod));
+        }
+      }
+    }
+    // 否则使用原始算法(ORIGINAL)，不做任何修改
+  }
+
   if (profile) {
     profileAxisHalfSpanX_ = detection.profileAxisHalfSpanX;
     lastProfileDetection_ = detection;
@@ -1148,7 +1372,10 @@ void LaserCorrectionController::processObservation(
     publishStatus();
     return;
   }
+  // 【重要】先设置初始 gapValid = detection.valid
+  // 后面的状态机（第1540行）和检测有效性逻辑（第1560-1595行）会进一步调整
   status_.gapValid = detection.valid;
+
   trajectoryPredictionActive_ = false;
   status_.horizontalLaser = detection.valid ? detection.horizontal
                                             : trackedGapHorizontal_;
@@ -1312,7 +1539,8 @@ void LaserCorrectionController::processObservation(
   }
   // An unconfirmed fallback cannot bypass the multi-frame identity gate.
   if (reacquisitionPending_) status_.gapValid = false;
-  if (status_.gapValid && lineSpanPx > 0) {
+
+  if (!filteredGapValid_ || lastGapFilterMs_ < 0) {
     const int axisLength = detection.horizontal ? observationWidth : observationHeight;
     latestImageAxisLengthPx_ = axisLength;
     latestLineStartPx_ = detection.lineStartPx;
@@ -1607,23 +1835,36 @@ void LaserCorrectionController::processObservation(
       publishStatus();
       return;
     }
+    // 【修复】区分初次定位和运行中丢失的情况
+    // 如果 gapTrackerValid_ 曾经有效过，说明纠偏已经在运行
+    // 只有在纠偏运行中丢失检测才停车；初次定位不停车
     if (phaseNeedsLaser()) {
-      emit logMessage(
-          CRAWLING_TEXT("激光候选无效：连续性拒绝 %1，宽度突变拒绝 %2，"
-                        "已沿用 %3 ms 后仍未恢复")
-              .arg(detection.continuityRejected ? CRAWLING_TEXT("是")
-                                                : CRAWLING_TEXT("否"))
-              .arg(detection.widthRejected ? CRAWLING_TEXT("是")
-                                           : CRAWLING_TEXT("否"))
-              .arg(detectionHoldLimitMs));
-      resetControllerError();
-      commandImmediateStop(CRAWLING_TEXT("尚无可沿用的主缺口，等待原始图恢复"));
+      if (gapTrackerValid_) {
+        // 纠偏运行中，检测丢失 -> 停车
+        emit logMessage(
+            CRAWLING_TEXT("激光候选无效：连续性拒绝 %1，宽度突变拒绝 %2，"
+                          "已沿用 %3 ms 后仍未恢复")
+                .arg(detection.continuityRejected ? CRAWLING_TEXT("是")
+                                                  : CRAWLING_TEXT("否"))
+                .arg(detection.widthRejected ? CRAWLING_TEXT("是")
+                                             : CRAWLING_TEXT("否"))
+                .arg(detectionHoldLimitMs));
+        resetControllerError();
+        commandImmediateStop(CRAWLING_TEXT("运行中焊道丢失，等待恢复"));
+      } else {
+        // 初次定位，检测暂时无效 -> 不停车，继续等待
+        // 让后面的状态机逻辑决定是否可以启动
+        publishStatus();
+      }
     } else {
       publishStatus();
     }
-    return;
+    // 【删除】不要在这里 return！
+    // 初次定位时检测暂时无效，要继续执行下面的状态机更新
+    // return;
   }
 
+  // 【检测有效】执行正常的接受和控制逻辑
   const bool firstValidAfterEnable =
       status_.active && lastValidDetectionMs_ < enabledAtMs_;
   detectionHeld_ = false;
@@ -1644,9 +1885,28 @@ void LaserCorrectionController::processObservation(
   boundaryCandidateRecoveryUntilMs_ = -1;
   status_.gapCenterRatio = detection.normalizedCenter;
   status_.gapAbsoluteCenterRatio = detection.absoluteCenterRatio;
-  status_.gapLateralM = kCameraLateralToVehicleSign *
-                        (detection.absoluteCenterRatio - 0.5) *
-                        settings_.imageLateralSpanM;
+
+  // 原始相机坐标系的焊道中心位置
+  double rawGapLateralM = kCameraLateralToVehicleSign *
+                          (detection.absoluteCenterRatio - 0.5) *
+                          settings_.imageLateralSpanM;
+
+  status_.gapLateralM = rawGapLateralM;
+
+  // 【核心】状态机逻辑：根据焊道定位状态决定是否允许纠偏
+  seamStateMachine_.update(
+      detection.valid, rawGapLateralM, detection.confidence);
+  const SeamLocalizationState seamState = seamStateMachine_.getState();
+  status_.seamState = seamState;
+  status_.seamStateDescription = seamStateMachine_.getStateDescription();
+
+  // 根据状态机状态设置初始 gapValid
+  // Located 状态：允许进入后续处理流程（但还要通过后面的各种检查）
+  // 非Located状态：不允许纠偏，直接标记为无效
+  if (seamState != SeamLocalizationState::Located) {
+    status_.gapValid = false;
+  }
+
   if (!filteredGapValid_ || lastGapFilterMs_ < 0) {
     filteredGapLateralM_ = status_.gapLateralM;
     filteredGapValid_ = true;

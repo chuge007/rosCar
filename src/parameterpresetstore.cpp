@@ -320,10 +320,15 @@ bool ParameterPresetStore::captureCurrentHardware(int presetId, QString *error)
     }
     const int frameRate = snapshotRoot.value(QStringLiteral("global")).toObject()
                               .value(QStringLiteral("frame_rate")).toInt(1);
-    entries.insert(QString::number(presetId),
-                   makePreset(oldPreset.value(QStringLiteral("name"))
-                                  .toString(QStringLiteral("预设 %1").arg(presetId)),
-                              frameRate, group));
+    QJsonObject updatedPreset =
+        makePreset(oldPreset.value(QStringLiteral("name"))
+                       .toString(QStringLiteral("预设 %1").arg(presetId)),
+                   frameRate, group);
+    if (oldPreset.contains(QStringLiteral("scan_precision_mm_per_cell"))) {
+        updatedPreset.insert(QStringLiteral("scan_precision_mm_per_cell"),
+                             oldPreset.value(QStringLiteral("scan_precision_mm_per_cell")));
+    }
+    entries.insert(QString::number(presetId), updatedPreset);
     root.insert(QStringLiteral("presets"), entries);
     presetsDocument.setObject(root);
     if (!writePresets(presetsDocument, error))
@@ -477,6 +482,42 @@ QList<int> ParameterPresetStore::importConfiguration(const QString &path, QStrin
     if (!writePresets(document, error))
         added.clear();
     return added;
+}
+
+double ParameterPresetStore::scanPrecisionMmPerCell(int presetId)
+{
+    QJsonDocument document;
+    if (!readPresets(&document, nullptr))
+        return 1.0;
+    const double value = presetObject(document, presetId)
+                             .value(QStringLiteral("scan_precision_mm_per_cell"))
+                             .toDouble(1.0);
+    return qBound(0.01, value, 100000.0);
+}
+
+bool ParameterPresetStore::saveScanPrecisionMmPerCell(int presetId, double mmPerCell,
+                                                       QString *error)
+{
+    QJsonDocument document;
+    if (!readPresets(&document, error))
+        return false;
+
+    QJsonObject root = document.object();
+    QJsonObject entries = root.value(QStringLiteral("presets")).toObject();
+    const QString key = QString::number(presetId);
+    QJsonObject preset = entries.value(key).toObject();
+    if (preset.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("参数预设 %1 不存在").arg(presetId);
+        return false;
+    }
+
+    preset.insert(QStringLiteral("scan_precision_mm_per_cell"),
+                  qBound(0.01, mmPerCell, 100000.0));
+    entries.insert(key, preset);
+    root.insert(QStringLiteral("presets"), entries);
+    document.setObject(root);
+    return writePresets(document, error);
 }
 
 void ParameterPresetStore::loadEncoderCalibration(double *wheelDiameterMm, int *resolution)

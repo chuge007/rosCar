@@ -76,7 +76,7 @@ struct DriveSettings {
   struct UsbCameraChannel {
     int usbCameraDeviceIndex = -1;
     QString networkCameraUrl;
-    int usbCameraFps = 30;
+    int usbCameraFps = 15;  // Reduced from 30 to 15fps to lower CPU load
     bool usbCameraAutoConnect = true;
     bool usbCameraFlipHorizontal = false;
     bool usbCameraFlipVertical = false;

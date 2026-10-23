@@ -402,12 +402,21 @@ class ProfileWeldDetector final {
         std::vector<double> absolute;
         absolute.reserve(errors.size());
         for (double error : errors) absolute.push_back(std::abs(error));
-        // Parent-surface noise: the MAD of the quieter half of the scan, so a
-        // raised region covering most of the scan cannot dominate it.
+        // Parent-surface noise: use the median of the smallest 30% of absolute
+        // errors. This resists both raised regions and whole-plate tilt. Taking
+        // a single quartile value amplifies baseline-offset bias.
         std::sort(absolute.begin(), absolute.end());
-        const double quietMedian = absolute.empty() ? 0.0
-            : absolute[absolute.size() / 4];
-        candidate.noise = std::max(differenceNoise, 1.4826 * quietMedian * 1.5);
+        const int quietCount = std::max(12, static_cast<int>(absolute.size() * 0.30));
+        std::vector<double> quietSample(absolute.begin(),
+                                         absolute.begin() + std::min(quietCount,
+                                                                     static_cast<int>(absolute.size())));
+        const double quietMAD = quietSample.empty() ? 0.0
+            : [](std::vector<double> v) {
+                const auto mid = v.begin() + v.size() / 2;
+                std::nth_element(v.begin(), mid, v.end());
+                return *mid;
+              }(quietSample);
+        candidate.noise = std::max(differenceNoise, 1.4826 * quietMAD);
         for (double error : errors) {
           if (error < -candidate.noise * 4.0) ++candidate.below;
           if (std::abs(error) <= candidate.noise * 3.0) ++candidate.inliers;
@@ -606,7 +615,13 @@ class ProfileWeldDetector final {
             saliency[end+j] <= shoulderTolerance) ++right;
         if (left >= shoulder && right >= shoulder) break;
       }
-      if (std::min(left,right) < shoulder) {
+      const bool hasBothShoulders = left >= shoulder && right >= shoulder;
+      const bool hasSingleShoulder = left >= shoulder || right >= shoulder;
+      const bool strongRaisedHump =
+          peak >= std::max(seed, noise * 4.0) &&
+          supportRatio >= std::max(minimumSupport, 0.35) &&
+          area >= seed * std::max(2.0, minWidth * 0.5);
+      if (!hasBothShoulders && !(hasSingleShoulder && strongRaisedHump)) {
         if (trace && trace->enabled)
           trace->append(QStringLiteral(
               "event=candidate frame_start=%1 frame_end=%2 length=%3 support=%4 "
@@ -626,7 +641,8 @@ class ProfileWeldDetector final {
                             .arg(points[end].x(), 0, 'g', 10));
         continue;
       }
-      const double centerX = (double(points[start].x()) + points[end].x()) * 0.5;
+      const double centerX = raisedHumpCenterX(
+          points, residual, start, end, noise);
       const double center = xRatio(centerX);
       const double absoluteWidth = xRatio(points[end].x()) - xRatio(points[start].x());
       // Profile exports can contain invalid slots and zero padding after the
@@ -847,6 +863,26 @@ class ProfileWeldDetector final {
 
  private:
   static constexpr int kTemplateSamples = 41;
+  static double raisedHumpCenterX(const QVector<QVector3D>& points,
+                                  const std::vector<double>& residual,
+                                  int start, int end, double noise) {
+    double peak = 0.0;
+    for (int index = start; index <= end; ++index)
+      if (std::isfinite(residual[index]))
+        peak = std::max(peak, residual[index]);
+    const double floor = std::max(noise * 1.5, peak * 0.35);
+    double weightedX = 0.0;
+    double totalWeight = 0.0;
+    for (int index = start; index <= end; ++index) {
+      if (!std::isfinite(residual[index])) continue;
+      const double weight = std::max(0.0, residual[index] - floor);
+      weightedX += double(points[index].x()) * weight;
+      totalWeight += weight;
+    }
+    if (totalWeight > 1e-12) return weightedX / totalWeight;
+    return (double(points[start].x()) + double(points[end].x())) * 0.5;
+  }
+
   static bool usableTemplate(const ProfileWeldTemplate& value) {
     if (!value.enabled || value.normalizedShape.size() != kTemplateSamples ||
         !std::isfinite(value.widthRatio) || value.widthRatio <= 1e-6 ||
@@ -984,10 +1020,8 @@ class ProfileWeldDetector final {
 
           const double candidatePeakRatio = std::clamp(
               profileTemplate.peakRatio, 0.0, 1.0);
-          const double candidatePeakX =
-              double(points[start].x()) +
-              (double(points[end].x()) - double(points[start].x())) *
-                  candidatePeakRatio;
+          const double candidatePeakX = raisedHumpCenterX(
+              points, residual, start, end, result.profileNoise);
           if (hasPrior && std::abs(xRatio(candidatePeakX) -
                                   config.expectedAbsoluteCenterRatio) >
                              centerTolerance) {
@@ -1045,10 +1079,8 @@ class ProfileWeldDetector final {
         diagnosticCompared >= int(std::ceil(kTemplateSamples * 0.90))) {
       const double allowedDeficit = std::clamp(
           0.015 + (1.0 - diagnosticThreshold) * 0.03, 0.012, 0.020);
-      const double candidatePeakX =
-          double(points[diagnosticStart].x()) +
-          (double(points[diagnosticEnd].x()) - double(points[diagnosticStart].x())) *
-              diagnosticPeakRatio;
+      const double candidatePeakX = raisedHumpCenterX(
+          points, residual, diagnosticStart, diagnosticEnd, result.profileNoise);
       const double candidateCenter = xRatio(candidatePeakX);
       if (diagnosticScore >= diagnosticThreshold - allowedDeficit &&
           std::abs(candidateCenter - config.expectedAbsoluteCenterRatio) <=
@@ -1092,7 +1124,8 @@ class ProfileWeldDetector final {
     }
     const double startX = points[bestStart].x();
     const double endX = points[bestEnd].x();
-    const double peakX = startX + (endX - startX) * bestPeakRatio;
+    const double peakX = raisedHumpCenterX(
+        points, residual, bestStart, bestEnd, result.profileNoise);
     const double center = xRatio(peakX);
     result.valid = result.baselineSupported = result.contourSupported = true;
     result.profileDetectionReason = QStringLiteral("located");

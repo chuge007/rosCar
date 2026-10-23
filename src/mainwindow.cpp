@@ -109,6 +109,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     const bool presetModeReady = ParameterPresetStore::prepare(&presetModeMessage,
                                                                 &presetModeError);
     m_activePresetId = ParameterPresetStore::currentPresetId();
+    m_groupEncoderPrecision.insert(
+        m_activePresetId,
+        ParameterPresetStore::scanPrecisionMmPerCell(m_activePresetId));
     m_device = new DeviceController(this);
     m_recorder = new FrameRecorder(this);
     m_player = new FramePlayer(this);
@@ -495,7 +498,7 @@ void MainWindow::buildUi()
     m_cPrecision = new QDoubleSpinBox;
     m_cPrecision->setRange(0.01, 100000.0);
     m_cPrecision->setDecimals(2);
-    m_cPrecision->setValue(1.0);
+    m_cPrecision->setValue(m_groupEncoderPrecision.value(currentGroupId(), 1.0));
     m_cPrecision->setSuffix(QStringLiteral(" mm/格"));
     m_cPrecision->setToolTip(QStringLiteral(
         "B 扫列/C 扫网格的空间分辨率（毫米/格）。数值越小，空间采样越细。"));
@@ -625,8 +628,8 @@ void MainWindow::buildUi()
                                 QStringLiteral("Gate C"), QStringLiteral("Gate I")})
         m_cImagingGate->addItem(name);
     m_mapTabs->addTab(buildScanPage(m_cScanStack, m_cScanToggle, m_cImagingGate), QStringLiteral("编码器 C 扫"));
-    m_bScan->setEncoderPrecision(m_cPrecision->value());
-    m_cScan->setEncoderPrecision(m_cPrecision->value());
+    m_bScan->setEncoderPrecision(encoderCountsPerCell(currentGroupId()));
+    m_cScan->setEncoderPrecision(encoderCountsPerCell(currentGroupId()));
     mapLayout->addWidget(m_mapTabs, 1);
     root->addWidget(mapCard, 3);
 
@@ -951,6 +954,11 @@ void MainWindow::buildUi()
             return;
         const int groupId = currentGroupId();
         m_groupEncoderPrecision[groupId] = mmPerCell;
+        QString error;
+        if (!ParameterPresetStore::saveScanPrecisionMmPerCell(groupId, mmPerCell,
+                                                               &error)) {
+            showMessage(QStringLiteral("保存 B/C 扫路径精度失败：%1").arg(error), true);
+        }
         const int counts = encoderCountsPerCell(groupId);
         m_bScan->setEncoderPrecision(counts);
         m_cScan->setEncoderPrecision(counts);
@@ -1224,9 +1232,16 @@ void MainWindow::setScanSessionActive(bool active)
         // Delay ultrasound start until auto-correction tracking phase begins
         m_waitingForTrackingStart = true;
         emit waveformCachingChanged(false);
+        // 点击右侧“启动”即自动开启 B 扫和 C 扫成像：即使操作员停留在小车控制
+        // 页签，B/C 扫数据也会从启动瞬间开始采集，避免切回超声页时整段漏帧。
+        m_bScanToggle->setChecked(true);
+        m_cScanToggle->setChecked(true);
         updateDecoderSettings();
         showMessage(QStringLiteral("已准备扫描缓存，等待小车自动纠偏跟踪开始后同步启动超声采集。"), false);
     } else {
+        // 点击右侧“停止”即自动关闭 B 扫和 C 扫成像；已采集的图像保留供查看。
+        m_bScanToggle->setChecked(false);
+        m_cScanToggle->setChecked(false);
         updateDecoderSettings();
         emit waveformCachingChanged(false);
         showMessage(QStringLiteral("扫描缓存已停止，实时 A 扫采集继续运行。"), false);
@@ -1700,9 +1715,16 @@ void MainWindow::selectCurrentGroupViews()
 void MainWindow::restoreCurrentGroupControls()
 {
     const int groupId = currentGroupId();
+    m_groupEncoderPrecision.insert(
+        groupId, ParameterPresetStore::scanPrecisionMmPerCell(groupId));
     m_restoringGroupControls = true;
     m_beam->setValue(m_groupSelectedBeam.value(groupId, 0) + 1);
     m_cPrecision->setValue(m_groupEncoderPrecision.value(groupId, 1.0));
+    const int encoderPrecision = encoderCountsPerCell(groupId);
+    if (m_bScan)
+        m_bScan->setEncoderPrecision(encoderPrecision);
+    if (m_cScan)
+        m_cScan->setEncoderPrecision(encoderPrecision);
     const int modes = m_groupScanModes.value(groupId, 0);
     m_eScanToggle->setChecked((modes & 0x1) != 0);
     m_bScanToggle->setChecked((modes & 0x2) != 0);
@@ -1733,12 +1755,20 @@ void MainWindow::updateEncoderCalibration()
     const int resolution = qMax(1, m_parameters->encoderResolution());
     m_encoderMmPerCount = 3.14159265358979323846 * diameter / double(resolution);
     ParameterPresetStore::saveEncoderCalibration(diameter, resolution);
-    for (BScanWidget *widget : qAsConst(m_bScans))
-        if (widget)
+    for (auto it = m_bScans.constBegin(); it != m_bScans.constEnd(); ++it) {
+        BScanWidget *widget = it.value();
+        if (widget) {
             widget->setMmPerCount(m_encoderMmPerCount);
-    for (CScanWidget *widget : qAsConst(m_cScans))
-        if (widget)
+            widget->setEncoderPrecision(encoderCountsPerCell(it.key()));
+        }
+    }
+    for (auto it = m_cScans.constBegin(); it != m_cScans.constEnd(); ++it) {
+        CScanWidget *widget = it.value();
+        if (widget) {
             widget->setMmPerCount(m_encoderMmPerCount);
+            widget->setEncoderPrecision(encoderCountsPerCell(it.key()));
+        }
+    }
 }
 
 void MainWindow::saveScanSession()

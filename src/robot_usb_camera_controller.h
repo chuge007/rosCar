@@ -17,11 +17,21 @@ class QTimer;
 
 namespace crawling {
 
+class CameraFrameProcessor;
+class CameraServerClient;
+
+// Mode selection for camera processing
+enum class CameraProcessMode {
+  InProcess,       // Original in-process mode with worker threads
+  IsolatedProcess  // New isolated camera server process
+};
+
 class RobotUsbCameraController final : public QObject {
   Q_OBJECT
 
  public:
-  explicit RobotUsbCameraController(QObject* parent = nullptr);
+  explicit RobotUsbCameraController(QObject* parent = nullptr,
+                                   CameraProcessMode mode = CameraProcessMode::IsolatedProcess);
   ~RobotUsbCameraController() override;
 
  public slots:
@@ -64,8 +74,15 @@ class RobotUsbCameraController final : public QObject {
   void checkNetworkWatchdog(int slot);
   void applyFrame(UsbSlot& slot, int slotIndex, const QVideoFrame& frame);
 
+  CameraProcessMode mode_;
   QElapsedTimer clock_;
   UsbSlot slots_[kUsbCameraChannelCount];
+
+  // In-process mode components
+  CameraFrameProcessor* frameProcessor_ = nullptr;
+
+  // Isolated process mode components
+  CameraServerClient* cameraClient_ = nullptr;
 };
 
 }  // namespace crawling

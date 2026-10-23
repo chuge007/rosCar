@@ -2798,11 +2798,24 @@ void RobotControlPanel::updateCorrectionStatus(
                                          : status.reason);
         return;
     }
+    // 使用状态机的详细描述，而不是简单的"已定位/等待定位"
+    QString seamStatusText;
+    if (!status.seamStateDescription.isEmpty()) {
+        seamStatusText = status.seamStateDescription;
+        if (status.laserCenterCalibrated && status.gapValid) {
+            seamStatusText += QStringLiteral("（偏移 %1 mm）")
+                .arg(status.laserCenterOffset, 0, 'f', 2);
+        }
+    } else {
+        // 向后兼容：如果status没有提供状态描述，使用旧逻辑
+        seamStatusText = status.gapValid ? QStringLiteral("已定位") : QStringLiteral("等待定位");
+    }
+
     m_correctionStatus->setText(
         QStringLiteral("%1%2；焊道%3；置信度 %4；线速度 %5 mm/s；角速度 %6 deg/s")
             .arg(status.phase.isEmpty() ? QStringLiteral("运行中") : status.phase)
             .arg(status.paused ? QStringLiteral("（已暂停）") : QString())
-            .arg(status.gapValid ? QStringLiteral("已定位") : QStringLiteral("等待定位"))
+            .arg(seamStatusText)
             .arg(status.confidence, 0, 'f', 2)
             .arg(status.linearCommandMps * kMillimetersPerMeter, 0, 'f', 1)
             .arg(status.angularCommandRadps * kDegreesPerRadian, 0, 'f', 2));
@@ -2908,12 +2921,8 @@ void RobotControlPanel::setUsbCameraImage(int slot, const QImage &image)
     m_usbImages[slot] = image;
     m_usbViews[slot]->setText(QString());
     const qreal dpr = m_usbViews[slot]->devicePixelRatioF();
-    const QSize logicalSize = m_usbViews[slot]->size().expandedTo(QSize(260, 160));
-    const QSize physicalSize(qRound(logicalSize.width() * dpr), qRound(logicalSize.height() * dpr));
-    QImage display = image;
-    if (image.size().width() > physicalSize.width() || image.size().height() > physicalSize.height())
-        display = image.scaled(physicalSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    QPixmap pix = QPixmap::fromImage(display);
+    // Image is already scaled in worker thread, just convert to pixmap
+    QPixmap pix = QPixmap::fromImage(image);
     pix.setDevicePixelRatio(dpr);
     m_usbViews[slot]->setPixmap(pix);
     if (m_usbCameraController)

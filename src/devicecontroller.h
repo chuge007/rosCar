@@ -106,8 +106,13 @@ private:
     static constexpr int DisplayPacketCapacity = 36;
     static constexpr int DisplayLatencyTarget = 30;
     // At 8 kHz a 5 ms drain interval normally contains about 40 packets. 512
-    // leaves ample burst margin without retaining hundreds of MB for PA groups.
-    static constexpr int CScanPacketCapacity = 512;
+    // was enough when the decoder thread was the only heavy consumer, but while
+    // the car-control page is active its drive/sensor/correction/camera threads
+    // contend for CPU and can stall the decoder well past that margin. 1024
+    // absorbs ~128 ms of such stalls before the oldest encoder packet is lost,
+    // keeping the B/C scan gap-free when the operator switches back to the
+    // ultrasound page.
+    static constexpr int CScanPacketCapacity = 1024;
     std::atomic_bool m_cScanPacketCollection{false};
     std::atomic<quint64> m_frames{0};
     quint64 m_framesAtStart = 0;

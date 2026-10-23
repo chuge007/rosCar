@@ -4,6 +4,9 @@
 #include "laser_gap_detector.h"
 #include "laser_path_estimator.h"
 #include "laser_seam_trajectory.h"
+#include "enhanced_weld_locator.h"
+#include "simple_weld_locator.h"  // 新增：极简焊道定位
+#include "seam_state_machine.h"   // 新增：焊道状态机
 
 #include <QElapsedTimer>
 #include <QImage>
@@ -81,6 +84,14 @@ struct LaserCorrectionSettings {
   // its first measured wheel motion before declaring a true stall.
   int motionStallTimeoutMs = 8000;
   LaserGapDetectorConfig detector;
+
+  // 焊道定位算法选择
+  enum class WeldLocatorType {
+      ORIGINAL,       // 原始ProfileWeldDetector算法
+      ENHANCED,       // 增强型多尺度算法
+      SIMPLE          // 极简算法（推荐）
+  };
+  WeldLocatorType weldLocatorType = WeldLocatorType::SIMPLE;  // 默认使用极简算法
 };
 
 struct LaserCorrectionStatus {
@@ -118,6 +129,13 @@ struct LaserCorrectionStatus {
   double angularCommandRadps = 0.0;
   double laserCenterErrorM = 0.0;
   double laserCenterCorrectionRad = 0.0;
+
+  // 焊道定位状态机相关
+  SeamLocalizationState seamState = SeamLocalizationState::NotDetected;
+  QString seamStateDescription;
+  bool laserCenterCalibrated = false;
+  double laserCenterOffset = 0.0;  // 激光中心偏移（mm）
+
   int gapStartPx = -1;
   int gapEndPx = -1;
   int supportingSamples = 0;
@@ -187,6 +205,12 @@ class LaserCorrectionController final : public QObject {
       const QVector<crawling::LaserEdgeSample>& scanSamples,
       const crawling::LaserPathFit& fit, double segmentLengthM,
       double lateralSpanM, const QString& label);
+
+  // ========== 新增：焊道状态机信号 ==========
+  void seamStateChanged(SeamLocalizationState state, QString description);
+  void seamLocated();
+  void seamLost();
+  void calibrationCompleted(double offset);
 
  private slots:
   void watchdogTick();
@@ -471,6 +495,21 @@ class LaserCorrectionController final : public QObject {
   double lastVisualLongitudinalM_ = -1.0;
   double lastGuidanceLongitudinalM_ = -1.0;
   quint64 trajectorySessionId_ = 0;
+
+  // 焊道定位器
+  EnhancedWeldLocator enhancedWeldLocator_;
+  SimpleWeldLocator simpleWeldLocator_;
+  qint64 lastEnhancedAlgorithmComparisonMs_ = -1;
+
+  // ========== 新增：焊道跟踪优化组件 ==========
+  SeamStateMachine seamStateMachine_;
+  LaserCenterCalibration centerCalibration_;
+  AdaptivePIDParams adaptivePID_;
+  CenterFilter centerFilter_;
+  std::vector<double> calibrationSamples_;
+  double lastCorrectionError_ = 0.0;
+  qint64 lastCorrectionTimeMs_ = 0;
+  qint64 lastSeamStateLogMs_ = 0;
 };
 
 }  // namespace crawling
