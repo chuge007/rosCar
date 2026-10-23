@@ -19,10 +19,13 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDataStream>
 #include <QDateTime>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDesktopServices>
 #include <QDir>
 #include <QDockWidget>
@@ -119,6 +122,24 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
                           .filePath(QStringLiteral("scan_cache/latest_scan_ascan.bin"));
     buildUi();
     buildMenus();
+
+    QSettings displaySettings;
+    m_screenLayoutMode = static_cast<ScreenLayoutMode>(qBound(
+        int(AutomaticScreenLayout),
+        displaySettings.value(QStringLiteral("display/layoutMode"),
+                              int(AutomaticScreenLayout)).toInt(),
+        int(DualWindowLayout)));
+    m_ultrasoundScreenName =
+        displaySettings.value(QStringLiteral("display/ultrasoundScreen")).toString();
+
+    connect(qGuiApp, &QGuiApplication::screenAdded, this, [this](QScreen *) {
+        QTimer::singleShot(0, this, &MainWindow::applyScreenLayout);
+    });
+    connect(qGuiApp, &QGuiApplication::screenRemoved, this, [this](QScreen *) {
+        QTimer::singleShot(0, this, &MainWindow::applyScreenLayout);
+    });
+    QTimer::singleShot(0, this, &MainWindow::applyScreenLayout);
+
     if (!presetModeReady)
         QTimer::singleShot(0, this, [this, presetModeError] {
             showMessage(QStringLiteral("参数预设模式初始化失败：%1").arg(presetModeError), true);
@@ -380,6 +401,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
 MainWindow::~MainWindow()
 {
+    if (m_robotWindow) {
+        m_robotWindow->hide();
+        delete m_robotWindow;
+        m_robotWindow = nullptr;
+        m_robotPanel = nullptr;
+    }
     if (m_recorder)
         m_recorder->stop();
     if (m_remoteDesktopProcess && m_remoteDesktopProcess->state() != QProcess::NotRunning) {
@@ -399,6 +426,17 @@ MainWindow::~MainWindow()
     }
     // 关闭软件即清掉本次扫描缓存文件，下次启动从空缓存开始。
     QFile::remove(m_scanCachePath);
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (m_robotWindow)
+        m_robotWindow->hide();
+
+    QMainWindow::closeEvent(event);
+
+    if (event->isAccepted())
+        QTimer::singleShot(0, qApp, &QApplication::quit);
 }
 
 void MainWindow::buildUi()
@@ -1114,6 +1152,10 @@ void MainWindow::buildMenus()
     auto *robotControl = tools->addAction(QStringLiteral("切换到小车运动控制"));
     robotControl->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+M")));
     connect(robotControl, &QAction::triggered, this, &MainWindow::openRobotControl);
+    tools->addSeparator();
+    auto *screenLayout = tools->addAction(QStringLiteral("屏幕布局…"));
+    connect(screenLayout, &QAction::triggered,
+            this, &MainWindow::showScreenLayoutDialog);
 
     auto *information = menuBar()->addMenu(QStringLiteral("信息"));
     auto *robotInformation = information->addAction(QStringLiteral("小车信息"));
@@ -1184,8 +1226,14 @@ void MainWindow::openRemoteDesktop()
 
 void MainWindow::openRobotControl()
 {
-    if (m_workspace && m_robotPanel)
+    if (m_robotWindow && m_robotPanel
+        && m_robotWindow->centralWidget() == m_robotPanel) {
+        m_robotWindow->show();
+        m_robotWindow->raise();
+        m_robotWindow->activateWindow();
+    } else if (m_workspace && m_robotPanel) {
         m_workspace->setCurrentWidget(m_robotPanel);
+    }
     showMessage(QStringLiteral("已切换到小车运动控制页面。"), false);
 }
 
@@ -2063,4 +2111,166 @@ void MainWindow::showMessage(const QString &text, bool error)
     statusBar()->showMessage(text, error ? 8000 : 5000);
     if (error) statusBar()->setStyleSheet("QStatusBar{color:#b42318}");
     else statusBar()->setStyleSheet("QStatusBar{color:#245c38}");
+}
+
+void MainWindow::showScreenLayoutDialog()
+{
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    if (screens.isEmpty()) {
+        showMessage(QStringLiteral("未检测到可用显示器。"), true);
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("屏幕布局"));
+    dialog.setMinimumWidth(560);
+
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *hint = new QLabel(QStringLiteral(
+        "自动模式在连接两块及以上显示器时拆分为双窗口；"
+        "单屏页签模式始终把“小车控制”保留在主窗口页签内。"));
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+
+    auto *form = new QFormLayout;
+    auto *mode = new QComboBox(&dialog);
+    mode->addItem(QStringLiteral("自动（双屏时双窗口，单屏时页签）"),
+                  int(AutomaticScreenLayout));
+    mode->addItem(QStringLiteral("单屏页签模式"), int(SingleWindowLayout));
+    mode->addItem(QStringLiteral("双窗口模式"), int(DualWindowLayout));
+    const int savedMode = mode->findData(int(m_screenLayoutMode));
+    mode->setCurrentIndex(savedMode >= 0 ? savedMode : 0);
+
+    auto *ultrasoundScreen = new QComboBox(&dialog);
+    for (int index = 0; index < screens.size(); ++index) {
+        QScreen *screen = screens.at(index);
+        const QSize logicalSize = screen->geometry().size();
+        const qreal ratio = screen->devicePixelRatio();
+        const QSize nativeSize(qRound(logicalSize.width() * ratio),
+                               qRound(logicalSize.height() * ratio));
+        ultrasoundScreen->addItem(
+            QStringLiteral("屏幕 %1：%2（%3 × %4）")
+                .arg(index + 1)
+                .arg(screen->name())
+                .arg(nativeSize.width())
+                .arg(nativeSize.height()),
+            screen->name());
+    }
+
+    int selectedScreen = ultrasoundScreen->findData(m_ultrasoundScreenName);
+    if (selectedScreen < 0) {
+        QScreen *currentScreen = QGuiApplication::screenAt(frameGeometry().center());
+        if (currentScreen)
+            selectedScreen = ultrasoundScreen->findData(currentScreen->name());
+    }
+    ultrasoundScreen->setCurrentIndex(qMax(0, selectedScreen));
+
+    form->addRow(QStringLiteral("布局模式"), mode);
+    form->addRow(QStringLiteral("超声检测窗口"), ultrasoundScreen);
+    auto *robotScreenHint = new QLabel(
+        QStringLiteral("自动使用第一块不同于超声检测窗口的显示器"), &dialog);
+    robotScreenHint->setWordWrap(true);
+    form->addRow(QStringLiteral("小车控制窗口"), robotScreenHint);
+    layout->addLayout(form);
+
+    auto *swapScreens = new QPushButton(QStringLiteral("交换两个屏幕"), &dialog);
+    swapScreens->setEnabled(screens.size() >= 2);
+    connect(swapScreens, &QPushButton::clicked, &dialog, [ultrasoundScreen] {
+        ultrasoundScreen->setCurrentIndex(
+            (ultrasoundScreen->currentIndex() + 1) % ultrasoundScreen->count());
+    });
+    layout->addWidget(swapScreens);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+                                         &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("应用"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    m_screenLayoutMode = static_cast<ScreenLayoutMode>(mode->currentData().toInt());
+    m_ultrasoundScreenName = ultrasoundScreen->currentData().toString();
+
+    QSettings settings;
+    settings.setValue(QStringLiteral("display/layoutMode"), int(m_screenLayoutMode));
+    settings.setValue(QStringLiteral("display/ultrasoundScreen"), m_ultrasoundScreenName);
+    settings.sync();
+
+    applyScreenLayout();
+}
+
+void MainWindow::applyScreenLayout()
+{
+    if (!m_workspace || !m_robotPanel)
+        return;
+
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    if (screens.isEmpty())
+        return;
+
+    const bool useDualWindow =
+        m_screenLayoutMode == DualWindowLayout
+        || (m_screenLayoutMode == AutomaticScreenLayout && screens.size() >= 2);
+
+    QScreen *ultrasoundScreen = nullptr;
+    for (QScreen *screen : screens) {
+        if (screen->name() == m_ultrasoundScreenName) {
+            ultrasoundScreen = screen;
+            break;
+        }
+    }
+    if (!ultrasoundScreen)
+        ultrasoundScreen = QGuiApplication::primaryScreen();
+    if (!ultrasoundScreen)
+        ultrasoundScreen = screens.first();
+
+    if (!useDualWindow) {
+        if (m_robotWindow && m_robotWindow->centralWidget() == m_robotPanel)
+            m_robotWindow->takeCentralWidget();
+        if (m_workspace->indexOf(m_robotPanel) < 0)
+            m_workspace->addTab(m_robotPanel, QStringLiteral("小车控制"));
+        if (m_robotWindow)
+            m_robotWindow->hide();
+
+        setWindowState(Qt::WindowNoState);
+        setGeometry(ultrasoundScreen->availableGeometry());
+        showMaximized();
+        return;
+    }
+
+    const int robotTab = m_workspace->indexOf(m_robotPanel);
+    if (robotTab >= 0)
+        m_workspace->removeTab(robotTab);
+
+    if (!m_robotWindow) {
+        m_robotWindow = new QMainWindow;
+        m_robotWindow->setAttribute(Qt::WA_QuitOnClose, false);
+        m_robotWindow->setWindowTitle(QStringLiteral("PA-1664 小车运动控制"));
+        m_robotWindow->setMinimumSize(960, 640);
+        m_robotWindow->setStyleSheet(styleSheet());
+    }
+
+    if (m_robotWindow->centralWidget() != m_robotPanel)
+        m_robotWindow->setCentralWidget(m_robotPanel);
+    m_robotPanel->show();
+
+    QScreen *robotScreen = ultrasoundScreen;
+    for (QScreen *screen : screens) {
+        if (screen != ultrasoundScreen) {
+            robotScreen = screen;
+            break;
+        }
+    }
+
+    setWindowState(Qt::WindowNoState);
+    setGeometry(ultrasoundScreen->availableGeometry());
+    showMaximized();
+
+    m_robotWindow->setWindowState(Qt::WindowNoState);
+    m_robotWindow->setGeometry(robotScreen->availableGeometry());
+    m_robotWindow->showMaximized();
 }

@@ -20,6 +20,7 @@ class ScanWaveformCache;
 class QAction;
 class QComboBox;
 class QCheckBox;
+class QCloseEvent;
 class QDockWidget;
 class QLabel;
 class QLineEdit;
@@ -44,6 +45,9 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
 
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
 private slots:
     void connectDevice();
     void acceptDecodedFrame(DecodedFrame frame, int groupId, int deviceId);
@@ -59,8 +63,16 @@ private slots:
     void processPlaybackFrame(const QByteArray &packet, int pointCount, int beamCount);
     void saveScanSession();
     void loadScanSession();
+    void showScreenLayoutDialog();
 
 private:
+    enum ScreenLayoutMode {
+        AutomaticScreenLayout = 0,
+        SingleWindowLayout = 1,
+        DualWindowLayout = 2
+    };
+
+    void applyScreenLayout();
     void buildUi();
     void buildMenus();
     void showMessage(const QString &text, bool error);
@@ -106,6 +118,9 @@ private:
     RobotControlPanel *m_robotPanel = nullptr;
     crawling::ClampMotorController *m_clampController = nullptr;
     QTabWidget *m_workspace = nullptr;
+    QMainWindow *m_robotWindow = nullptr;
+    ScreenLayoutMode m_screenLayoutMode = AutomaticScreenLayout;
+    QString m_ultrasoundScreenName;
     ParameterPanel *m_parameters = nullptr;
     AScanWidget *m_aScan = nullptr;
     EScanWidget *m_eScan = nullptr;
