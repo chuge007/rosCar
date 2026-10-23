@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QImage>
 #include <QMutexLocker>
 #include <QSerialPortInfo>
@@ -276,6 +277,8 @@ void RobotSensorController::scanCamera() {
 
 void RobotSensorController::connectCamera(const QString& serialNumber) {
   const QString serial = serialNumber.section(" | ", 0, 0);
+  QElapsedTimer connectTimer;
+  connectTimer.start();
   AppLogger::write(QStringLiteral("CAMERA.CONNECTION"),
                    QStringLiteral("event=connect_start serial=%1").arg(serial));
   try {
@@ -293,6 +296,12 @@ void RobotSensorController::connectCamera(const QString& serialNumber) {
     if (camera_->isConnected()) {
       startProfilePreview();
       emit cameraConnectionChanged(true, QStringLiteral("Camera already connected; live profile preview active"));
+      AppLogger::write(
+          QStringLiteral("CAMERA.CONNECTION"),
+          QStringLiteral("event=connect_skipped result=OK serial=%1 reason=already_connected "
+                         "elapsed_ms=%2")
+              .arg(serial)
+              .arg(connectTimer.elapsed()));
       return;
     }
     camera_->connectBySerial(serial.toStdString());
@@ -320,6 +329,12 @@ void RobotSensorController::connectCamera(const QString& serialNumber) {
     cameraTimer_->start();
     const QString message = CRAWLING_TEXT("\xE7\xBA\xBF""\xE6\xBF\x80""\xE5\x85\x89""\xE7\x9B\xB8""\xE6\x9C\xBA""\xE5\xB7\xB2""\xE8\xBF\x9E""\xE6\x8E\xA5""\xEF\xBC\x9A""%1").arg(serial);
     emit cameraConnectionChanged(true, message);
+    AppLogger::write(
+        QStringLiteral("CAMERA.CONNECTION"),
+        QStringLiteral("event=connect_complete result=OK serial=%1 elapsed_ms=%2 sdk=%3")
+            .arg(serial)
+            .arg(connectTimer.elapsed())
+            .arg(QString::fromStdString(camera_->sdkVersion())));
     AppLogger::write(QStringLiteral("CAMERA.ACQUISITION"),
                      QStringLiteral("event=acquisition_start result=OK serial=%1 timer_ms=%2")
                          .arg(serial).arg(cameraTimer_->interval()));
@@ -328,8 +343,11 @@ void RobotSensorController::connectCamera(const QString& serialNumber) {
     emit cameraConnectionChanged(false, message);
     emit logMessage(message);
     AppLogger::error(QStringLiteral("CAMERA.CONNECTION"),
-                     QStringLiteral("event=connect_complete result=FAILED serial=%1 error=%2")
-                         .arg(serial, message));
+                     QStringLiteral("event=connect_complete result=FAILED serial=%1 "
+                                    "elapsed_ms=%2 error=%3")
+                         .arg(serial)
+                         .arg(connectTimer.elapsed())
+                         .arg(message));
   }
 }
 void RobotSensorController::startProfilePreview() {

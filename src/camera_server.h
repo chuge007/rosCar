@@ -3,6 +3,7 @@
 #define CRAWLING_CAMERA_SERVER_H_
 
 #include <QCamera>
+#include <QMediaCaptureSession>
 #include <QMediaPlayer>
 #include <QObject>
 #include <QSharedMemory>
@@ -10,6 +11,8 @@
 #include <QVideoFrame>
 #include <QVideoSink>
 #include <QAtomicInt>
+#include <QElapsedTimer>
+#include "robot/drive_settings.h"
 
 namespace crawling {
 
@@ -17,6 +20,7 @@ namespace crawling {
 struct CameraSlot {
   // Camera hardware
   QCamera* camera = nullptr;
+  QMediaCaptureSession* captureSession = nullptr;
   QVideoSink* videoSink = nullptr;
 
   // Network stream
@@ -36,6 +40,8 @@ struct CameraSlot {
   // State
   QAtomicInt frameProcessing{0};
   qint64 lastFrameTime = 0;
+  int consecutiveDrops = 0;  // Track dropped frames for network streams
+  QTimer* bufferClearTimer = nullptr;  // Periodic buffer flush for network
 };
 
 class CameraServer : public QObject {
@@ -64,7 +70,8 @@ class CameraServer : public QObject {
  private:
   void applyFrame(int slot, const QVideoFrame& frame);
   bool setupSharedMemory(int slot);
-  void cleanupSlot(CameraSlot& slot);
+  // Shared memory survives camera switches; only stop() releases it.
+  void cleanupSlot(CameraSlot& slot, bool releaseSharedMemory = true);
 
   QString ipcKeyBase_;
   CameraSlot slots_[kUsbCameraChannelCount];

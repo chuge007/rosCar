@@ -19,17 +19,52 @@ constexpr qint64 kMaximumBytes = 16 * 1024 * 1024;
 constexpr qint64 kRetainedBytes = 12 * 1024 * 1024;
 constexpr qint64 kProfileDetectionMaximumBytes = 64 * 1024 * 1024;
 constexpr qint64 kProfileDetectionRetainedBytes = 48 * 1024 * 1024;
+// Camera connection diagnostics are small compared with profile traffic. Keep a
+// dedicated file so a field failure can be shared without the full console log.
+constexpr qint64 kCameraConnectionMaximumBytes = 8 * 1024 * 1024;
+constexpr qint64 kCameraConnectionRetainedBytes = 6 * 1024 * 1024;
 QMutex& loggerMutex() { static QMutex mutex; return mutex; }
 QMutex& profileDetectionLoggerMutex() { static QMutex mutex; return mutex; }
+QMutex& cameraConnectionLoggerMutex() { static QMutex mutex; return mutex; }
 quint64& logSequence() { static quint64 sequence = 0; return sequence; }
 quint64& profileDetectionLogSequence() {
   static quint64 sequence = 0;
   return sequence;
 }
+quint64& cameraConnectionLogSequence() {
+  static quint64 sequence = 0;
+  return sequence;
+}
+
+bool isCameraConnectionCategory(const QString& category, const QString& level) {
+  static const QStringList categories = {
+      QStringLiteral("CAMERA.CONNECTION"),
+      QStringLiteral("CAMERA.DISCOVERY"),
+      QStringLiteral("CAMERA.SDK"),
+      QStringLiteral("CAMERA.CONFIG"),
+      QStringLiteral("CAMERA.ACQUISITION"),
+      QStringLiteral("CAMERA.PAYLOAD"),
+      QStringLiteral("USB_CAMERA.CONNECTION"),
+      QStringLiteral("USB_CAMERA.DISCOVERY"),
+      QStringLiteral("USB_CAMERA.ACQUISITION"),
+  };
+  if (categories.contains(category))
+    return true;
+  // Keep camera warnings/errors even when their category is not in the list
+  // above (for example CAMERA.PAYLOAD or CAMERA.UI).
+  return level != QLatin1String("INFO") &&
+         (category.startsWith(QLatin1String("CAMERA.")) ||
+          category.startsWith(QLatin1String("USB_CAMERA.")));
+}
 }
 
 QString AppLogger::filePath() {
   return QDir(QCoreApplication::applicationDirPath()).filePath(CRAWLING_TEXT("logs/robot_console.log"));
+}
+
+QString AppLogger::cameraConnectionFilePath() {
+  return QDir(QCoreApplication::applicationDirPath())
+      .filePath(CRAWLING_TEXT("logs/camera_connection.log"));
 }
 
 QString AppLogger::profileDetectionFilePath() {
@@ -50,6 +85,12 @@ void AppLogger::writeBatch(const QString& category, const QStringList& messages)
   if (messages.isEmpty()) return;
   writeLinesToFile(filePath(), QStringLiteral("INFO"), category, messages,
                    kMaximumBytes, kRetainedBytes, loggerMutex(), logSequence());
+  if (isCameraConnectionCategory(category, QStringLiteral("INFO"))) {
+    writeLinesToFile(cameraConnectionFilePath(), QStringLiteral("INFO"), category,
+                     messages, kCameraConnectionMaximumBytes,
+                     kCameraConnectionRetainedBytes, cameraConnectionLoggerMutex(),
+                     cameraConnectionLogSequence());
+  }
 }
 
 bool AppLogger::resetProfileDetection() {
@@ -91,6 +132,12 @@ void AppLogger::writeLine(const QString& level, const QString& category,
                           const QString& message) {
   writeLineToFile(filePath(), level, category, message, kMaximumBytes,
                   kRetainedBytes, loggerMutex(), logSequence());
+  if (isCameraConnectionCategory(category, level)) {
+    writeLineToFile(cameraConnectionFilePath(), level, category, message,
+                    kCameraConnectionMaximumBytes,
+                    kCameraConnectionRetainedBytes, cameraConnectionLoggerMutex(),
+                    cameraConnectionLogSequence());
+  }
 }
 
 void AppLogger::writeLineToFile(const QString& path, const QString& level,

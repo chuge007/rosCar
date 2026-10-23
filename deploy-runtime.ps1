@@ -53,6 +53,26 @@ Get-ChildItem -LiteralPath $source -Recurse -File -Force | ForEach-Object {
     }
 }
 
+# OpenCV's FFmpeg backend is loaded dynamically by the low-latency network camera reader.
+$opencvBin = 'D:\opencv\opencv\build\x64\vc16\bin'
+$opencvRuntimeDlls = @('opencv_world500.dll', 'opencv_videoio_ffmpeg500_64.dll')
+foreach ($dll in $opencvRuntimeDlls) {
+    $sourceDll = Join-Path $opencvBin $dll
+    if (-not (Test-Path -LiteralPath $sourceDll)) {
+        throw "OpenCV runtime dependency missing: $sourceDll"
+    }
+    Copy-IfDifferent $sourceDll (Join-Path $destination $dll)
+}
+
+# Fail the deployment instead of silently producing a package whose RTSP
+# cameras cannot open because OpenCV's FFmpeg plugin was left behind.
+foreach ($dll in $opencvRuntimeDlls) {
+    $deployedDll = Join-Path $destination $dll
+    if (-not (Test-Path -LiteralPath $deployedDll)) {
+        throw "Runtime deployment incomplete: $deployedDll"
+    }
+}
+
 $qtBin = 'D:\QT\6.8.3\msvc2022_64\bin'
 $neededQt = @('Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Network.dll',
               'Qt6SerialPort.dll', 'Qt6Multimedia.dll',

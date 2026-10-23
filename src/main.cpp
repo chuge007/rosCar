@@ -41,6 +41,11 @@ void prepareSessionLogs()
     QFile robotLog(logDirectory.filePath(QStringLiteral("robot_console.log")));
     if (robotLog.exists() && !robotLog.open(QIODevice::WriteOnly | QIODevice::Truncate))
         qWarning() << "SESSION_LOG_CLEANUP: failed" << robotLog.fileName();
+
+    QFile cameraLog(logDirectory.filePath(QStringLiteral("camera_connection.log")));
+    if (cameraLog.exists() && !cameraLog.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        qWarning() << "SESSION_LOG_CLEANUP: failed" << cameraLog.fileName();
+    qInfo().noquote() << "CAMERA_CONNECTION_LOG:" << cameraLog.fileName();
 }
 
 void pruneInactiveServiceGroups()

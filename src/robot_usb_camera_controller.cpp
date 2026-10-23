@@ -2,6 +2,7 @@
 
 #include "camera_frame_processor.h"
 #include "camera_server_client.h"
+#include "network_stream_reader.h"
 #include "robot_app_logger.h"
 #include "utf8_compat.h"
 
@@ -10,7 +11,6 @@
 #include <QCameraFormat>
 #include <QMediaCaptureSession>
 #include <QMediaDevices>
-#include <QMediaPlayer>
 #include <QStringBuilder>
 #include <QTimer>
 #include <QUrl>
@@ -61,10 +61,23 @@ RobotUsbCameraController::RobotUsbCameraController(QObject* parent, CameraProces
   if (mode_ == CameraProcessMode::InProcess) {
     // Use in-process worker threads
     frameProcessor_ = new CameraFrameProcessor(this);
-    connect(frameProcessor_, &CameraFrameProcessor::frameReady,
-            this, &RobotUsbCameraController::frameChanged);
+    connect(frameProcessor_, &CameraFrameProcessor::frameReady, this,
+            [this](int slot, const QImage& image) {
+              if (image.isNull()) {
+                frameConsumed(slot);
+                return;
+              }
+              emit frameChanged(slot, image);
+            });
     qInfo() << "Camera controller using IN-PROCESS mode";
   }
+
+  AppLogger::write(QStringLiteral("CAMERA.CONNECTION"),
+                   QStringLiteral("event=controller_ready mode=%1")
+                       .arg(mode_ == CameraProcessMode::IsolatedProcess
+                                ? QStringLiteral("isolated_process")
+                                : QStringLiteral("in_process")));
+  NetworkStreamReader::logEnvironmentSnapshot(QStringLiteral("controller_constructor"));
 }
 
 RobotUsbCameraController::~RobotUsbCameraController() {
@@ -95,7 +108,7 @@ void RobotUsbCameraController::scanDevices() {
                        .arg(devices.size()));
 }
 
-void RobotUsbCameraController::teardownSlot(UsbSlot& slot) const {
+void RobotUsbCameraController::teardownSlot(UsbSlot& slot) {
   if (slot.camera)
     slot.camera->stop();
   if (slot.captureSession) {
@@ -109,12 +122,7 @@ void RobotUsbCameraController::teardownSlot(UsbSlot& slot) const {
   delete slot.captureSession;
   slot.captureSession = nullptr;
 
-  if (slot.networkPlayer)
-    slot.networkPlayer->stop();
-  delete slot.networkPlayer;
-  slot.networkPlayer = nullptr;
-  delete slot.networkVideoSink;
-  slot.networkVideoSink = nullptr;
+  stopNetworkReader(slot);
   delete slot.networkWatchdog;
   slot.networkWatchdog = nullptr;
   delete slot.networkReconnectTimer;
@@ -138,7 +146,7 @@ void RobotUsbCameraController::disconnectCamera(int slot) {
   // Fallback to in-process mode
   UsbSlot& target = slots_[slot];
   const bool wasCamera = target.camera && target.camera->isActive();
-  const bool wasNetwork = target.networkPlayer != nullptr;
+  const bool wasNetwork = target.networkReader != nullptr;
   teardownSlot(target);
   emit connectionChanged(slot, false, CRAWLING_TEXT("%1 未连接").arg(slotLabel(slot)));
   if (wasCamera || wasNetwork) {
@@ -158,6 +166,8 @@ void RobotUsbCameraController::frameConsumed(int slot) {
   if (slot < 0 || slot >= kUsbCameraChannelCount)
     return;
   slots_[slot].frameProcessing.storeRelease(0);
+  if (slots_[slot].networkReader)
+    slots_[slot].networkReader->releaseFrame();
 }
 
 void RobotUsbCameraController::setDisplaySize(int slot, int width, int height) {
@@ -165,6 +175,8 @@ void RobotUsbCameraController::setDisplaySize(int slot, int width, int height) {
     return;
   slots_[slot].targetWidth.storeRelease(width);
   slots_[slot].targetHeight.storeRelease(height);
+  if (slots_[slot].networkReader)
+    slots_[slot].networkReader->setTargetSize(width, height);
 }
 
 void RobotUsbCameraController::applyFrame(UsbSlot& slot, int slotIndex,
@@ -181,9 +193,9 @@ void RobotUsbCameraController::applyFrame(UsbSlot& slot, int slotIndex,
   if (frameProcessor_) {
     frameProcessor_->submitFrame(frame, slotIndex, targetWidth, targetHeight,
                                  slot.flipHorizontal, slot.flipVertical);
+  } else {
+    slot.frameProcessing.storeRelease(0);
   }
-
-  slot.frameProcessing.storeRelease(0);
 }
 
 void RobotUsbCameraController::connectCamera(int slot, int deviceIndex, int fps,
@@ -247,7 +259,7 @@ void RobotUsbCameraController::connectCamera(int slot, int deviceIndex, int fps,
 
   QCameraFormat selectedFormat;
   double bestScore = std::numeric_limits<double>::max();
-  const int requestedFps = qMax(1, fps);
+  const int requestedFps = qBound(1, fps, 15);
   for (const QCameraFormat& format : device.videoFormats()) {
     const QSize resolution = format.resolution();
     const bool containsRequestedFps =
@@ -257,13 +269,16 @@ void RobotUsbCameraController::connectCamera(int slot, int deviceIndex, int fps,
                                  : std::min(std::abs(format.minFrameRate() - requestedFps),
                                             std::abs(format.maxFrameRate() - requestedFps));
     const int pixels = resolution.width() * resolution.height();
-    // Prefer lower resolution (640x480 or 800x600) to reduce CPU load
-    const int targetPixels = 640 * 480;
+    // The preview is small; prefer a native 320x240 format so USB bandwidth,
+    // conversion and scaling work all drop substantially.
+    const int targetPixels = 320 * 240;
     const double resolutionPenalty =
         pixels <= targetPixels
             ? static_cast<double>(targetPixels - pixels) / targetPixels
-            : 4.0 + static_cast<double>(pixels - targetPixels) / targetPixels;
-    const double score = fpsPenalty * 100.0 + resolutionPenalty;
+            : 10.0 + static_cast<double>(pixels - targetPixels) / targetPixels;
+    // Resolution dominates: a native 320x240 format is better for preview
+    // latency than a higher-resolution stream even if its max FPS differs.
+    const double score = resolutionPenalty + fpsPenalty * 0.05;
     if (score < bestScore) {
       bestScore = score;
       selectedFormat = format;
@@ -305,14 +320,42 @@ void RobotUsbCameraController::connectNetworkCamera(int slot, const QString& add
                                             bool flipHorizontal, bool flipVertical) {
   if (slot < 0 || slot >= kUsbCameraChannelCount) {
     emit logMessage(CRAWLING_TEXT("%1 槽位参数无效").arg(slotLabel(slot)));
+    AppLogger::error(QStringLiteral("USB_CAMERA.CONNECTION"),
+                     QStringLiteral("event=network_connect_rejected slot=%1 reason=invalid_slot")
+                         .arg(slot));
     return;
   }
 
+  QString value = address.trimmed();
+  AppLogger::write(
+      QStringLiteral("USB_CAMERA.CONNECTION"),
+      QStringLiteral("event=network_connect_request slot=%1 address=\"%2\" flip_h=%3 "
+                     "flip_v=%4 mode=%5")
+          .arg(slot)
+          .arg(value.isEmpty() ? QStringLiteral("<empty>")
+                               : NetworkStreamReader::redactStreamUrl(value))
+          .arg(flipHorizontal ? 1 : 0)
+          .arg(flipVertical ? 1 : 0)
+          .arg(mode_ == CameraProcessMode::IsolatedProcess
+                   ? QStringLiteral("isolated_process")
+                   : QStringLiteral("in_process")));
+  NetworkStreamReader::logEnvironmentSnapshot(QStringLiteral("network_connect_request"));
+
+  if (value.isEmpty()) {
+    const QString message =
+        CRAWLING_TEXT("%1 地址为空").arg(slotLabel(slot));
+    emit connectionChanged(slot, false, message);
+    emit logMessage(message);
+    AppLogger::warning(QStringLiteral("USB_CAMERA.CONNECTION"),
+                       QStringLiteral("event=network_connect_rejected slot=%1 reason=empty_address")
+                           .arg(slot));
+    return;
+  }
+  if (!value.contains(QStringLiteral("://")))
+    value.prepend(QStringLiteral("rtsp://"));
+
   // Use isolated process mode if available
   if (mode_ == CameraProcessMode::IsolatedProcess && cameraClient_) {
-    QString value = address.trimmed();
-    if (!value.contains(QStringLiteral("://")))
-      value.prepend(QStringLiteral("rtsp://"));
     cameraClient_->connectNetworkCamera(slot, value, flipHorizontal, flipVertical);
     return;
   }
@@ -323,26 +366,27 @@ void RobotUsbCameraController::connectNetworkCamera(int slot, const QString& add
   target.flipHorizontal = flipHorizontal;
   target.flipVertical = flipVertical;
 
-  QString value = address.trimmed();
-  if (value.isEmpty()) {
-    emit connectionChanged(slot, false,
-                           CRAWLING_TEXT("%1 地址为空").arg(slotLabel(slot)));
-    return;
-  }
-  if (!value.contains(QStringLiteral("://")))
-    value.prepend(QStringLiteral("rtsp://"));
   const QUrl url(value);
   if (!url.isValid() || url.host().isEmpty()) {
     const QString message =
         CRAWLING_TEXT("%1 地址无效：%2").arg(slotLabel(slot), value);
     emit connectionChanged(slot, false, message);
     emit logMessage(message);
+    AppLogger::warning(
+        QStringLiteral("USB_CAMERA.CONNECTION"),
+        QStringLiteral("event=network_connect_rejected slot=%1 reason=invalid_url address=\"%2\"")
+            .arg(slot)
+            .arg(NetworkStreamReader::redactStreamUrl(value)));
     return;
   }
 
   target.networkAddress = value;
   target.networkWanted = true;
   target.reconnectAttempts = 0;
+  // pushUsbDisplaySize() is queued right after this command, so use the same
+  // small preview size rather than decoding at the stream's native resolution.
+  target.targetWidth.storeRelease(260);
+  target.targetHeight.storeRelease(160);
 
   target.networkWatchdog = new QTimer(this);
   target.networkWatchdog->setInterval(kNetworkWatchdogIntervalMs);
@@ -358,46 +402,65 @@ void RobotUsbCameraController::connectNetworkCamera(int slot, const QString& add
   emit logMessage(CRAWLING_TEXT("正在连接%1：%2").arg(slotLabel(slot), value));
 }
 
+void RobotUsbCameraController::stopNetworkReader(UsbSlot& slot) {
+  if (!slot.networkReader)
+    return;
+  NetworkStreamReader* reader = slot.networkReader;
+  slot.networkReader = nullptr;
+  disconnect(reader, nullptr, this, nullptr);
+  reader->requestStop();
+  if (!reader->wait(400)) {
+    // Avoid blocking shutdown forever if FFmpeg is stuck in a socket read.
+    reader->terminate();
+    if (!reader->wait(700)) {
+      // Deleting a running QThread would abort the process. Detach it and let
+      // Qt delete the wrapper once the OS finally releases the thread.
+      reader->setParent(nullptr);
+      connect(reader, &QThread::finished, reader, &QObject::deleteLater);
+      return;
+    }
+  }
+  delete reader;
+}
+
 void RobotUsbCameraController::startNetworkStream(int slot) {
   UsbSlot& target = slots_[slot];
   if (!target.networkWanted)
     return;
 
-  if (target.networkPlayer) {
-    disconnect(target.networkPlayer, nullptr, this, nullptr);
-    target.networkPlayer->stop();
-    target.networkPlayer->deleteLater();
-    target.networkPlayer = nullptr;
-  }
-  if (target.networkVideoSink) {
-    disconnect(target.networkVideoSink, nullptr, this, nullptr);
-    target.networkVideoSink->deleteLater();
-    target.networkVideoSink = nullptr;
-  }
+  stopNetworkReader(target);
   target.frameProcessing.storeRelease(0);
   target.lastFrameTime = clock_.elapsed();
 
   const QString value = target.networkAddress;
-  target.networkPlayer = new QMediaPlayer(this);
-  target.networkVideoSink = new QVideoSink(this);
-  target.networkPlayer->setVideoOutput(target.networkVideoSink);
+  const quint64 generation = ++target.networkGeneration;
+  AppLogger::write(
+      QStringLiteral("USB_CAMERA.CONNECTION"),
+      QStringLiteral("event=stream_start slot=%1 generation=%2 address=\"%3\" "
+                     "reconnect_attempt=%4")
+          .arg(slot)
+          .arg(generation)
+          .arg(NetworkStreamReader::redactStreamUrl(value))
+          .arg(target.reconnectAttempts));
 
-  // Aggressive low-latency configuration for network streams
-  target.networkPlayer->setProperty("bufferSize", 1);        // Minimal buffer (was 50)
-  target.networkPlayer->setProperty("rtsp_transport", "tcp"); // TCP for stability
-  target.networkPlayer->setProperty("rtsp_flags", "prefer_tcp");
-  target.networkPlayer->setProperty("fflags", "nobuffer");    // Disable FFmpeg buffering
-  target.networkPlayer->setProperty("flags", "low_delay");    // Low delay mode
-  target.networkPlayer->setProperty("probesize", 32);         // Small probe
-  target.networkPlayer->setProperty("analyzeduration", 0);    // Skip analysis
+  // QMediaPlayer follows a playback clock and buffers live RTSP streams, which
+  // caused multi-second latency. Decode with OpenCV/FFmpeg on a dedicated thread
+  // and emit only frames the UI is ready to consume.
+  NetworkStreamReader* reader = new NetworkStreamReader(value, slot, this);
+  target.networkReader = reader;
+  target.networkReader->setTargetSize(target.targetWidth.loadAcquire(),
+                                      target.targetHeight.loadAcquire());
+  target.networkReader->setFlip(target.flipHorizontal, target.flipVertical);
 
-  connect(target.networkVideoSink, &QVideoSink::videoFrameChanged, this,
-          [this, slot](const QVideoFrame& frame) {
+  connect(reader, &NetworkStreamReader::opened, this,
+          [this, slot, generation, reader](int, int width, int height, double fps) {
             UsbSlot& current = slots_[slot];
+            if (current.networkReader != reader || current.networkGeneration != generation)
+              return;
             current.lastFrameTime = clock_.elapsed();
             if (current.reconnectAttempts > 0) {
-              const QString message =
-                  CRAWLING_TEXT("%1 已重新连接：%2").arg(slotLabel(slot), current.networkAddress);
+              const QString message = CRAWLING_TEXT("%1 已重新连接：%2")
+                                          .arg(slotLabel(slot), current.networkAddress);
               current.reconnectAttempts = 0;
               emit connectionChanged(slot, true, message);
               emit logMessage(message);
@@ -405,44 +468,68 @@ void RobotUsbCameraController::startNetworkStream(int slot) {
                   QStringLiteral("USB_CAMERA.CONNECTION"),
                   QStringLiteral("event=network_reconnect slot=%1 result=OK address=%2")
                       .arg(slot)
-                      .arg(current.networkAddress));
-            }
-            applyFrame(current, slot, frame);
-          });
-  connect(target.networkPlayer, &QMediaPlayer::mediaStatusChanged, this,
-          [this, slot, value](QMediaPlayer::MediaStatus status) {
-            if (status == QMediaPlayer::EndOfMedia || status == QMediaPlayer::InvalidMedia) {
-              scheduleNetworkReconnect(slot);
-              return;
-            }
-            if (slots_[slot].reconnectAttempts > 0)
-              return;
-            if (status == QMediaPlayer::LoadedMedia ||
-                status == QMediaPlayer::BufferedMedia ||
-                status == QMediaPlayer::BufferingMedia) {
-              emit connectionChanged(
-                  slot, true,
-                  CRAWLING_TEXT("%1 已连接：%2").arg(slotLabel(slot), value));
+                      .arg(NetworkStreamReader::redactStreamUrl(
+                          current.networkAddress)));
+            } else {
+              const QString message =
+                  CRAWLING_TEXT("%1 已连接：%2（%3x%4，%5 fps，低延迟）")
+                      .arg(slotLabel(slot), current.networkAddress)
+                      .arg(width)
+                      .arg(height)
+                      .arg(fps, 0, 'f', 1);
+              emit connectionChanged(slot, true, message);
+              emit logMessage(message);
               AppLogger::write(
                   QStringLiteral("USB_CAMERA.CONNECTION"),
-                  QStringLiteral("event=network_connect slot=%1 status=OK address=%2")
+                  QStringLiteral("event=network_connect slot=%1 result=OK address=%2 width=%3 height=%4 fps=%5")
                       .arg(slot)
-                      .arg(value));
+                      .arg(NetworkStreamReader::redactStreamUrl(
+                          current.networkAddress))
+                      .arg(width)
+                      .arg(height)
+                      .arg(fps));
             }
-          });
-  connect(target.networkPlayer, &QMediaPlayer::errorOccurred, this,
-          [this, slot, value](QMediaPlayer::Error, const QString& errorText) {
+          },
+          Qt::QueuedConnection);
+
+  connect(reader, &NetworkStreamReader::frameReady, this,
+          [this, slot, generation, reader](int, const QImage& image) {
+            UsbSlot& current = slots_[slot];
+            if (!current.networkWanted || current.networkReader != reader ||
+                current.networkGeneration != generation)
+              return;
+            current.lastFrameTime = clock_.elapsed();
+            if (current.reconnectAttempts > 0) {
+              const QString message = CRAWLING_TEXT("%1 已重新连接：%2")
+                                          .arg(slotLabel(slot), current.networkAddress);
+              current.reconnectAttempts = 0;
+              emit connectionChanged(slot, true, message);
+              emit logMessage(message);
+            }
+            emit frameChanged(slot, image);
+          },
+          Qt::QueuedConnection);
+
+  connect(reader, &NetworkStreamReader::failed, this,
+          [this, slot, generation, reader](int, const QString& reason) {
+            UsbSlot& current = slots_[slot];
+            if (!current.networkWanted || current.networkReader != reader ||
+                current.networkGeneration != generation)
+              return;
             emit logMessage(CRAWLING_TEXT("%1 打开失败：%2（%3）")
-                                .arg(slotLabel(slot), value, errorText));
+                                .arg(slotLabel(slot), slots_[slot].networkAddress, reason));
             AppLogger::error(QStringLiteral("USB_CAMERA.CONNECTION"),
-                             QStringLiteral("event=network_connect slot=%1 result=FAILED address=%2 error=%3")
+                             QStringLiteral("event=network_connect slot=%1 result=FAILED "
+                                            "address=%2 error=%3")
                                  .arg(slot)
-                                 .arg(value)
-                                 .arg(errorText));
+                                 .arg(NetworkStreamReader::redactStreamUrl(
+                                     slots_[slot].networkAddress))
+                                 .arg(reason));
             scheduleNetworkReconnect(slot);
-          });
-  target.networkPlayer->setSource(QUrl(value));
-  target.networkPlayer->play();
+          },
+          Qt::QueuedConnection);
+
+  reader->start();
 }
 
 void RobotUsbCameraController::scheduleNetworkReconnect(int slot) {
@@ -451,17 +538,7 @@ void RobotUsbCameraController::scheduleNetworkReconnect(int slot) {
       target.networkReconnectTimer->isActive())
     return;
 
-  if (target.networkPlayer) {
-    disconnect(target.networkPlayer, nullptr, this, nullptr);
-    target.networkPlayer->stop();
-    target.networkPlayer->deleteLater();
-    target.networkPlayer = nullptr;
-  }
-  if (target.networkVideoSink) {
-    disconnect(target.networkVideoSink, nullptr, this, nullptr);
-    target.networkVideoSink->deleteLater();
-    target.networkVideoSink = nullptr;
-  }
+  stopNetworkReader(target);
   target.frameProcessing.storeRelease(0);
 
   ++target.reconnectAttempts;
@@ -479,22 +556,26 @@ void RobotUsbCameraController::scheduleNetworkReconnect(int slot) {
                        .arg(slot)
                        .arg(target.reconnectAttempts)
                        .arg(delayMs)
-                       .arg(target.networkAddress));
+                       .arg(NetworkStreamReader::redactStreamUrl(
+                           target.networkAddress)));
   target.networkReconnectTimer->start(delayMs);
 }
 
 void RobotUsbCameraController::checkNetworkWatchdog(int slot) {
   UsbSlot& target = slots_[slot];
-  if (!target.networkWanted || !target.networkPlayer)
+  if (!target.networkWanted || !target.networkReader)
     return;
   if (target.networkReconnectTimer && target.networkReconnectTimer->isActive())
     return;
   if (clock_.elapsed() - target.lastFrameTime < kNetworkFrameTimeoutMs)
     return;
   AppLogger::write(QStringLiteral("USB_CAMERA.CONNECTION"),
-                   QStringLiteral("event=network_frame_timeout slot=%1 timeout_ms=%2")
+                   QStringLiteral("event=network_frame_timeout slot=%1 timeout_ms=%2 "
+                                  "address=\"%3\"")
                        .arg(slot)
-                       .arg(kNetworkFrameTimeoutMs));
+                       .arg(kNetworkFrameTimeoutMs)
+                       .arg(NetworkStreamReader::redactStreamUrl(
+                           target.networkAddress)));
   scheduleNetworkReconnect(slot);
 }
 

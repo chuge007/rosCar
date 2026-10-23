@@ -3,6 +3,7 @@
 
 #include <QString>
 #include <QObject>
+#include <algorithm>
 #include <vector>
 #include <cmath>
 
@@ -11,13 +12,15 @@ namespace crawling {
 /**
  * @brief 焊道定位状态
  *
- * 状态转换链路：NotDetected → Candidate → Located
+ * 状态转换链路：NotDetected → Candidate → Confirmed → Located
  *
- * 【2026-10-23 简化】删除Confirmed状态，Candidate稳定后直接进Located
+ * Confirmed 负责采集稳定中心样本；校准完成后由控制器显式通知进入 Located。
+ * 同一次任务内短暂丢检恢复时，已有校准结果可以被复用。
  */
 enum class SeamLocalizationState {
     NotDetected,  // 未检测到焊道
     Candidate,    // 候选焊道（检测到但未稳定）
+    Confirmed,    // 已连续稳定，正在建立/复用激光中心基准
     Located       // 已定位（稳定且可用于纠偏控制）
 };
 
@@ -55,8 +58,10 @@ public:
         for (double s : samples) {
             sum += s;
         }
-        double avgCenter = sum / samples.size();
-        calibrate(avgCenter);
+        cameraToLaserOffset_ = sum / samples.size();
+        calibrated_ = true;
+        calibrationSamples_ = samples;
+        emit calibrationChanged(cameraToLaserOffset_);
     }
 
     /**
@@ -100,9 +105,14 @@ private:
 /**
  * @brief 自适应PID参数计算器
  *
- * 根据偏差大小动态调整Kp和Kd，实现：
- * - 大偏差：强响应快速纠正
- * - 小偏差：弱响应平滑保持
+ * 根据偏差大小分四档调整Kp和Kd：
+ * - <2 mm：弱响应平滑保持
+ * - 2~5 mm：精细调整
+ * - 5~10 mm：稳定逼近
+ * - >10 mm：强响应快速纠正
+ *
+ * 档位边界使用 0.5 mm 的平滑过渡，避免滤波后的误差在阈值附近
+ * 反复切换增益而引入抖动。
  */
 class AdaptivePIDParams {
 public:
@@ -117,28 +127,31 @@ public:
      * @return 当前偏差对应的Kp和Kd
      */
     Params getParams(double errorMm) const {
-        double absError = std::abs(errorMm);
+        const double absError = std::isfinite(errorMm)
+                                    ? std::abs(errorMm)
+                                    : 0.0;
+        const auto smoothStep = [](double edge0, double edge1, double value) {
+            const double ratio = std::clamp(
+                (value - edge0) / (edge1 - edge0), 0.0, 1.0);
+            return ratio * ratio * (3.0 - 2.0 * ratio);
+        };
+        const double fineBlend = smoothStep(
+            smallErrorThreshold_ - kGainTransitionHalfWidthMm,
+            smallErrorThreshold_ + kGainTransitionHalfWidthMm, absError);
+        const double mediumBlend = smoothStep(
+            mediumErrorThreshold_ - kGainTransitionHalfWidthMm,
+            mediumErrorThreshold_ + kGainTransitionHalfWidthMm, absError);
+        const double largeBlend = smoothStep(
+            largeErrorThreshold_ - kGainTransitionHalfWidthMm,
+            largeErrorThreshold_ + kGainTransitionHalfWidthMm, absError);
 
-        if (absError > largeErrorThreshold_) {
-            return {largeKp_, largeKd_};
-        } else if (absError > mediumErrorThreshold_) {
-            // 线性插值
-            double ratio = (absError - mediumErrorThreshold_) /
-                          (largeErrorThreshold_ - mediumErrorThreshold_);
-            return {
-                mediumKp_ + ratio * (largeKp_ - mediumKp_),
-                mediumKd_ + ratio * (largeKd_ - mediumKd_)
-            };
-        } else if (absError > smallErrorThreshold_) {
-            double ratio = (absError - smallErrorThreshold_) /
-                          (mediumErrorThreshold_ - smallErrorThreshold_);
-            return {
-                smallKp_ + ratio * (mediumKp_ - smallKp_),
-                smallKd_ + ratio * (mediumKd_ - smallKd_)
-            };
-        } else {
-            return {smallKp_, smallKd_};
-        }
+        const double kp = smallKp_ + fineBlend * (fineKp_ - smallKp_) +
+                          mediumBlend * (mediumKp_ - fineKp_) +
+                          largeBlend * (largeKp_ - mediumKp_);
+        const double kd = smallKd_ + fineBlend * (fineKd_ - smallKd_) +
+                          mediumBlend * (mediumKd_ - fineKd_) +
+                          largeBlend * (largeKd_ - mediumKd_);
+        return {kp, kd};
     }
 
     // 阈值设置
@@ -160,6 +173,12 @@ public:
         mediumKd_ = kd;
     }
 
+    // 精细偏差参数（2~5mm）
+    void setFineErrorParams(double kp, double kd) {
+        fineKp_ = kp;
+        fineKd_ = kd;
+    }
+
     // 小偏差参数
     void setSmallErrorParams(double kp, double kd) {
         smallKp_ = kp;
@@ -167,6 +186,8 @@ public:
     }
 
 private:
+    static constexpr double kGainTransitionHalfWidthMm = 0.5;
+
     // 偏差阈值（mm）
     double smallErrorThreshold_ = 2.0;
     double mediumErrorThreshold_ = 5.0;
@@ -177,6 +198,8 @@ private:
     double largeKd_ = 3.0;
     double mediumKp_ = 1.5;
     double mediumKd_ = 2.0;
+    double fineKp_ = 1.0;
+    double fineKd_ = 1.5;
     double smallKp_ = 0.5;
     double smallKd_ = 1.0;
 };
@@ -247,18 +270,43 @@ public:
     /**
      * @brief 更新状态机
      * @param detectionValid 当前帧检测是否有效
-     * @param centerX 检测到的中心位置（mm）
+     * @param centerMm 检测到的中心位置（mm）
      * @param confidence 检测置信度
      */
-    void update(bool detectionValid, double centerX, double confidence) {
-        if (!detectionValid) {
+    void update(bool detectionValid, double centerMm, double confidence) {
+        const bool wasLocated = currentState_ == SeamLocalizationState::Located;
+        if (!detectionValid || !std::isfinite(centerMm) ||
+            !std::isfinite(confidence)) {
             transitionTo(SeamLocalizationState::NotDetected);
+            recentCenters_.clear();
+            confirmationCount_ = 0;
+            if (wasLocated) emit seamLost();
+            return;
+        }
+
+        if (confidence < lostConfidenceThreshold_) {
+            transitionTo(SeamLocalizationState::NotDetected);
+            recentCenters_.clear();
+            confirmationCount_ = 0;
+            if (wasLocated) emit seamLost();
+            return;
+        }
+
+        if (confidence < candidateConfidenceThreshold_) {
+            // 已定位的焊道降为候选；尚未定位时保持原状态，避免低置信度
+            // 单帧把 NotDetected 误报成候选。
+            if (currentState_ == SeamLocalizationState::Located) {
+                transitionTo(SeamLocalizationState::Candidate);
+                emit seamLost();
+            } else if (currentState_ == SeamLocalizationState::Confirmed) {
+                transitionTo(SeamLocalizationState::Candidate);
+            }
             recentCenters_.clear();
             confirmationCount_ = 0;
             return;
         }
 
-        recentCenters_.push_back(centerX);
+        recentCenters_.push_back(centerMm);
         if (recentCenters_.size() > maxHistoryFrames_) {
             recentCenters_.erase(recentCenters_.begin());
         }
@@ -266,29 +314,47 @@ public:
         switch (currentState_) {
         case SeamLocalizationState::NotDetected:
             // 检测到候选焊道
-            if (confidence > candidateConfidenceThreshold_) {
-                transitionTo(SeamLocalizationState::Candidate);
-                confirmationCount_ = 1;
-            }
+            transitionTo(SeamLocalizationState::Candidate);
+            confirmationCount_ = 1;
             break;
 
         case SeamLocalizationState::Candidate:
-            // 候选 → 定位：连续稳定帧（简化：直接进Located，无需校准门槛）
+            // 候选 → 确认：连续稳定后才允许建立/复用激光中心基准。
             if (isCenterStable(minConfirmationFrames_, centerStabilityTolerance_)) {
+                transitionTo(SeamLocalizationState::Confirmed);
+                emit seamConfirmed();
+            }
+            break;
+
+        case SeamLocalizationState::Confirmed:
+            // 校准器由控制器驱动；已有校准结果时可直接恢复定位。
+            if (calibrationComplete_) {
                 transitionTo(SeamLocalizationState::Located);
                 emit seamLocated();
             }
             break;
 
         case SeamLocalizationState::Located:
-            // 已定位状态下持续检查稳定性
-            if (confidence < lostConfidenceThreshold_) {
-                transitionTo(SeamLocalizationState::Candidate);
-                emit seamLost();
-            }
+            // 检测丢失或置信度下降已在上面统一降级，无需重复发射信号。
             break;
         }
     }
+
+    /**
+     * @brief 通知校准已完成
+     *
+     * Confirmed 收到该通知后立即进入 Located。校准结果在本次任务内保留，
+     * 因此短暂丢检恢复时无需重新采样即可再次定位。
+     */
+    void notifyCalibrationComplete() {
+        calibrationComplete_ = true;
+        if (currentState_ == SeamLocalizationState::Confirmed) {
+            transitionTo(SeamLocalizationState::Located);
+            emit seamLocated();
+        }
+    }
+
+    bool isCalibrationComplete() const { return calibrationComplete_; }
 
     /**
      * @brief 获取当前状态
@@ -304,6 +370,8 @@ public:
             return QStringLiteral("焊道等待定位");
         case SeamLocalizationState::Candidate:
             return QStringLiteral("本项焊道候选");
+        case SeamLocalizationState::Confirmed:
+            return QStringLiteral("焊道确认中（校准激光中心）");
         case SeamLocalizationState::Located:
             return QStringLiteral("焊道已定位");
         default:
@@ -325,6 +393,7 @@ public:
         transitionTo(SeamLocalizationState::NotDetected);
         recentCenters_.clear();
         confirmationCount_ = 0;
+        calibrationComplete_ = false;
     }
 
     // 参数设置
@@ -346,6 +415,7 @@ public:
 
 signals:
     void stateChanged(SeamLocalizationState newState);
+    void seamConfirmed();
     void seamLocated();
     void seamLost();
 
@@ -394,9 +464,10 @@ private:
     // 参数配置
     static constexpr int maxHistoryFrames_ = 10;
     int minConfirmationFrames_ = 3;
-    double centerStabilityTolerance_ = 0.002;  // 2mm
+    double centerStabilityTolerance_ = 2.0;  // mm
     double candidateConfidenceThreshold_ = 0.10;
     double lostConfidenceThreshold_ = 0.05;
+    bool calibrationComplete_ = false;
 };
 
 } // namespace crawling

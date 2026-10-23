@@ -39,6 +39,7 @@ SOURCES += \
     src/robot_app_logger.cpp \
     src/robot_sensor_controller.cpp \
     src/robot_usb_camera_controller.cpp \
+    src/network_stream_reader.cpp \
     src/camera_frame_processor.cpp \
     src/camera_server_client.cpp \
     src/camera_server_client.cpp \
@@ -88,6 +89,7 @@ HEADERS += \
     src/robot_app_logger.h \
     src/robot_sensor_controller.h \
     src/robot_usb_camera_controller.h \
+    src/network_stream_reader.h \
     src/camera_frame_processor.h \
     src/camera_server_client.h \
     src/camera_server_client.h \

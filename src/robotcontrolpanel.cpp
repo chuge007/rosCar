@@ -1069,12 +1069,17 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     compactGroup(laser);
     rightColumn->addWidget(laser);
 
-    auto *usb = new QGroupBox(QStringLiteral("USB 摄像头配置"), page);
+    auto *usb = new QGroupBox(QStringLiteral("摄像头配置"), page);
     auto *usbOuterLayout = new QVBoxLayout(usb);
     usbOuterLayout->setContentsMargins(8, 12, 8, 8);
     usbOuterLayout->setSpacing(8);
     auto *usb1 = new QGroupBox(QStringLiteral("摄像头 %1").arg(1), usb);
     auto *usbForm1 = new QFormLayout(usb1);
+    m_usbCameraUi[0].source = new QComboBox(usb1);
+    m_usbCameraUi[0].source->addItem(QStringLiteral("USB 摄像头"),
+                                     static_cast<int>(crawling::CameraSource::Usb));
+    m_usbCameraUi[0].source->addItem(QStringLiteral("网络摄像头 (RTSP/HTTP)"),
+                                     static_cast<int>(crawling::CameraSource::Network));
     m_usbCameraUi[0].device = new QComboBox(usb1);
     m_usbCameraUi[0].device->setCurrentIndex(-1);  // populated by updateUsbDevices().
     m_usbCameraUi[0].networkUrl = new QLineEdit(usb1);
@@ -1089,9 +1094,10 @@ QWidget *RobotControlPanel::buildConfigurationPage()
         checkBox->setMinimumHeight(21);
     }
     m_usbCameraUi[0].scan = actionButton(QStringLiteral("扫描 USB 摄像头"));
-    m_usbCameraUi[0].connect = actionButton(QStringLiteral("连接配置中的 USB 摄像头"), "primary");
+    m_usbCameraUi[0].connect = actionButton(QStringLiteral("连接配置中的摄像头"), "primary");
     m_usbCameraUi[0].disconnect = actionButton(QStringLiteral("断开 USB 摄像头"));
     m_usbCameraUi[0].configState = new QLabel(QStringLiteral("未连接"), usb1);
+    usbForm1->addRow(QStringLiteral("连接方式"), m_usbCameraUi[0].source);
     usbForm1->addRow(QStringLiteral("设备"), m_usbCameraUi[0].device);
     usbForm1->addRow(QStringLiteral("网络摄像头地址"), m_usbCameraUi[0].networkUrl);
     usbForm1->addRow(QStringLiteral("帧率 (fps)"), m_usbCameraUi[0].fps);
@@ -1107,6 +1113,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     usbForm1->addRow(QString(), opts1);
     usbForm1->addRow(QStringLiteral("连接状态"), m_usbCameraUi[0].configState);
     const int slotIndex0 = 0;
+    connect(m_usbCameraUi[0].source, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, slotIndex0](int) { updateUsbCameraSourceUi(slotIndex0); });
     connect(m_usbCameraUi[0].scan, &QPushButton::clicked, this, [this] {
         if (m_usbCameraController)
             QMetaObject::invokeMethod(m_usbCameraController, "scanDevices",
@@ -1120,10 +1128,16 @@ QWidget *RobotControlPanel::buildConfigurationPage()
             QMetaObject::invokeMethod(m_usbCameraController, "disconnectCamera",
                                       Qt::QueuedConnection, Q_ARG(int, slotIndex0));
     });
+    updateUsbCameraSourceUi(slotIndex0);
     usbOuterLayout->addWidget(usb1);
     compactGroup(usb1);
     auto *usb2 = new QGroupBox(QStringLiteral("摄像头 %1").arg(2), usb);
     auto *usbForm2 = new QFormLayout(usb2);
+    m_usbCameraUi[1].source = new QComboBox(usb2);
+    m_usbCameraUi[1].source->addItem(QStringLiteral("USB 摄像头"),
+                                     static_cast<int>(crawling::CameraSource::Usb));
+    m_usbCameraUi[1].source->addItem(QStringLiteral("网络摄像头 (RTSP/HTTP)"),
+                                     static_cast<int>(crawling::CameraSource::Network));
     m_usbCameraUi[1].device = new QComboBox(usb2);
     m_usbCameraUi[1].device->setCurrentIndex(-1);  // populated by updateUsbDevices().
     m_usbCameraUi[1].networkUrl = new QLineEdit(usb2);
@@ -1138,9 +1152,10 @@ QWidget *RobotControlPanel::buildConfigurationPage()
         checkBox->setMinimumHeight(21);
     }
     m_usbCameraUi[1].scan = actionButton(QStringLiteral("扫描 USB 摄像头"));
-    m_usbCameraUi[1].connect = actionButton(QStringLiteral("连接配置中的 USB 摄像头"), "primary");
+    m_usbCameraUi[1].connect = actionButton(QStringLiteral("连接配置中的摄像头"), "primary");
     m_usbCameraUi[1].disconnect = actionButton(QStringLiteral("断开 USB 摄像头"));
     m_usbCameraUi[1].configState = new QLabel(QStringLiteral("未连接"), usb2);
+    usbForm2->addRow(QStringLiteral("连接方式"), m_usbCameraUi[1].source);
     usbForm2->addRow(QStringLiteral("设备"), m_usbCameraUi[1].device);
     usbForm2->addRow(QStringLiteral("网络摄像头地址"), m_usbCameraUi[1].networkUrl);
     usbForm2->addRow(QStringLiteral("帧率 (fps)"), m_usbCameraUi[1].fps);
@@ -1156,6 +1171,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     usbForm2->addRow(QString(), opts2);
     usbForm2->addRow(QStringLiteral("连接状态"), m_usbCameraUi[1].configState);
     const int slotIndex1 = 1;
+    connect(m_usbCameraUi[1].source, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, slotIndex1](int) { updateUsbCameraSourceUi(slotIndex1); });
     connect(m_usbCameraUi[1].scan, &QPushButton::clicked, this, [this] {
         if (m_usbCameraController)
             QMetaObject::invokeMethod(m_usbCameraController, "scanDevices",
@@ -1169,6 +1186,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
             QMetaObject::invokeMethod(m_usbCameraController, "disconnectCamera",
                                       Qt::QueuedConnection, Q_ARG(int, slotIndex1));
     });
+    updateUsbCameraSourceUi(slotIndex1);
     usbOuterLayout->addWidget(usb2);
     compactGroup(usb2);
     compactGroup(usb);
@@ -1912,6 +1930,8 @@ crawling::DriveSettings RobotControlPanel::settingsFromUi() const
         for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
         const auto& ui = m_usbCameraUi[slot];
         auto& cam = value.usbCameras[slot];
+        if (ui.source && ui.source->currentIndex() >= 0)
+            cam.cameraSource = static_cast<crawling::CameraSource>(ui.source->currentData().toInt());
         cam.usbCameraDeviceIndex = (ui.device && ui.device->currentIndex() >= 0)
                                        ? ui.device->currentData().toInt() : -1;
         cam.networkCameraUrl = ui.networkUrl ? ui.networkUrl->text().trimmed() : QString();
@@ -1975,6 +1995,11 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
     for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
         const auto& ui = m_usbCameraUi[slot];
         const auto& cam = settings.usbCameras[slot];
+        if (ui.source) {
+            const QSignalBlocker blocker(ui.source);
+            const int index = ui.source->findData(static_cast<int>(cam.cameraSource));
+            ui.source->setCurrentIndex(index >= 0 ? index : 0);
+        }
         if (ui.device) {
             const QSignalBlocker blocker(ui.device);
             const int index = ui.device->findData(cam.usbCameraDeviceIndex);
@@ -1985,7 +2010,9 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
         if (ui.autoConnect) ui.autoConnect->setChecked(cam.usbCameraAutoConnect);
         if (ui.flipHorizontal) ui.flipHorizontal->setChecked(cam.usbCameraFlipHorizontal);
         if (ui.flipVertical) ui.flipVertical->setChecked(cam.usbCameraFlipVertical);
-    }m_autoConnectCheck->setChecked(settings.autoConnectOnStartup);
+        updateUsbCameraSourceUi(slot);
+    }
+    m_autoConnectCheck->setChecked(settings.autoConnectOnStartup);
     m_speedSlider->setValue(settings.manualJogPercent);
     QSettings persistent(crawling::DriveSettings::persistentFilePath(),
                          QSettings::IniFormat);
@@ -2163,7 +2190,11 @@ void RobotControlPanel::connectConfiguredUsbCameraSlot(int slot)
         appendLog(QStringLiteral("USB 摄像头 %1 连接已跳过：未勾选自动连接").arg(slot + 1));
         return;
     }
-    if (!cam.networkCameraUrl.trimmed().isEmpty()) {
+    if (cam.cameraSource == crawling::CameraSource::Network) {
+        if (cam.networkCameraUrl.trimmed().isEmpty()) {
+            appendLog(QStringLiteral("摄像头 %1 连接已跳过：已选择网络，但地址为空").arg(slot + 1));
+            return;
+        }
         if (m_usbCameraController)
             QMetaObject::invokeMethod(m_usbCameraController, "connectNetworkCamera",
                                       Qt::QueuedConnection,
@@ -2175,7 +2206,7 @@ void RobotControlPanel::connectConfiguredUsbCameraSlot(int slot)
         return;
     }
     if (cam.usbCameraDeviceIndex < 0) {
-        appendLog(QStringLiteral("USB 摄像头 %1 连接已跳过：未配置设备").arg(slot + 1));
+        appendLog(QStringLiteral("摄像头 %1 连接已跳过：已选择 USB，但未配置设备，请先扫描并选择").arg(slot + 1));
         return;
     }
     if (m_usbCameraController)
@@ -2821,6 +2852,28 @@ void RobotControlPanel::updateCorrectionStatus(
             .arg(status.angularCommandRadps * kDegreesPerRadian, 0, 'f', 2));
 }
 
+void RobotControlPanel::updateUsbCameraSourceUi(int slot)
+{
+    if (slot < 0 || slot >= crawling::kUsbCameraChannelCount)
+        return;
+    const auto& ui = m_usbCameraUi[slot];
+    const bool network =
+        ui.source && ui.source->currentData().toInt() ==
+                         static_cast<int>(crawling::CameraSource::Network);
+    if (ui.device)
+        ui.device->setEnabled(!network);
+    if (ui.networkUrl)
+        ui.networkUrl->setEnabled(network);
+    if (ui.fps)
+        ui.fps->setEnabled(!network);
+    if (ui.scan)
+        ui.scan->setEnabled(!network);
+    if (ui.connect) {
+        ui.connect->setText(network ? QStringLiteral("连接配置中的网络摄像头")
+                                    : QStringLiteral("连接配置中的 USB 摄像头"));
+    }
+}
+
 void RobotControlPanel::updateUsbDevices(const QStringList &devices)
 {
     for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
@@ -2910,26 +2963,30 @@ void RobotControlPanel::setLaserProfileImage(const QImage &image)
     m_laserImage = image;
 }
 
-void RobotControlPanel::setUsbCameraImage(int slot, const QImage &image)
+void RobotControlPanel::displayUsbCameraImage(int slot, const QImage &image)
 {
-    if (image.isNull())
-        return;
-    if (slot < 0 || slot >= crawling::kUsbCameraChannelCount)
-        return;
-    if (!m_usbViews[slot])
+    if (slot < 0 || slot >= crawling::kUsbCameraChannelCount || image.isNull() || !m_usbViews[slot])
         return;
     m_usbImages[slot] = image;
     m_usbViews[slot]->setText(QString());
     const qreal dpr = m_usbViews[slot]->devicePixelRatioF();
-    // Image is already scaled in worker thread, just convert to pixmap
+    // Image is already scaled in worker thread, just convert to pixmap.
     QPixmap pix = QPixmap::fromImage(image);
     pix.setDevicePixelRatio(dpr);
     m_usbViews[slot]->setPixmap(pix);
+}
+
+void RobotControlPanel::setUsbCameraImage(int slot, const QImage &image)
+{
+    if (slot < 0 || slot >= crawling::kUsbCameraChannelCount)
+        return;
+    displayUsbCameraImage(slot, image);
+    // Acknowledge exactly one delivered camera frame. Resize repainting must
+    // not release the capture backpressure as if a new frame had arrived.
     if (m_usbCameraController)
         QMetaObject::invokeMethod(m_usbCameraController, "frameConsumed",
                                   Qt::QueuedConnection, Q_ARG(int, slot));
 }
-
 
 void RobotControlPanel::pushUsbDisplaySize(int slot)
 {
@@ -3068,7 +3125,7 @@ void RobotControlPanel::resizeEvent(QResizeEvent *event)
     QWidget::resizeEvent(event);
     for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
         if (!m_usbImages[slot].isNull())
-            setUsbCameraImage(slot, m_usbImages[slot]);
+            displayUsbCameraImage(slot, m_usbImages[slot]);
         pushUsbDisplaySize(slot);
     }
 }

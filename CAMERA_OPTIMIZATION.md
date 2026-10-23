@@ -1,5 +1,7 @@
 # 摄像头延迟优化方案
 
+> **2026-10-23 低延迟热修复**：默认采集路径已改为进程内低延迟模式。网络摄像头改用 OpenCV/FFmpeg 独立线程，始终丢弃旧帧、只显示最新帧；USB 摄像头优先 320x240 原生格式，缩放改为快速插值。下面 v2.0 的进程隔离子进程方案保留为可选方案/历史设计，不属于当前默认路径。
+
 ## 概述
 
 为了解决 USB 和网络摄像头延迟过大的问题,实现了**进程隔离方案**。摄像头采集和图像处理现在运行在独立的进程中,不会影响主进程的运动控制和超声传感器。
@@ -59,6 +61,34 @@
 - JPEG 压缩 (质量 75)
 - 通过 `QLocalSocket` 传输
 - 序列化开销小
+
+## 当前默认路径（2026-10-23 热修复）
+
+- 主程序默认使用 `CameraProcessMode::InProcess`，不再自动启动 `PA1664CameraServer.exe`。
+- USB 摄像头优先选择原生 320x240（评分目标 15 FPS），并在工作线程中使用快速插值缩放。
+- USB 帧请求已显式注册为 Qt 元类型，避免跨线程队列连接静默丢帧。
+- 网络摄像头不再使用 `QMediaPlayer`，改由 `NetworkStreamReader` 在独立线程中通过 OpenCV/FFmpeg 读取；消费者未确认上一帧时只解码新帧，不建立显示队列。
+- UI 只在收到新帧时确认消费；窗口 resize 重绘不会释放采集背压。
+- 主程序目录必须存在 `opencv_videoio_ffmpeg500_64.dll`（`opencv.pri` 和 `deploy-runtime.ps1` 已配置部署）。
+
+IP 摄像头仍延迟较高时，应优先在摄像头端切换到低码率子码流；低延迟优先时可测试 UDP（`rtsp_transport;udp`），但弱网下稳定性低于当前 TCP。
+
+### USB / 网络来源选择（2026-10-23 修复）
+
+- 每个摄像头槽位现在有独立的“连接方式”：`USB 摄像头` 或 `网络摄像头 (RTSP/HTTP)`。
+- 自动连接和手动连接只使用当前选择的来源。网络地址不再隐式覆盖 USB 设备。
+- 旧配置没有 `cameraSource` 时，为避免改变既有网络摄像头配置，仍会按“URL 非空则使用网络”迁移；升级后请在界面中为需要 USB 的槽位选择 `USB 摄像头`。
+- USB 槽位需要先扫描并选择设备；网络槽位需要填写完整 RTSP/HTTP 地址。
+
+### 问题: 配置过 IP 地址后 USB 摄像头不连接
+
+**原因**: 旧版只要网络地址非空就优先网络连接，USB 分支不会执行，因此日志中只有网络重连，没有 USB 扫描/连接事件。
+
+**处理**:
+1. 打开“摄像头配置”。
+2. 将对应槽位的“连接方式”改为“USB 摄像头”。
+3. 扫描并选择 USB 设备，勾选自动连接后点击连接。
+4. 网络摄像头不可达时，先将该槽位切回 USB，或改为其它可用的网络地址。
 
 ## 构建说明
 
@@ -209,6 +239,9 @@ PA1664CameraServer.exe --test-usb 0
 
 ## 版本历史
 
+- **v2.1** (2026-10-23): 修复 USB / 网络来源隐式抢占
+  - 每个槽位显式选择 USB 或网络来源
+  - 旧配置按非空网络 URL 兼容迁移
 - **v2.0** (2026-10-23): 进程隔离方案
   - 独立的摄像头服务进程
   - QLocalSocket IPC 通信
@@ -218,3 +251,11 @@ PA1664CameraServer.exe --test-usb 0
   - 工作线程处理图像
   - 网络流低延迟配置
   - 源头降分辨率
+
+## 摄像头连接专用日志
+
+- 文件位置：`<程序目录>/logs/camera_connection.log`（每次启动清空）。
+- 记录范围：`CAMERA.CONNECTION / DISCOVERY / SDK / CONFIG / ACQUISITION / PAYLOAD`、`USB_CAMERA.*`，以及所有摄像头类别的 `WARN/ERROR`；不记录高频的 `CAMERA.PROFILE` 和 `CAMERA.UI`。
+- 启动首条 `event=camera_environment` 会列出运行用户、程序目录、OpenCV 版本、FFmpeg 后端 DLL 的搜索目录、程序目录内实际的 OpenCV DLL 列表和加载结果。若为 `ffmpeg_backend=MISSING`，说明部署目录缺少 `opencv_videoio_ffmpeg*_64.dll`，网络摄像头一定无法打开。
+- DLL 会依次搜索程序目录、`bin/release/debug/runtime/x64` 等子目录、`OPENCV_FFMPEG_DLL_DIR` 和 `PATH`；找到后自动把 `OPENCV_FFMPEG_DLL_DIR` 指向实际所在目录。
+- 网络地址中的 `password=`、`pass=`、`pwd=` 以及 `user:pass@` 会自动脱敏，可直接发送该文件用于排查。

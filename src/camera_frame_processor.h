@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QImage>
+#include <QMetaType>
 #include <QObject>
 #include <QQueue>
 #include <QMutex>
@@ -65,3 +66,5 @@ class CameraFrameProcessor final : public QObject {
 };
 
 }  // namespace crawling
+
+Q_DECLARE_METATYPE(crawling::CameraFrameProcessorWorker::FrameRequest)

@@ -52,7 +52,7 @@ void calibrationCompleted(double offset);
 // ========== 初始化焊道跟踪优化组件 ==========
 // 配置状态机参数
 seamStateMachine_.setConfirmationFrames(3);
-seamStateMachine_.setStabilityTolerance(0.002);  // 2mm
+seamStateMachine_.setStabilityTolerance(2.0);  // mm
 seamStateMachine_.setCandidateConfidenceThreshold(0.10);
 seamStateMachine_.setLostConfidenceThreshold(0.05);
 
@@ -60,10 +60,11 @@ seamStateMachine_.setLostConfidenceThreshold(0.05);
 adaptivePID_.setThresholds(2.0, 5.0, 10.0);
 adaptivePID_.setLargeErrorParams(2.5, 3.0);
 adaptivePID_.setMediumErrorParams(1.5, 2.0);
+adaptivePID_.setFineErrorParams(1.0, 1.5);
 adaptivePID_.setSmallErrorParams(0.5, 1.0);
 
-// 配置滤波器
-centerFilter_.setAlpha(0.3);
+// 配置滤波器（控制周期按偏差动态设置 alpha=0.15~0.40）
+centerFilter_.setAlpha(0.3);  // 初始值
 
 // 连接状态机信号
 connect(&seamStateMachine_, &SeamStateMachine::stateChanged,
@@ -92,8 +93,8 @@ connect(&seamStateMachine_, &SeamStateMachine::seamLost,
 
 **说明**：
 - 初始化状态机参数（3帧确认，2mm稳定性阈值）
-- 初始化自适应PID参数（大中小偏差三档）
-- 初始化滤波器（alpha=0.3）
+- 初始化自适应PID参数（<2 / 2~5 / 5~10 / >10 mm 四档，档位边界 0.5 mm 平滑过渡）
+- 初始化滤波器（运行时 alpha=0.15~0.40）
 - 连接Qt信号槽，实现状态变化通知
 
 ---
@@ -104,36 +105,50 @@ connect(&seamStateMachine_, &SeamStateMachine::seamLost,
 
 ```cpp
 // ========== 更新焊道状态机 ==========
-// 更新状态机
-seamStateMachine_.update(detection.valid, status_.gapLateralM * 1000.0, detection.confidence);
+const double rawGapLateralM = kCameraLateralToVehicleSign *
+    (detection.absoluteCenterRatio - 0.5) * settings_.imageLateralSpanM;
+const double rawGapLateralMm = rawGapLateralM * 1000.0;
+const bool localizationValid =
+    detection.valid && status_.gapValid && !reacquisitionPending_;
+const bool localizationReliable =
+    localizationValid && !detectionHeld_ && !detectionEdgeBreakFallback_ &&
+    (realTwoEdge || confirmedContourIdentity ||
+     (detection.opencvContour && liveContourTrack));
+
+seamStateMachine_.update(localizationValid, rawGapLateralMm,
+                         detection.confidence);
 auto seamState = seamStateMachine_.getState();
 
 // 激光中心自动校准（在Confirmed状态）
-if (seamState == SeamLocalizationState::Confirmed && !centerCalibration_.isCalibrated()) {
-  calibrationSamples_.push_back(status_.gapLateralM * 1000.0);  // 转换为mm
-  if (calibrationSamples_.size() >= 5) {
-    double sum = 0.0;
-    for (double s : calibrationSamples_) sum += s;
-    double avgCenter = sum / calibrationSamples_.size();
-    centerCalibration_.calibrate(avgCenter);
+if (seamState == SeamLocalizationState::Confirmed) {
+  if (centerCalibration_.isCalibrated()) {
     seamStateMachine_.notifyCalibrationComplete();
-
-    qInfo() << "[LASER.CALIBRATION] 激光中心校准完成"
-            << " offset=" << centerCalibration_.getOffset() << "mm"
-            << " samples=" << calibrationSamples_.size();
-    emit calibrationCompleted(centerCalibration_.getOffset());
-
+  } else if (localizationReliable && std::isfinite(rawGapLateralMm)) {
+    calibrationSamples_.push_back(rawGapLateralMm);
+    if (calibrationSamples_.size() >= kLaserCenterCalibrationSamples) {
+      centerCalibration_.calibrateFromSamples(calibrationSamples_);
+      seamStateMachine_.notifyCalibrationComplete();
+    }
+  } else {
     calibrationSamples_.clear();
   }
+} else {
+  calibrationSamples_.clear();
 }
+
+status_.gapLateralM =
+    centerCalibration_.isCalibrated()
+        ? centerCalibration_.adjustToLaserFrame(rawGapLateralMm) / 1000.0
+        : rawGapLateralM;
+if (seamState != SeamLocalizationState::Located) status_.gapValid = false;
 ```
 
 **说明**：
-- 每次检测后更新状态机（传入有效性、中心位置mm、置信度）
-- 在Confirmed状态自动触发激光校准
-- 收集5帧样本取平均值计算偏移量
-- 校准完成后通知状态机进入Located状态
-- 发出信号通知UI
+- 检测通过输入、候选和可靠测量门后更新状态机（传入有效性、中心位置mm、置信度）；短时沿用/预测帧保持当前控制态，由丢检停车和输入超时保护兜底
+- 在Confirmed状态仅使用连续的真实测量帧进行激光校准
+- 收集5帧样本取平均值计算偏移量；相机帧序号或采样时间不连续时重新开始，单边推断/沿用帧不会混入样本
+- 校准完成后通知状态机进入Located；Candidate/Confirmed 不允许驱动车辆
+- 校准结果在同一次任务内可复用，`resetSession()` 会同时清空状态机和校准
 
 ---
 
@@ -147,25 +162,31 @@ if (seamState == SeamLocalizationState::Confirmed && !centerCalibration_.isCalib
 
 ### 2. 激光中心校准
 - **触发条件**：状态机进入Confirmed且未校准
-- **采样方式**：连续5帧平均值
-- **坐标转换**：将相机坐标系(gapLateralM)转换为激光中心参考系
-- **持久化**：校准完成后offset保存在centerCalibration_对象中
+- **采样方式**：连续5帧真实测量平均值；帧序号必须连续且采样间隔不超过输入超时，不混入沿用帧或单边推断
+- **坐标转换**：将原始相机横向位置（mm）转换为激光中心参考系
+- **持久化**：校准完成后offset保存在centerCalibration_对象中，任务内可复用
 
-### 3. 数据流
+### 3. 自适应PD控制
+- **增益分档**：<2mm(0.5/1.0)、2~5mm(1.0/1.5)、5~10mm(1.5/2.0)、>10mm(2.5/3.0)
+- **平顺切换**：档位边界使用0.5mm smoothstep过渡，避免误差在阈值附近来回跳档
+- **滤波**：中心误差alpha按偏差在0.15~0.40动态调整
+- **死区复位**：死区或反向确认主动抑制时同步重置中心滤波与微分状态，避免旧误差残留继续驱动
+- **安全限幅**：微分项±0.020m/s、横向修正±0.030m/s，原曲率/轮速比/角速度/加速度限幅继续生效
+- **增益来源**：移除已不再参与控制的 `laserCenterAngularGain`，横向速度到角速度统一由 `laserCenterFeedbackGain`、前瞻距离和自适应PD换算
+
+### 4. 数据流
 ```
 检测器 → processObservation()
         ↓
-   更新status_.gapLateralM（米）
+   计算原始焊道横向位置（mm）
         ↓
-   转换为mm传入状态机
+   状态机连续3帧稳定 → Confirmed
         ↓
-   状态机判断 → Confirmed？
+   连续5帧真实测量 → 校准采样
         ↓
-   触发校准采样（5帧）
+   计算偏移量 → 通知状态机Located → 坐标转换回米
         ↓
-   计算偏移量 → 通知状态机Located
-        ↓
-   发出信号 → UI更新
+   Candidate/Confirmed 保持 gapValid=false；Located 才允许纠偏
 ```
 
 ---
@@ -194,7 +215,7 @@ make
 
 1. **编译检查**
 ```bash
-# 确认无编译错误
+# 按项目Qt规则，本次未主动执行编译；需要时由现场构建确认
 make 2>&1 | grep -i error
 ```
 
@@ -204,14 +225,14 @@ make 2>&1 | grep -i error
 [LASER.STATE] 焊道状态变更: 未检测到焊道
 [LASER.STATE] 焊道状态变更: 本项焊道候选
 [LASER.STATE] 焊道状态变更: 焊道已确认（校准中）
-[LASER.CALIBRATION] 激光中心校准完成 offset=-1578.6mm samples=5
+[LASER.CALIBRATION] 激光中心校准完成 offset=23.40 mm，采样 5 帧
 [LASER.STATE] 焊道状态变更: 焊道已定位
 [LASER.STATE] 焊道已定位，可以启动纠偏
 ```
 
 3. **UI验证**
 - 状态文本应显示"本项焊道候选" → "焊道已确认" → "焊道已定位"
-- "启动纠偏"按钮仅在"已定位"状态可用
+- 控制器仅在Located状态置 `gapValid=true`；按钮使能联动仍待UI确认
 
 ---
 
@@ -220,15 +241,17 @@ make 2>&1 | grep -i error
 ### 1. UI适配
 需要修改 `robotcontrolpanel.cpp`：
 - [ ] 连接 `seamStateChanged` 信号
-- [ ] 更新状态显示标签
+- [x] 使用 `seamStateDescription` 更新状态显示
 - [ ] 修改按钮使能逻辑
-- [ ] 添加校准偏移量显示
+- [x] 添加校准偏移量显示
 
-### 2. 自适应PID集成
-当前自适应PID组件已初始化但未使用，需要：
-- [ ] 在实际纠偏控制中调用 `adaptivePID_.getParams(error)`
-- [ ] 替换固定Kp/Kd为动态参数
-- [ ] 添加滤波器应用
+### 2. 自适应PD集成 ✅
+- [x] 在实际纠偏控制中调用 `adaptivePID_.getParams(error)`
+- [x] 四档增益（<2 / 2~5 / 5~10 / >10 mm），边界0.5mm平滑过渡
+- [x] 中心误差动态滤波（alpha=0.15~0.40）
+- [x] 死区/反向抑制时清空中心滤波和微分状态，避免残留输出
+- [x] 微分项±0.020m/s、横向修正±0.030m/s限幅
+- [x] 移除不再参与控制律的 `laserCenterAngularGain`
 
 ### 3. 参数配置界面
 需要在UI中添加：
@@ -265,16 +288,16 @@ git checkout src/laser_correction_controller.cpp
    - 修改robotcontrolpanel.cpp
    - 测试状态显示
 
-2. **自适应PID集成**（预计2小时）
-   - 找到纠偏控制代码位置
-   - 集成动态PID参数
+2. ✅ **自适应PD集成**（已完成）
+   - 已接入 `advanceFromTelemetry()` 实时回中路径
+   - 已增加 `adaptive_kp/kd/error/correction` 控制日志
 
 3. **完整测试**（预计2小时）
    - 功能测试
    - 性能测试
    - 边界测试
 
-**总预计时间**：约5小时完成完整集成
+**剩余工作**：UI按钮联动、现场参数标定与完整测试
 
 ---
 

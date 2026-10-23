@@ -56,10 +56,6 @@ struct LaserCorrectionSettings {
   // converts lateral image error into a gentle steering curvature.
   double laserCenterFeedbackGain = 0.60;
   double laserCenterLookaheadM = 0.25;
-  // Fast raw-image lateral feedback. This is intentionally separate from
-  // the fitted-path heading blend: the gap position is the freshest measure
-  // of whether the weld is leaving the laser's usable center region.
-  double laserCenterAngularGain = 1.80;
   // Keep the inner wheel moving during correction. The previous 0.45 rad/s
   // cap was too aggressive at low speed and could turn almost in place.
   double minimumInnerWheelRatio = 0.45;
@@ -507,6 +503,8 @@ class LaserCorrectionController final : public QObject {
   AdaptivePIDParams adaptivePID_;
   CenterFilter centerFilter_;
   std::vector<double> calibrationSamples_;
+  quint64 lastCalibrationCameraSequence_ = 0;
+  qint64 lastCalibrationSampleMs_ = -1;
   double lastCorrectionError_ = 0.0;
   qint64 lastCorrectionTimeMs_ = 0;
   qint64 lastSeamStateLogMs_ = 0;

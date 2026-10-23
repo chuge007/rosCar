@@ -143,13 +143,15 @@ void CameraServerClient::pollSharedMemory() {
     shm->lock();
     const quint32 dataSize = *reinterpret_cast<const quint32*>(shm->constData());
 
-    // Check if new frame available
-    if (dataSize > 0 && dataSize != lastFrameSize_[slot]) {
+    // Check if a complete frame is available. The writer publishes the payload
+    // before its length, so a stable nonzero size means the frame is complete.
+    if (dataSize > 0 && dataSize <= kSharedMemorySize - sizeof(quint32) &&
+        dataSize != lastFrameSize_[slot]) {
       lastFrameSize_[slot] = dataSize;
 
       // Read JPEG data
       const char* dataPtr = static_cast<const char*>(shm->constData()) + sizeof(quint32);
-      QByteArray imageData(dataPtr, dataSize - sizeof(quint32));
+      QByteArray imageData(dataPtr, static_cast<int>(dataSize));
       shm->unlock();
 
       QImage image;

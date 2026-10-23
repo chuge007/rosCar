@@ -16,6 +16,11 @@ namespace crawling {
 // the workbench can display side by side.
 constexpr int kUsbCameraChannelCount = 2;
 
+enum class CameraSource {
+  Usb,
+  Network,
+};
+
 enum class WheelCommunicationMode {
   Can,
   Rs485,
@@ -57,7 +62,7 @@ QString clampModeName(ClampCommunicationMode mode);
 
 struct DriveSettings {
   static constexpr int kMinimumFeedbackTimeoutMs = 800;
-  static constexpr int kCurrentSettingsSchemaVersion = 12;
+  static constexpr int kCurrentSettingsSchemaVersion = 13;
   static constexpr int kMaximumClampMotorsPerAxis = 16;
 
 
@@ -70,10 +75,11 @@ struct DriveSettings {
   int imuBaudRate = 115200;
   int imuOutputDivider = 10;
   QString laserSerialNumber;
-  // Two independent camera channels: each may attach to a USB device index or
-  // a network stream (RTSP/HTTP). When networkCameraUrl is non-empty the
-  // controller prefers it over usbCameraDeviceIndex for that slot.
+  // Two independent camera channels. Each channel explicitly selects USB or
+  // network. Legacy files without a source key keep their previous behavior by
+  // inferring network when a URL is present.
   struct UsbCameraChannel {
+    CameraSource cameraSource = CameraSource::Usb;
     int usbCameraDeviceIndex = -1;
     QString networkCameraUrl;
     int usbCameraFps = 15;  // Reduced from 30 to 15fps to lower CPU load

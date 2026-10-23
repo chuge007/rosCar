@@ -120,6 +120,8 @@ private:
     void stopMotion();
     void setStateStyle(crawling::DriveState state);
     void updateInformationDialog();
+    void displayUsbCameraImage(int slot, const QImage &image);
+    void updateUsbCameraSourceUi(int slot);
     QWidget *buildConfigurationPage();
     void persistAutoConnectSetting(bool enabled);
     void showProfileTemplateDialog();
@@ -229,6 +231,7 @@ private:
     QLineEdit *m_laserSerial = nullptr;
     QComboBox *m_laserDevice = nullptr;
     struct UsbCameraUi {
+        QComboBox *source = nullptr;
         QComboBox *device = nullptr;
         QLineEdit *networkUrl = nullptr;
         QSpinBox *fps = nullptr;

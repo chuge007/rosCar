@@ -10,7 +10,6 @@
 
 class QCamera;
 class QMediaCaptureSession;
-class QMediaPlayer;
 class QVideoFrame;
 class QVideoSink;
 class QTimer;
@@ -19,11 +18,12 @@ namespace crawling {
 
 class CameraFrameProcessor;
 class CameraServerClient;
+class NetworkStreamReader;
 
 // Mode selection for camera processing
 enum class CameraProcessMode {
-  InProcess,       // Original in-process mode with worker threads
-  IsolatedProcess  // New isolated camera server process
+  InProcess,       // Low-latency in-process capture (default)
+  IsolatedProcess  // Optional camera server process
 };
 
 class RobotUsbCameraController final : public QObject {
@@ -31,7 +31,7 @@ class RobotUsbCameraController final : public QObject {
 
  public:
   explicit RobotUsbCameraController(QObject* parent = nullptr,
-                                   CameraProcessMode mode = CameraProcessMode::IsolatedProcess);
+                                   CameraProcessMode mode = CameraProcessMode::InProcess);
   ~RobotUsbCameraController() override;
 
  public slots:
@@ -54,10 +54,10 @@ class RobotUsbCameraController final : public QObject {
     QCamera* camera = nullptr;
     QMediaCaptureSession* captureSession = nullptr;
     QVideoSink* videoSink = nullptr;
-    QMediaPlayer* networkPlayer = nullptr;
-    QVideoSink* networkVideoSink = nullptr;
     QTimer* networkWatchdog = nullptr;
     QTimer* networkReconnectTimer = nullptr;
+    NetworkStreamReader* networkReader = nullptr;
+    quint64 networkGeneration = 0;
     QString networkAddress;
     qint64 lastFrameTime = 0;
     int reconnectAttempts = 0;
@@ -68,7 +68,8 @@ class RobotUsbCameraController final : public QObject {
     QAtomicInt targetWidth{260};
     QAtomicInt targetHeight{160};
   };
-  void teardownSlot(UsbSlot& slot) const;
+  void teardownSlot(UsbSlot& slot);
+  void stopNetworkReader(UsbSlot& slot);
   void startNetworkStream(int slot);
   void scheduleNetworkReconnect(int slot);
   void checkNetworkWatchdog(int slot);

@@ -35,12 +35,16 @@ equals(OPENCV_LAYOUT, modular) {
     isEmpty(OPENCV_VERSION_SUFFIX): OPENCV_VERSION_SUFFIX = 453
     OPENCV_CORE = opencv_core$${OPENCV_VERSION_SUFFIX}
     OPENCV_IMGPROC = opencv_imgproc$${OPENCV_VERSION_SUFFIX}
+    OPENCV_VIDEOIO = opencv_videoio$${OPENCV_VERSION_SUFFIX}
     !exists($$OPENCV_LIB/$${OPENCV_CORE}.lib): error("OpenCV library missing: $$OPENCV_CORE")
     !exists($$OPENCV_LIB/$${OPENCV_IMGPROC}.lib): error("OpenCV library missing: $$OPENCV_IMGPROC")
+    !exists($$OPENCV_LIB/$${OPENCV_VIDEOIO}.lib): error("OpenCV library missing: $$OPENCV_VIDEOIO")
     !exists($$OPENCV_BIN/$${OPENCV_CORE}.dll): error("OpenCV runtime missing: $$OPENCV_CORE")
     !exists($$OPENCV_BIN/$${OPENCV_IMGPROC}.dll): error("OpenCV runtime missing: $$OPENCV_IMGPROC")
+    !exists($$OPENCV_BIN/$${OPENCV_VIDEOIO}.dll): error("OpenCV runtime missing: $$OPENCV_VIDEOIO")
     LIBS += $$quote($$OPENCV_LIB/$${OPENCV_CORE}.lib)
     LIBS += $$quote($$OPENCV_LIB/$${OPENCV_IMGPROC}.lib)
+    LIBS += $$quote($$OPENCV_LIB/$${OPENCV_VIDEOIO}.lib)
 } else {
     isEmpty(OPENCV_VERSION_SUFFIX): OPENCV_VERSION_SUFFIX = 500
     CONFIG(debug, debug|release) {
@@ -55,14 +59,20 @@ equals(OPENCV_LAYOUT, modular) {
 
 INCLUDEPATH += $$quote($$OPENCV_INCLUDE)
 
+# cv::VideoCapture loads this backend DLL at runtime (required by the network camera).
+OPENCV_VIDEOIO_FFMPEG = $$OPENCV_BIN/opencv_videoio_ffmpeg$${OPENCV_VERSION_SUFFIX}_64.dll
+!exists($$OPENCV_VIDEOIO_FFMPEG): error("OpenCV FFmpeg backend missing: $$OPENCV_VIDEOIO_FFMPEG")
+
 # Runtime deployment is performed only when a build is explicitly requested.
 equals(OPENCV_LAYOUT, modular) {
     OPENCV_RUNTIME_DEST = $$clean_path($$DESTDIR)
     QMAKE_POST_LINK += $$QMAKE_COPY $$shell_quote($$shell_path($$OPENCV_BIN/$${OPENCV_CORE}.dll)) $$shell_quote($$shell_path($$OPENCV_RUNTIME_DEST)) $$escape_expand(\\n\\t)
     QMAKE_POST_LINK += $$QMAKE_COPY $$shell_quote($$shell_path($$OPENCV_BIN/$${OPENCV_IMGPROC}.dll)) $$shell_quote($$shell_path($$OPENCV_RUNTIME_DEST)) $$escape_expand(\\n\\t)
+    QMAKE_POST_LINK += $$QMAKE_COPY $$shell_quote($$shell_path($$OPENCV_BIN/$${OPENCV_VIDEOIO}.dll)) $$shell_quote($$shell_path($$OPENCV_RUNTIME_DEST)) $$escape_expand(\\n\\t)
+    QMAKE_POST_LINK += $$QMAKE_COPY $$shell_quote($$shell_path($$OPENCV_VIDEOIO_FFMPEG)) $$shell_quote($$shell_path($$OPENCV_RUNTIME_DEST)) $$escape_expand(\\n\\t)
 } else {
-    OPENCV_RUNTIME_DEST = $$OUT_PWD
-    CONFIG(debug, debug|release): OPENCV_RUNTIME_DEST = $$OUT_PWD/debug
-    else: OPENCV_RUNTIME_DEST = $$OUT_PWD/release
+    # Keep the OpenCV runtime beside the executable written by DESTDIR.
+    OPENCV_RUNTIME_DEST = $$clean_path($$DESTDIR)
     QMAKE_POST_LINK += $$QMAKE_COPY $$shell_quote($$shell_path($$OPENCV_BIN/$${OPENCV_WORLD}.dll)) $$shell_quote($$shell_path($$OPENCV_RUNTIME_DEST)) $$escape_expand(\\n\\t)
+    QMAKE_POST_LINK += $$QMAKE_COPY $$shell_quote($$shell_path($$OPENCV_VIDEOIO_FFMPEG)) $$shell_quote($$shell_path($$OPENCV_RUNTIME_DEST))
 }

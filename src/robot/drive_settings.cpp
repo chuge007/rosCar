@@ -272,6 +272,10 @@ void DriveSettings::save(QSettings& settings) const {
   settings.setValue(CRAWLING_TEXT("laserSerialNumber"), laserSerialNumber);
   for (int slot = 0; slot < kUsbCameraChannelCount; ++slot) {
     const auto& cam = usbCameras[slot];
+    settings.setValue(CRAWLING_TEXT("cameraSource%1").arg(slot),
+                      cam.cameraSource == CameraSource::Network
+                          ? CRAWLING_TEXT("network")
+                          : CRAWLING_TEXT("usb"));
     settings.setValue(CRAWLING_TEXT("usbCameraDeviceIndex%1").arg(slot),
                       cam.usbCameraDeviceIndex);
     settings.setValue(CRAWLING_TEXT("networkCameraUrl%1").arg(slot),
@@ -394,6 +398,22 @@ DriveSettings DriveSettings::load(QSettings& settings) {
             .toInt();
     cam.networkCameraUrl =
         readCameraKey(CRAWLING_TEXT("networkCameraUrl"), cam.networkCameraUrl).toString();
+    const QString sourceKey = CRAWLING_TEXT("cameraSource%1").arg(slot);
+    const bool hasSourceKey =
+        settings.contains(sourceKey) ||
+        (slot == 0 && settings.contains(CRAWLING_TEXT("cameraSource")));
+    if (hasSourceKey) {
+      const QString source =
+          readCameraKey(CRAWLING_TEXT("cameraSource"), QVariant()).toString().trimmed();
+      cam.cameraSource =
+          source.compare(CRAWLING_TEXT("network"), Qt::CaseInsensitive) == 0
+              ? CameraSource::Network
+              : CameraSource::Usb;
+    } else if (!cam.networkCameraUrl.trimmed().isEmpty()) {
+      // Preserve the old URL-wins behavior for settings written before the
+      // explicit source selector existed.
+      cam.cameraSource = CameraSource::Network;
+    }
     cam.usbCameraFps = std::clamp(
         readCameraKey(CRAWLING_TEXT("usbCameraFps"), cam.usbCameraFps).toInt(), 1, 120);
     cam.usbCameraAutoConnect =

@@ -3,8 +3,12 @@
 
 #include <QBuffer>
 #include <QCameraDevice>
+#include <QMediaCaptureSession>
+#include <QDebug>
 #include <QImage>
 #include <QMediaDevices>
+#include <algorithm>
+#include <cstring>
 #include <limits>
 
 namespace crawling {
@@ -63,11 +67,21 @@ bool CameraServer::setupSharedMemory(int slot) {
   return true;
 }
 
-void CameraServer::cleanupSlot(CameraSlot& slot) {
+void CameraServer::cleanupSlot(CameraSlot& slot, bool releaseSharedMemory) {
+  // Detach the sink before destroying either endpoint so the session cannot
+  // retain a dangling camera/sink pointer during a camera switch.
+  if (slot.captureSession) {
+    slot.captureSession->setCamera(nullptr);
+    slot.captureSession->setVideoSink(nullptr);
+  }
   if (slot.camera) {
     slot.camera->stop();
     delete slot.camera;
     slot.camera = nullptr;
+  }
+  if (slot.captureSession) {
+    delete slot.captureSession;
+    slot.captureSession = nullptr;
   }
   if (slot.videoSink) {
     delete slot.videoSink;
@@ -82,10 +96,16 @@ void CameraServer::cleanupSlot(CameraSlot& slot) {
     delete slot.networkVideoSink;
     slot.networkVideoSink = nullptr;
   }
-  if (slot.sharedMemory) {
+  if (slot.bufferClearTimer) {
+    slot.bufferClearTimer->stop();
+    delete slot.bufferClearTimer;
+    slot.bufferClearTimer = nullptr;
+  }
+  if (releaseSharedMemory && slot.sharedMemory) {
     delete slot.sharedMemory;
     slot.sharedMemory = nullptr;
   }
+  slot.consecutiveDrops = 0;
 }
 
 void CameraServer::connectUsbCamera(int slot, int deviceIndex, int fps,
@@ -94,10 +114,13 @@ void CameraServer::connectUsbCamera(int slot, int deviceIndex, int fps,
     return;
 
   CameraSlot& s = slots_[slot];
-  cleanupSlot(s);
+  cleanupSlot(s, false);
 
   s.flipHorizontal = flipH;
   s.flipVertical = flipV;
+
+  // Clamp FPS to maximum 15 for lower latency
+  fps = std::min(fps, 15);
 
   const QList<QCameraDevice> cameras = QMediaDevices::videoInputs();
   if (deviceIndex < 0 || deviceIndex >= cameras.size()) {
@@ -109,13 +132,13 @@ void CameraServer::connectUsbCamera(int slot, int deviceIndex, int fps,
   s.camera = new QCamera(device, this);
   s.videoSink = new QVideoSink(this);
 
-  // Select low-resolution format
+  // Select ultra-low-resolution format (320x240 preferred)
   QCameraFormat selectedFormat;
   double bestScore = std::numeric_limits<double>::max();
   for (const QCameraFormat& format : device.videoFormats()) {
     const QSize res = format.resolution();
     const int pixels = res.width() * res.height();
-    const int targetPixels = 640 * 480;
+    const int targetPixels = 320 * 240;  // Much lower resolution
 
     const bool fpsMatch =
         fps >= format.minFrameRate() && fps <= format.maxFrameRate();
@@ -138,7 +161,9 @@ void CameraServer::connectUsbCamera(int slot, int deviceIndex, int fps,
   }
 
   s.camera->setCameraFormat(selectedFormat);
-  s.camera->setVideoOutput(s.videoSink);
+  s.captureSession = new QMediaCaptureSession(this);
+  s.captureSession->setCamera(s.camera);
+  s.captureSession->setVideoSink(s.videoSink);
 
   connect(s.videoSink, &QVideoSink::videoFrameChanged, this,
           [this, slot](const QVideoFrame& frame) { applyFrame(slot, frame); });
@@ -160,25 +185,40 @@ void CameraServer::connectNetworkCamera(int slot, const QString& url,
     return;
 
   CameraSlot& s = slots_[slot];
-  cleanupSlot(s);
+  cleanupSlot(s, false);
 
   s.flipHorizontal = flipH;
   s.flipVertical = flipV;
+  s.consecutiveDrops = 0;
 
   s.networkPlayer = new QMediaPlayer(this);
   s.networkVideoSink = new QVideoSink(this);
-  s.networkPlayer->setVideoOutput(s.networkVideoSink);
+  s.networkPlayer->setVideoSink(s.networkVideoSink);
 
   // Ultra-low latency configuration
-  s.networkPlayer->setProperty("bufferSize", 1);
-  s.networkPlayer->setProperty("rtsp_transport", "tcp");
-  s.networkPlayer->setProperty("fflags", "nobuffer");
-  s.networkPlayer->setProperty("flags", "low_delay");
-  s.networkPlayer->setProperty("probesize", 32);
-  s.networkPlayer->setProperty("analyzeduration", 0);
+  // Qt Multimedia does not forward these FFmpeg options as QObject properties.
+  // The standalone server is only the optional fallback path; the workbench
+  // uses NetworkStreamReader for genuinely low-latency RTSP/HTTP capture.
 
   connect(s.networkVideoSink, &QVideoSink::videoFrameChanged, this,
           [this, slot](const QVideoFrame& frame) { applyFrame(slot, frame); });
+
+  // Periodic buffer clear to prevent accumulation
+  s.bufferClearTimer = new QTimer(this);
+  s.bufferClearTimer->setInterval(50);  // Every 50ms, aggressively clear old frames
+  connect(s.bufferClearTimer, &QTimer::timeout, this, [this, slot]() {
+    CameraSlot& s = slots_[slot];
+    if (s.consecutiveDrops > 5) {
+      // If we're dropping too many frames, the stream might be buffering
+      // Force a position update to flush buffer
+      if (s.networkPlayer && s.networkPlayer->isPlaying()) {
+        qint64 pos = s.networkPlayer->position();
+        s.networkPlayer->setPosition(pos);
+      }
+      s.consecutiveDrops = 0;
+    }
+  });
+  s.bufferClearTimer->start();
 
   s.networkPlayer->setSource(QUrl(url));
   s.networkPlayer->play();
@@ -189,7 +229,7 @@ void CameraServer::connectNetworkCamera(int slot, const QString& url,
 void CameraServer::disconnectCamera(int slot) {
   if (slot < 0 || slot >= kUsbCameraChannelCount)
     return;
-  cleanupSlot(slots_[slot]);
+  cleanupSlot(slots_[slot], false);
   emit cameraStatusChanged(slot, false, "Disconnected");
 }
 
@@ -205,8 +245,16 @@ void CameraServer::applyFrame(int slot, const QVideoFrame& frame) {
     return;
 
   CameraSlot& s = slots_[slot];
-  if (!s.frameProcessing.testAndSetAcquire(0, 1))
+  if (!s.frameProcessing.testAndSetAcquire(0, 1)) {
+    // Frame dropped - increment counter for network streams
+    if (s.networkPlayer) {
+      s.consecutiveDrops++;
+    }
     return;  // Drop frame if previous is still processing
+  }
+
+  // Reset drop counter on successful processing
+  s.consecutiveDrops = 0;
 
   QImage image = frame.toImage();
   if (image.isNull()) {
@@ -214,11 +262,15 @@ void CameraServer::applyFrame(int slot, const QVideoFrame& frame) {
     return;
   }
 
-  // Scale to target size
-  if (s.targetWidth > 0 && s.targetHeight > 0 &&
-      (image.width() > s.targetWidth || image.height() > s.targetHeight)) {
-    image = image.scaled(QSize(s.targetWidth, s.targetHeight),
-                        Qt::KeepAspectRatio, Qt::FastTransformation);
+  // Scale to target size (network cameras often stream at high resolution)
+  if (s.targetWidth > 0 && s.targetHeight > 0) {
+    // Force scale down to 320x240 maximum for network streams
+    int maxWidth = std::min(s.targetWidth, 320);
+    int maxHeight = std::min(s.targetHeight, 240);
+    if (image.width() > maxWidth || image.height() > maxHeight) {
+      image = image.scaled(QSize(maxWidth, maxHeight),
+                          Qt::KeepAspectRatio, Qt::FastTransformation);
+    }
   }
 
   // Mirror
@@ -230,12 +282,16 @@ void CameraServer::applyFrame(int slot, const QVideoFrame& frame) {
   if (s.sharedMemory && s.sharedMemory->isAttached()) {
     QBuffer buffer;
     buffer.open(QBuffer::WriteOnly);
-    if (image.save(&buffer, "JPG", 85)) {  // 85% quality JPEG
+    // Lower JPEG quality for network streams to reduce latency
+    int quality = s.networkPlayer ? 65 : 75;
+    if (image.save(&buffer, "JPG", quality)) {
       const QByteArray data = buffer.data();
-      if (data.size() <= kSharedMemorySize) {
+      if (data.size() + sizeof(quint32) <= kSharedMemorySize) {
         s.sharedMemory->lock();
-        memcpy(s.sharedMemory->data(), data.constData(), data.size());
-        // Write size at the beginning
+        // Publish the JPEG before its length so the reader cannot observe a
+        // new size while the payload is still being copied.
+        memcpy(static_cast<char*>(s.sharedMemory->data()) + sizeof(quint32),
+               data.constData(), data.size());
         *reinterpret_cast<quint32*>(s.sharedMemory->data()) = data.size();
         s.sharedMemory->unlock();
 

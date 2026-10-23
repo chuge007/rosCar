@@ -18,6 +18,7 @@ class AppLogger final {
   static void warning(const QString& category, const QString& message);
   static void error(const QString& category, const QString& message);
   static QString filePath();
+  static QString cameraConnectionFilePath();
   static QString profileDetectionFilePath();
 
  private:
