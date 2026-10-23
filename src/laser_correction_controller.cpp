@@ -108,6 +108,9 @@ double clamp(double value, double low, double high) {
 bool applySimpleWeldDetection(LaserGapDetection& detection,
                               const QVector<QVector3D>& points,
                               const SimpleWeldResult& simpleResult) {
+  if (detection.widthRejected || detection.continuityRejected)
+    return false;
+
   if (simpleResult.startIndex < 0 ||
       simpleResult.endIndex <= simpleResult.startIndex ||
       simpleResult.startIndex >= points.size() ||
