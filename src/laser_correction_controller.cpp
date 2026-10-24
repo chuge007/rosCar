@@ -103,14 +103,12 @@ double clamp(double value, double low, double high) {
   return std::max(low, std::min(value, high));
 }
 
-// SIMPLE owns the complete profile result. Do not retain rejection flags or
-// normalized geometry from the fallback detector that ran first.
+// SIMPLE owns the complete profile result. The fallback detector may reject a
+// different shoulder candidate; its continuity/width flags must not suppress a
+// valid SIMPLE result.
 bool applySimpleWeldDetection(LaserGapDetection& detection,
                               const QVector<QVector3D>& points,
                               const SimpleWeldResult& simpleResult) {
-  if (detection.widthRejected || detection.continuityRejected)
-    return false;
-
   if (simpleResult.startIndex < 0 ||
       simpleResult.endIndex <= simpleResult.startIndex ||
       simpleResult.startIndex >= points.size() ||
@@ -359,11 +357,15 @@ void LaserCorrectionController::setSettings(
     const LaserCorrectionSettings& value) {
   settings_ = value;
   settings_.imageLateralSpanM = kInternalImageLateralSpanM;
-  settings_.segmentLengthM = clamp(settings_.segmentLengthM, 0.02, 2.0);
+  // A 1 mm minimum segment needs proportionally dense samples; the legacy
+  // 0.5/0.75 mm floors otherwise leave too few points for a valid fit.
+  settings_.segmentLengthM = clamp(settings_.segmentLengthM, 0.001, 0.03);
   const double adaptiveSampleSpacingM =
-      clamp(settings_.segmentLengthM * 0.075, 0.00075, 0.004);
-  settings_.sampleSpacingM = clamp(settings_.sampleSpacingM, 0.0005,
-                                   adaptiveSampleSpacingM);
+      clamp(settings_.segmentLengthM * 0.075, 0.00005, 0.004);
+  settings_.sampleSpacingM =
+      clamp(settings_.sampleSpacingM,
+            std::min(0.0005, adaptiveSampleSpacingM),
+            adaptiveSampleSpacingM);
   const int adaptiveMinimumFitSamples = settings_.segmentLengthM <= 0.03
                                             ? 4
                                             : (settings_.segmentLengthM <= 0.06
@@ -386,8 +388,12 @@ void LaserCorrectionController::setSettings(
   settings_.maximumFitRmsErrorM =
       clamp(settings_.maximumFitRmsErrorM, 0.0005,
             adaptiveMaximumFitRmsErrorM);
-  settings_.returnToleranceM = clamp(settings_.returnToleranceM, 0.001,
-                                     settings_.segmentLengthM * 0.25);
+  // Short segments must not consume their whole length as return tolerance.
+  const double adaptiveReturnToleranceM = settings_.segmentLengthM * 0.25;
+  settings_.returnToleranceM =
+      clamp(settings_.returnToleranceM,
+            std::min(0.001, adaptiveReturnToleranceM),
+            adaptiveReturnToleranceM);
   settings_.settleTimeMs = std::max(100, settings_.settleTimeMs);
   settings_.wheelRadiusM = std::max(0.001, settings_.wheelRadiusM);
   settings_.trackWidthM = std::max(0.01, settings_.trackWidthM);
@@ -1009,7 +1015,8 @@ void LaserCorrectionController::processProfileFrame(
                 "old_valid=%2 old_center_x=%3 simple_valid=%4 simple_center_x=%5 diff=%6 "
                 "old_confidence=%7 simple_confidence=%8 "
                 "simple_width=%9 simple_height=%10 simple_noise=%11 "
-                "peak_index=%12")
+                "peak_index=%12 association_rejected=%13 center_jump=%14 "
+                "width_jump=%15 confirmation=%16")
                 .arg(sourceFrameNumber)
                 .arg(detection.valid)
                 .arg(detection.profileCenterX, 0, 'f', 2)
@@ -1022,10 +1029,33 @@ void LaserCorrectionController::processProfileFrame(
                 .arg(simpleResult.weldWidth, 0, 'f', 1)
                 .arg(simpleResult.weldHeight, 0, 'f', 2)
                 .arg(simpleResult.noiseLevel, 0, 'f', 2)
-                .arg(simpleResult.peakIndex));
+                .arg(simpleResult.peakIndex)
+                .arg(simpleResult.associationRejected)
+                .arg(simpleResult.centerJumpRejected)
+                .arg(simpleResult.widthJumpRejected)
+                .arg(simpleResult.associationConfirmationCount));
       }
 
-      // 使用极简算法的结果（置信度>0.4即可）
+      // Keep a large one-frame jump out of the control and boundary state.
+      if (simpleResult.associationRejected &&
+          (lastSimpleAssociationRejectMs_ < 0 ||
+           now - lastSimpleAssociationRejectMs_ >= 250)) {
+        lastSimpleAssociationRejectMs_ = now;
+        emit diagnosticLogMessage(QStringLiteral(
+            "event=simple_weld_candidate_rejected sdk_frame=%1 raw_center_x=%2 "
+            "raw_width=%3 support=%4 center_jump=%5 width_jump=%6 "
+            "confirmation=%7/%8 active=1")
+            .arg(sourceFrameNumber)
+            .arg(simpleResult.rawCenterX, 0, 'f', 2)
+            .arg(simpleResult.rawWeldWidth, 0, 'f', 1)
+            .arg(simpleResult.candidateSupportSamples)
+            .arg(simpleResult.centerJumpRejected)
+            .arg(simpleResult.widthJumpRejected)
+            .arg(simpleResult.associationConfirmationCount)
+            .arg(3));
+      }
+
+      // Apply SIMPLE only after confidence and temporal association pass.
       if (simpleResult.valid && simpleResult.confidence > 0.4 &&
           applySimpleWeldDetection(detection, points, simpleResult)) {
         if (trace.enabled) {
@@ -2730,6 +2760,7 @@ void LaserCorrectionController::beginTrackingSegment() {
 }
 
 void LaserCorrectionController::resetGapTracker() {
+  simpleWeldLocator_.reset();
   seamTrajectory_.clear();
   seamPrediction_ = {};
   gapTrackerValid_ = false;
@@ -4161,6 +4192,7 @@ void LaserCorrectionController::resetSession() {
   lastControlDiagnosticMs_ = -1;
   lastDetectionDiagnosticMs_ = -1;
   lastDetectionRejectLogMs_ = -1;
+  lastSimpleAssociationRejectMs_ = -1;
   lastCenterTrendSampleMs_ = -1;
   lastRawFrameDiagnosticMs_ = -1;
   lastRawFrameSaveMs_ = -1;

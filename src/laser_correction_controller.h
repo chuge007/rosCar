@@ -23,7 +23,7 @@ struct LaserCorrectionSettings {
   // Nominal image scale; physical calibration cannot be inferred from a
   // monochrome camera image. Pixel/ratio logs remain the primary evidence.
   double imageLateralSpanM = 0.20;
-  double segmentLengthM = 0.10;
+  double segmentLengthM = 0.03;
   double sampleSpacingM = 0.004;
   int minimumFitSamples = 8;
   double minimumFitSpanRatio = 0.45;
@@ -496,6 +496,7 @@ class LaserCorrectionController final : public QObject {
   EnhancedWeldLocator enhancedWeldLocator_;
   SimpleWeldLocator simpleWeldLocator_;
   qint64 lastEnhancedAlgorithmComparisonMs_ = -1;
+  qint64 lastSimpleAssociationRejectMs_ = -1;
 
   // ========== 新增：焊道跟踪优化组件 ==========
   SeamStateMachine seamStateMachine_;

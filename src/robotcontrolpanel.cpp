@@ -875,7 +875,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     leftColumn->setAlignment(Qt::AlignTop);
     rightColumn->setAlignment(Qt::AlignTop);
     layout->addLayout(leftColumn, 1);
-    layout->addLayout(rightColumn, 1);
+    layout->addLayout(rightColumn, 2);
     const auto compactGroup = [](QGroupBox *group) {
         group->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
         if (group->layout()) {
@@ -898,8 +898,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     auto *correctionForm = new QFormLayout;
     m_correctionSpeed = makeDouble(1.0, 150.0, 1.0, 1, correctionGroup);
     m_correctionSpeed->setValue(5.0);
-    m_correctionSegment = makeDouble(20.0, 500.0, 10.0, 1, correctionGroup);
-    m_correctionSegment->setValue(100.0);
+    m_correctionSegment = makeDouble(1.0, 30.0, 1.0, 1, correctionGroup);
+    m_correctionSegment->setValue(30.0);
     m_correctionKp = makeDouble(0.0, 20.0, 0.1, 2, correctionGroup);
     m_correctionKp->setValue(3.0);
     m_correctionKd = makeDouble(0.0, 5.0, 0.01, 2, correctionGroup);
@@ -909,7 +909,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                                         QStringLiteral("调大行走纠偏更快；调小更慢更稳")));
     correctionForm->addRow(QStringLiteral("分段长度 (mm)"),
                            wrapWithHint(m_correctionSegment,
-                                        QStringLiteral("调大拟合窗口更长更平滑；调小局部跟随更细")));
+                                        QStringLiteral("范围 1-30 mm；调大拟合窗口更长更平滑；调小局部跟随更细")));
     correctionForm->addRow(QStringLiteral("Kp"),
                            wrapWithHint(m_correctionKp,
                                         QStringLiteral("调大偏差修正更强但易振荡；调小更柔和")));
@@ -2020,7 +2020,7 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
         persistent.value(QStringLiteral("laserCorrection/speed"), 0.005)
             .toDouble() * kMillimetersPerMeter);
     m_correctionSegment->setValue(
-        persistent.value(QStringLiteral("laserCorrection/segmentLength"), 0.10)
+        persistent.value(QStringLiteral("laserCorrection/segmentLength"), 0.03)
             .toDouble() * kMillimetersPerMeter);
     m_correctionKp->setValue(
         persistent.value(QStringLiteral("laserCorrection/kp"), 3.0).toDouble());

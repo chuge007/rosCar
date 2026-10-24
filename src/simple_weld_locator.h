@@ -37,11 +37,21 @@ struct SimpleWeldResult {
     double weldHeight = 0.0;
     double confidence = 0.0;
 
-    // 诊断信息
+    // Diagnostic information
     double baselineSlope = 0.0;
     double baselineOffset = 0.0;
     double noiseLevel = 0.0;
     int peakIndex = -1;
+
+    // Temporal association diagnostics. Large center/width changes must be
+    // confirmed across consecutive frames before reaching the controller.
+    double rawCenterX = 0.0;
+    double rawWeldWidth = 0.0;
+    int candidateSupportSamples = 0;
+    bool associationRejected = false;
+    bool centerJumpRejected = false;
+    bool widthJumpRejected = false;
+    int associationConfirmationCount = 0;
 };
 
 /**
@@ -119,7 +129,8 @@ public:
 
         int n = static_cast<int>(indices.size());
         if (n < 32) {
-            return result;  // 数据太少
+            pendingConfirmationCount_ = 0;
+            return result;  // Data too sparse.
         }
 
         // 2. 估计基准面 - 用两端的中位数
@@ -169,8 +180,9 @@ public:
 
         result.peakIndex = indices[peakIdx];
 
-        // 如果最高点还不如噪声高，那就是没有焊道
+        // A peak below the noise floor is not a weld candidate.
         if (peakHeight < 1.5 * noise) {
+            pendingConfirmationCount_ = 0;
             return result;
         }
 
@@ -203,42 +215,113 @@ public:
             sumW += w;
         }
 
-        double centerX = sumW > 0 ? sumWX / sumW : xVec[peakIdx];
+        const double rawCenterX = sumW > 0 ? sumWX / sumW : xVec[peakIdx];
+        const double candidateWidth = xVec[rightBoundary] - xVec[leftBoundary];
+        const int candidateSupport = rightBoundary - leftBoundary + 1;
 
-        // 7. 卡尔曼滤波 - 时序平滑
-        if (kalman_.isInit()) {
-            double lastCenter = kalman_.get();
-            if (std::abs(centerX - lastCenter) > 10.0) {
-                // 可能跳到新焊道了
-                kalman_.reset();
-            }
-        }
-        centerX = kalman_.update(centerX);
-
-        // 8. 计算置信度
-        double widthScore = std::min(1.0, (rightBoundary - leftBoundary) / 50.0);
-        double heightScore = std::min(1.0, peakHeight / (5.0 * noise));
-        double confidence = (widthScore + heightScore) / 2.0;
-
-        // 9. 填充结果
-        result.valid = true;
-        result.centerX = centerX;
-        result.centerZ = slope * centerX + offset + peakHeight * 0.7;
+        result.rawCenterX = rawCenterX;
+        result.rawWeldWidth = candidateWidth;
+        result.candidateSupportSamples = candidateSupport;
         result.startIndex = indices[leftBoundary];
         result.endIndex = indices[rightBoundary];
-        result.weldWidth = xVec[rightBoundary] - xVec[leftBoundary];
+        result.weldWidth = candidateWidth;
         result.weldHeight = peakHeight;
+        result.peakIndex = indices[peakIdx];
+
+        // Confidence diagnostics.
+        const double widthScore = std::min(1.0, candidateSupport / 50.0);
+        const double heightScore = std::min(1.0, peakHeight / (5.0 * noise));
+        const double confidence = (widthScore + heightScore) / 2.0;
         result.confidence = confidence;
+
+        // The controller does not apply candidates at or below 0.4. Do not let
+        // those ignored candidates poison the association/Kalman memory.
+        if (confidence <= 0.4) {
+            pendingConfirmationCount_ = 0;
+            result.valid = true;
+            result.centerX = rawCenterX;
+            result.centerZ = slope * rawCenterX + offset + peakHeight * 0.7;
+            return result;
+        }
+
+        // Temporal association. A one-frame spike or width collapse remains a
+        // pending candidate and must not reset the Kalman state or pollute the
+        // downstream scan envelope. A real relocation is accepted after three
+        // consistent frames.
+        bool confirmedRelocation = !kalman_.isInit();
+        if (kalman_.isInit()) {
+            const double scanSpan = std::max(1e-6, xVec.back() - xVec.front());
+            const double centerJumpTolerance = std::max(500.0, scanSpan * 0.06);
+            const bool centerJump =
+                std::abs(rawCenterX - lastAcceptedRawCenterX_) > centerJumpTolerance;
+            double widthRatio = 1.0;
+            if (lastAcceptedRawWidth_ > 1e-9) {
+                widthRatio = candidateWidth / lastAcceptedRawWidth_;
+            }
+            const bool widthJump = widthRatio < 0.40 || widthRatio > 2.50;
+            result.centerJumpRejected = centerJump;
+            result.widthJumpRejected = widthJump;
+
+            if (centerJump || widthJump) {
+                const double pendingCenterTolerance = std::max(300.0, scanSpan * 0.015);
+                const double pendingWidthTolerance =
+                    std::max(16.0, pendingCandidateWidth_ * 0.35);
+                const bool samePending =
+                    pendingConfirmationCount_ > 0 &&
+                    std::abs(rawCenterX - pendingCandidateCenterX_) <=
+                        pendingCenterTolerance &&
+                    std::abs(candidateWidth - pendingCandidateWidth_) <=
+                        pendingWidthTolerance;
+                pendingConfirmationCount_ = samePending
+                    ? pendingConfirmationCount_ + 1 : 1;
+                pendingCandidateCenterX_ = rawCenterX;
+                pendingCandidateWidth_ = candidateWidth;
+                result.associationConfirmationCount = pendingConfirmationCount_;
+                if (pendingConfirmationCount_ < kAssociationConfirmationFrames) {
+                    result.associationRejected = true;
+                    result.centerX = rawCenterX;
+                    result.centerZ = slope * rawCenterX + offset + peakHeight * 0.7;
+                    return result;
+                }
+                confirmedRelocation = true;
+                pendingConfirmationCount_ = 0;
+            } else {
+                pendingConfirmationCount_ = 0;
+            }
+        }
+
+        // Kalman smoothing is applied only to associated measurements. Reset
+        // the filter only after a relocation has been confirmed.
+        if (confirmedRelocation) kalman_.reset();
+        const double filteredCenterX = kalman_.update(rawCenterX);
+        lastAcceptedRawCenterX_ = rawCenterX;
+        lastAcceptedRawWidth_ = candidateWidth;
+
+        result.valid = true;
+        result.centerX = filteredCenterX;
+        result.centerZ = slope * filteredCenterX + offset + peakHeight * 0.7;
 
         return result;
     }
 
     void reset() {
         kalman_.reset();
+        pendingConfirmationCount_ = 0;
+        pendingCandidateCenterX_ = 0.0;
+        pendingCandidateWidth_ = 0.0;
+        lastAcceptedRawCenterX_ = 0.0;
+        lastAcceptedRawWidth_ = 0.0;
     }
 
 private:
+    static constexpr int kAssociationConfirmationFrames = 3;
+
     SimpleKalman kalman_;
+    int pendingConfirmationCount_ = 0;
+    double pendingCandidateCenterX_ = 0.0;
+    double pendingCandidateWidth_ = 0.0;
+    double lastAcceptedRawCenterX_ = 0.0;
+    double lastAcceptedRawWidth_ = 0.0;
 };
 
 }  // namespace crawling

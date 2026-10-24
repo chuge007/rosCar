@@ -1,0 +1,1008 @@
+PA1664 Workbench
+E/B/C 扫描掉帧与超声进程隔离优化方案
+版本：2026-10-24（只读分析版）
+项目根目录：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp
+
+
+重要说明
+======================================================================
+1. 本文件是优化方案，不是代码补丁。本次没有修改任何业务源码，也没有执行编译、链接、打包。
+2. 代码中没有名为 EBC 的符号。实际对应 E 扫、B 扫、C 扫，位于 scanModes 的 0x1、0x2、0x4 位。
+3. 文中行号基于 2026-10-24 当前工作树。后续真正改代码时，文件可能已经变化，应以函数名为主、行号为辅重新确认。
+4. 本项目是 Qt 项目。除非用户明确要求，否则实施过程中不主动运行 qmake、cmake、ninja、make 或 IDE 构建。
+5. 真正编辑函数/类/方法前，必须按项目规则执行 GitNexus impact(upstream)；遇到 HIGH/CRITICAL 先评审再改。提交前必须执行 detect_changes()。
+
+
+一、结论摘要
+======================================================================
+当前问题不能简单归因于“CPU 平均占用太高”。更可能的根因是：
+
+1. 超声解码线程通过 Qt::DirectConnection 同步执行 UI 合并和缓存合并，容易被下游锁/UI 长尾拖住。
+2. 编码器 C 扫描 FIFO 只有 1024 个包。按代码注释中的 8 kHz 估算，大约只有 128 ms 缓冲；一旦解码线程停顿超过这个余量，就会丢掉最老的编码器包。
+3. CScan FIFO 满时直接 dequeue，但没有增加 C 扫描丢包计数，所以当前显示的 FPS/丢帧统计不能证明 B/C 扫描完整。
+4. MainWindow 的 UI 合并表限制为 4096 个 key，超过时删除最老项且没有计数。切页造成 GUI 卡顿时，UI 自己也可能丢 B/C 数据。
+5. CScanWidget::paintEvent 每次重新创建完整 raster，并遍历当前 gate 的全部 cell；单 gate 最多 262,144 个 cell。切页会触发明显 GUI 长尾。
+6. B 扫动态缩放变化时可能全图 rebuild，页面切换或参数变化也可能造成额外重绘。
+7. 小车控制虽然有独立线程，但仍与超声、UI、缓存写盘共享同一进程和 CPU。平均 CPU 不高不代表关键线程没有调度抖动。
+
+推荐路线：
+P0 可观测性 -> P1 修队列和同步 fan-out -> P2 拆 UI/缓存/绘制 -> P3 抽超声后端接口 -> P4 独立超声服务进程 -> P5 可选运动服务隔离。
+
+不建议直接做 P4。只搬 DeviceController 不够，因为 ParameterPanel、ParameterPresetStore、PulseLoadGuard、RemoteControlServer、MainWindow 和 main.cpp 都直接使用 Client 或 SDK 生命周期逻辑。
+
+
+二、现场现象与证据边界
+======================================================================
+此前只读采样看到：
+- PA1664Workbench.exe 约 37 个线程，工作集约 159-163 MB。
+- 机器为 Intel Core Ultra 5 225H，14 个逻辑处理器。
+- 采样时整机负载约 20%。
+- 日志曾出现 invalid physical device id -1，说明当时超声没有真实在线流量。
+
+因此：
+- 那次采样不能证明“CPU 一定够”或“CPU 一定不够”。
+- 但代码结构足以支持以下判断：这不是单纯算力总量问题，更可能是关键路径停顿、锁竞争、队列容量和 GUI 长尾问题。
+- 最终必须用真实超声在线、真实 B/C 扫描、真实纠偏和真实切页的数据确认。
+
+
+三、当前完整链路
+======================================================================
+3.1 超声采集和扫描
+
+厂商 SDK 回调线程
+  -> DeviceController::packetCallback
+  -> 同一把 m_frameMailboxMutex
+     -> Display FIFO：36 包，显示延迟目标 30 帧
+     -> CScan FIFO：1024 包，约 128 ms
+  -> FrameDecoderWorker 解码线程
+     -> 33 ms 显示解码
+     -> 有 B/C 时改为 5 ms PreciseTimer
+  -> groupScanBatchDecoded
+     -> DirectConnection -> MainWindow::enqueueGroupScanBatch
+     -> DirectConnection -> ScanWaveformCache::enqueueBatch
+  -> GUI 20 ms drain
+  -> acceptGroupScanBatch
+  -> BScanWidget / CScanWidget 更新和重绘
+
+3.2 小车和纠偏
+
+RobotControlPanel 已有多个独立 QThread：
+- 驱动控制线程：SynchronizedDriveController，20 ms PreciseTimer
+- 传感器/IMU/激光相机线程：RobotSensorController，相机 5 ms PreciseTimer
+- 激光纠偏线程：LaserCorrectionController，20 ms PreciseTimer watchdog
+- 轮廓检测日志线程
+- 轨迹写盘线程
+- USB 相机线程
+- UI 侧 80 ms 运动命令定时器
+
+问题不是“小车没有线程”，而是这些线程仍与超声解码、UI、缓存共享同一个进程资源。
+
+3.3 切页实际影响
+
+m_workspace 是 QTabWidget。当前没有看到切页时主动销毁超声解码线程的代码。
+切页会触发：
+- 页面隐藏/显示
+- 布局重新计算
+- B/C/E 图谱重绘
+- 状态栏/标签排版
+- 解码线程同步入队与 GUI drain 的竞争
+
+双窗口布局下，窗口失活还可能触发 RobotControlPanel::changeEvent 中的 stopAutoCorrection()。这是现有安全行为，需要单独确认和保留。
+
+
+四、关键丢帧点与当前代码位置
+======================================================================
+4.1 采集回调与队列
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.h
+位置：103-121
+内容：m_frameMailboxMutex、DisplayPacketCapacity=36、DisplayLatencyTarget=30、CScanPacketCapacity=1024、m_dropped
+问题：显示和 C 扫共用一把锁；C 扫容量按包数计算；C 扫丢包没有独立计数。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.cpp
+位置：83-127，DeviceController::packetCallback
+问题：Display 和 CScan 在同一临界区入队；CScan 满时 dequeue 但不增加丢包计数。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.cpp
+位置：129-142，takeLatestDisplayPacket
+问题：显示链路会主动裁掉超过 DisplayLatencyTarget 的帧，这是设计行为，但 m_dropped 只反映显示链路。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.cpp
+位置：145-167，setCScanPacketCollection / takeCScanPackets
+问题：takeCScanPackets 在锁内最多搬运 2048 个 QSharedPointer 包；消费者批量取出时可能拉长锁持有时间。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.cpp
+位置：770-784，watchdog 中的 frameRateChanged
+问题：只上报 Display FIFO 的 m_dropped，无法看到 CScan FIFO 丢失。
+
+4.2 解码线程
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framedecoderworker.cpp
+位置：12-31，startPolling
+问题：33 ms PreciseTimer；有 C/B 扫时在 updateSettings 中改为 5 ms。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framedecoderworker.cpp
+位置：35-84，updateSettings
+关键点：m_pollTimer->setInterval(m_hasEncoderScans ? 5 : 33)
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framedecoderworker.cpp
+位置：96-103，processLatestPacket
+问题：同一个线程先处理 B/C，再处理显示；C 批次过长会延后 A/E 显示。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framedecoderworker.cpp
+位置：149-307，processEncoderTriggeredPackets
+问题：
+- takeCScanPackets(packets, 2048) 一次取过多；
+- 每批最多 256 帧；
+- 每包做 packet tail、selected measurement、selected beam 等多次解析；
+- 307 行左右直接 emit groupScanBatchDecoded。
+
+4.3 DirectConnection
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：261-265
+内容：
+  connect(m_decoder, groupScanBatchDecoded, this, enqueueGroupScanBatch, Qt::DirectConnection);
+  connect(m_decoder, groupScanBatchDecoded, m_waveformCache, enqueueBatch, Qt::DirectConnection);
+问题：接收函数在解码线程内执行，UI 合并和缓存合并会直接阻塞解码线程。
+
+4.4 UI 合并队列
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：1461-1522，MainWindow::enqueueGroupScanBatch
+问题：
+- 使用 QString 作为高频 key；
+- pendingScanFrames 达到 4096 时删除最老项；
+- 删除没有计数；
+- 与解码线程的 DirectConnection 组合后，页面切换容易造成 UI 侧数据缺口。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：1524-1545，MainWindow::drainPendingGroupScanBatches
+问题：在 GUI 线程中一次搬走全部 pending，持锁期间可能阻塞解码线程入队。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：164-169，scanUiTimer
+问题：20 ms CoarseTimer 触发 drain；页面切换时 GUI 可能无法及时执行。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：1404-1438，MainWindow::acceptGroupScanBatch
+问题：在 GUI 线程更新 B/C 模型并触发 update；需要和渲染解耦。
+
+4.5 B/C 绘制
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.cpp
+位置：783-799，BScanWidget::ensureImageWidth
+关键点：MaximumStoredColumns=65536；扩容时新建 QImage 并逐行 memcpy。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.cpp
+位置：951-1015，BScanWidget::appendFrameAtColumnInternal
+问题：动态缩放最大值变化时直接 rebuildImage()，可能全图重建。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.cpp
+位置：1138-1146，BScanWidget::rebuildImage
+问题：遍历所有已用列并重绘。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.cpp
+位置：1300，BScanWidget::paintEvent
+问题：绘制本身比 C 扫轻，但缺失列/插补列叠加仍有 GUI 成本。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.cpp
+位置：1527-1622，CScanWidget::appendFrameDeferred
+关键点：1606 行 cells.size() >= 262144 后拒绝新增 cell；这个上限要保留语义，但需要可观测的丢点统计。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.cpp
+位置：1712-1806，CScanWidget::paintEvent
+问题：
+- 每次 paint 创建完整 QImage raster；
+- 遍历当前 gate 的全部 QHash cell；
+- 每个 cell 做 fillRect；
+- 页面切换/显示隐藏/缩放都可能触发全量重绘。
+
+4.6 扫描缓存
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.h
+位置：44-45、77-91
+内容：enqueueBatch、storeBatch、drainPendingBatches、m_pendingFrames、m_pendingMutex
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.cpp
+位置：100-114，ensureCapacity
+问题：每次都可能构造 QStorageInfo 并查询 bytesAvailable，存在长尾。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.cpp
+位置：150-210，enqueueBatch
+问题：
+- 高频 QString key；
+- pendingFrames 达到 4096 时删除最老项；
+- 由 DirectConnection 在解码线程执行；
+- 没有 pending 丢弃计数。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.cpp
+位置：212-233，drainPendingBatches
+问题：持锁搬运全部 pending，可能阻塞解码线程的 enqueueBatch。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.cpp
+位置：235-345，storeBatch
+问题：记录构建、写入、索引更新、flush、statistics 合并都在缓存线程；磁盘慢时会拉长下游压力。
+
+4.7 原始录制
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：271-272
+内容：recordingPacketReady -> FrameRecorder::append，Qt::QueuedConnection
+问题：FrameRecorder 是 MainWindow 子对象，实际在 GUI 线程执行写入。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framerecorder.cpp
+位置：41-54，FrameRecorder::append
+问题：QDataStream 写文件，每 100 帧 flush；录制开启时会增加 GUI 长尾。
+
+4.8 小车线程
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\robotcontrolpanel.cpp
+位置：173-378
+内容：驱动、传感器、纠偏、日志、轨迹、USB 相机线程和 80 ms 命令定时器。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\robot\synchronized_drive_controller.cpp
+位置：29-37
+内容：20 ms PreciseTimer 控制循环。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\robot_sensor_controller.cpp
+位置：42-53、329、356、511 附近
+内容：相机 5 ms PreciseTimer 轮询和图像处理。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\laser_correction_controller.cpp
+位置：284-287、4102 附近
+内容：20 ms PreciseTimer watchdog 和纠偏状态检查。
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\robotcontrolpanel.cpp
+位置：3133-3155，RobotControlPanel::changeEvent
+内容：WindowDeactivate/ApplicationDeactivate 时停止自动纠偏。属于现有安全行为，不能随意改。
+
+
+五、根因优先级
+======================================================================
+P0：解码线程同步 fan-out + CScan FIFO 余量不足 + C 扫丢包不可见
+P1：UI 侧 4096 key 合并队列静默淘汰
+P2：C 扫全量 paint、B 扫动态 rebuild 造成 GUI 长尾
+P3：缓存线程锁竞争、QStorageInfo 查询、磁盘写入和 flush
+P4：小车/纠偏/相机线程与超声共享进程调度资源
+P5：双窗口失活触发纠偏停止，属于现有行为，不等于扫描线程崩溃
+
+确认方法：
+- 如果 CScan FIFO 丢弃数大于 0：问题在采集/解码余量。
+- 如果 CScan FIFO 丢弃数为 0，但 UI pending 丢弃数大于 0：问题在 GUI 合并/绘制。
+- 如果 paint P99 很大且页面切换后 drain 延迟：优先修 CScanWidget。
+- 如果 cache enqueue 等待很大：优先拆 DirectConnection 和缓存锁。
+- 如果 CPU 平均不高但线程周期抖动大：是调度/阻塞问题，不是纯算力不足。
+
+
+六、优化原则
+======================================================================
+1. 先测量，再改结构。
+2. 显示链路允许 latest-value 覆盖；B/C 扫描链路不允许静默丢包。
+3. 控制面和数据面分离。
+4. SDK 回调只做最小入队，不做日志、磁盘、UI 或复杂解析。
+5. 所有队列必须有上限、丢弃原因、丢弃数量和丢失范围。
+6. 先做进程内解耦，再做进程外隔离。
+7. 不用“增加大量线程”代替数据通路优化。
+8. 不改变 UI、参数范围、PRF 限幅、远程协议、文件格式和安全行为。
+
+
+七、P0 可观测性改造
+======================================================================
+7.1 RawPacketBuffer 和采集指标
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\rawpacket.h
+需要增加或关联：
+- ingestSequence：采集回调序号
+- ingestTimestamp：单调时间戳
+- packetBytes：包长度
+- deviceId：设备号
+- captureEpoch：采集会话编号
+
+要求：不复制 SDK buffer，不改变现有 QSharedPointer 所有权模型。
+
+7.2 DeviceController 指标
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.h
+新增统计结构，建议至少包含：
+- rxPackets
+- rxBytes
+- displayDropped
+- displayQueueDepth
+- displayMaxAgeMs
+- cScanEnqueuedPackets
+- cScanDequeuedPackets
+- cScanDroppedPackets
+- cScanQueueBytes
+- cScanQueueMaxBytes
+- cScanMaxAgeMs
+- callbackMutexWaitUs
+
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.cpp
+位置：83-167、770-784
+改法：
+- 回调只做计数和入队；
+- CScan 满时增加 cScanDroppedPackets，并记录编码器范围；
+- frameRateChanged 不再只上报 display dropped；
+- 指标输出降频，禁止在回调中格式化日志。
+
+7.3 FrameDecoderWorker 指标
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framedecoderworker.h
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framedecoderworker.cpp
+位置：96-307
+新增：
+- decodeBatchSize
+- takePacketsDuration
+- decodeDuration
+- downstreamDuration
+- displayDecodeDuration
+- scanQueueAgeMs
+- emitGroupBatchDuration
+
+7.4 MainWindow 指标
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.h
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：1404-1545
+新增：
+- pendingScanDepth
+- pendingScanKeys
+- pendingMergeDropped
+- drainDuration
+- acceptDuration
+- scanUiTimerDelay
+- pageSwitchDuration
+- visibleScanPaintDuration
+
+7.5 ScanWaveformCache 指标
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.h
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.cpp
+位置：100-345
+新增：
+- pendingCacheDepth
+- pendingCacheBytes
+- cacheMergeDropped
+- drainLockDuration
+- storeDuration
+- storageQueryDuration
+- writeDuration
+- flushDuration
+
+7.6 绘制指标
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.cpp
+位置：1300、1712-1806
+新增：
+- appendFramesDuration
+- paintDuration
+- rasterBuildDuration
+- fullRebuildDuration
+- visibleCellCount
+
+7.7 小车指标
+文件：
+- src\robotcontrolpanel.cpp
+- src\robot\synchronized_drive_controller.cpp
+- src\robot_sensor_controller.cpp
+- src\laser_correction_controller.cpp
+新增：
+- driveTickJitter
+- correctionWatchdogGap
+- sensorPollGap
+- cameraDecodeDuration
+- autoCorrectionCommandLatency
+
+7.8 复现矩阵
+- 仅 A 扫
+- E 扫单独
+- B 扫单独
+- C 扫单独
+- E+B+C
+- B+C
+- 四 gate 全开
+- 纠偏关闭/启动/跟踪/暂停/恢复
+- 超声页和汽车页快速切换
+- E/B/C 子页切换
+- 单窗口/双窗口
+- IMU 开/关
+- 激光轮廓开/关
+- USB 相机开/关
+- 扫描缓存开/关/暂停
+- 原始录制开/关
+- 高 PRF、高采样点、多声束
+- 慢盘、磁盘空间不足
+- 超声服务异常退出
+
+
+八、P1 队列和解码改造
+======================================================================
+8.1 拆分锁
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.h
+位置：103-121
+改法：
+- DisplayMailbox 使用独立 mutex；
+- ScanIngress 使用独立 mutex；
+- 不再让显示裁剪和 C 扫描搬运共用同一临界区。
+
+8.2 CScan 按字节限流
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.h
+位置：106-115
+删除仅按包数的容量判断，新增：
+- maxQueueBytes
+- maxQueueAgeMs
+- packetBytes
+- queueBytes
+- overflow reason
+
+单包大小公式（来自 PacketDecoder::validatePacket）：
+bytes = (groupOffsetWords + beamCount * (pointCount + 16)) * 2 + 32
+
+估算：
+- pointCount=1024、beamCount=1、offset=0：约 2112 字节/包。
+- 8 kHz 时：约 16.9 MB/s。
+- 1024 包：约 2.1 MB、约 128 ms。
+
+容量应按实测峰值和目标抗抖动时间配置，例如 1-2 秒；不能简单把 1024 改成 8192 就结束。
+
+8.3 takeCScanPackets 改为双缓冲换出
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.cpp
+位置：145-167
+改法：
+- 生产队列和消费队列双缓冲；
+- 锁内只交换队列或一段范围；
+- 锁外解析；
+- 返回包数和总字节数；
+- 记录本次批次最大年龄。
+
+8.4 C 扫描丢包必须可见
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.cpp
+位置：106-110
+不得再出现无计数 dequeue。至少记录：
+- 丢失包数
+- 丢失起始/结束编码器值
+- 当前 captureEpoch
+- 扫描会话完整性标志
+
+8.5 解码批次加时间预算
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framedecoderworker.cpp
+位置：149-307
+改法：
+- 每次最多处理 4-8 ms；
+- 未处理完的包保留下次继续；
+- 不要一次处理 2048 个包且无限延长；
+- 保留现有批次大小、触发判定和输出顺序。
+
+8.6 去掉 DirectConnection
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：261-265
+改法：
+- 解码器只写入 ScanDeltaBus；
+- UI 使用有界、可统计、可补齐的扫描增量队列；
+- 缓存线程独立消费自己的队列；
+- 不使用 Qt::DirectConnection 让接收方在解码线程执行重活。
+
+8.7 使用强类型 key
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：1461-1522
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.cpp
+位置：150-210
+改法：
+- 不再高频构造 QString("B:%1:%2") 和 QString("C:%1:%2:%3:%4");
+- 使用 BScanKey、CScanKey 或预计算 ScanDelta；
+- 避免解码线程里重复做哈希和字符串分配。
+
+8.8 不建议的临时措施
+可以把 CScanPacketCapacity 临时调大并补丢包计数，作为短期缓解；但这只能延长可容忍停顿，不能解决同步 fan-out 和 UI 长尾。
+
+
+九、P2 UI 和缓存解耦
+======================================================================
+9.1 MainWindow pending 队列
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.h
+位置：198 及附近成员
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：1461-1545
+改法：
+- pending 队列按类型/字节限制；
+- 不允许静默淘汰；
+- 超过容量时记录 pendingMergeDropped 和丢失范围；
+- drain 设置时间预算；
+- 持锁只交换，渲染和 accept 在锁外执行；
+- 每个 UI 周期最多触发一次 update。
+
+9.2 CScanWidget 缓存绘制
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.h
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.cpp
+位置：1527-1622、1712-1806
+改法：
+- 新增持久化离屏 QImage；
+- append 只更新模型和 dirty 标记；
+- 20-33 ms 合并一次重建；
+- 可选 CScanRenderWorker 在后台生成热力图 QImage；
+- paintEvent 只 drawImage、坐标轴、文字、边框；
+- 点击查询使用模型快照或服务端缓存索引；
+- 必须保证相同阈值、gate、颜色、范围下的最终像素与当前一致。
+
+9.3 BScanWidget 扩容和动态缩放
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.cpp
+位置：783-799、951-1015、1138-1146、1300
+改法：
+- 扩容步长加大，减少 QImage 复制次数；
+- 动态缩放全图重建合并处理；
+- 支持脏区刷新；
+- 不改变 B 扫列、插补和点击回看的语义。
+
+9.4 ScanWaveformCache
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.h
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.cpp
+位置：100-345
+改法：
+- enqueueBatch 不再由解码线程同步执行；
+- pending 队列有容量、深度、丢弃统计；
+- drain 只持锁交换；
+- QStorageInfo 按时间或累计字节检查，不每批查询；
+- 批量写入，flush 保持低频；
+- statistics 合并发送；
+- 缓存记录、索引和文件格式保持不变。
+
+9.5 FrameRecorder
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：271-272
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framerecorder.cpp
+位置：41-54
+改法：
+- FrameRecorder 移到独立 QThread；
+- 使用专用写盘队列；
+- GUI 只负责开始/停止和状态；
+- 保持 PA1664_RAW_V1 文件格式、记录顺序和回放能力不变。
+
+
+十、P3 超声后端接口
+======================================================================
+目标：让 UI、参数、远程控制和进程隔离只依赖接口，不再直接访问 Client。
+
+新增接口建议：
+- IUltrasoundBackend
+- InProcessUltrasoundBackend
+- IsolatedUltrasoundBackend
+- UltrasoundServiceProtocol
+- UltrasoundServiceHost
+- ScanDeltaBus
+- CScanRenderWorker
+- UltrasoundMetrics
+
+接口分组：
+1. 设备控制
+   connectDevice
+   disconnectDevice
+   start
+   stop
+   resetEncoder
+   refreshGeometry
+   resumeAfterConfigurationChange
+   resumeAfterPresetChange
+   cycleUsbForColdStart
+
+2. 参数和状态
+   stateSnapshot
+   parameterSnapshot
+   applyParameterTransaction
+   saveConfig
+   loadConfig
+   savePreset
+   loadPreset
+
+3. 数据订阅
+   displayFrameReady
+   scanDeltaReady
+   cacheStatisticsChanged
+   waveformReady
+   message
+
+10.1 参数访问必须走快照
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\parameterpanel.cpp
+位置：99 行起的大量 getter/setter lambda
+问题：如果直接改成每字段一次 IPC，会产生新的 UI 延迟。
+改法：
+- 服务端维护 ParameterSnapshot；
+- 连接、参数应用、预设切换、配置加载后推送快照；
+- 面板 getter 读本地快照；
+- setter 提交修改；
+- apply 提交事务，保持现有字段顺序、回读、异常处理和 PRF 保护。
+
+10.2 参数应用逻辑共用
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\parameterpanel.cpp
+位置：568，persistConfiguration
+位置：729-847，ParameterPanel::apply
+位置：791-825，PRF 查询和自动限幅
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\parameterpresetstore.cpp
+位置：107、127、356-379
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\pulseloadguard.cpp
+位置：87-99、141-146
+改法：
+- 抽取 ParameterTransactionEngine；
+- 手动 apply、预设 apply、远程 patch 共用同一实现；
+- SDK 访问全部留在服务端；
+- 保持现有错误消息、限幅规则、回读顺序和预设文件格式。
+
+10.3 RemoteControlServer
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\remotecontrolserver.cpp
+位置：192-355，stateObject/configurationObject/applyConfigurationPatch
+位置：368-423，executeCommand
+问题：直接调用 Client 和 DeviceController。
+改法：
+- 构造参数从 DeviceController/ParameterPanel 改为 IUltrasoundBackend；
+- state、configuration、apply、start/stop、connect/disconnect 全部走同一后端；
+- 保持外部 JSON 协议、字段名、错误码和响应结构不变。
+
+10.4 MainWindow 中直接 SDK 访问
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+位置：1344-1401，updateDecoderSettings
+位置：1625-1640，updateParametersForPlot
+位置：2022-2028，saveConfig
+位置：2031-2066，loadConfig
+改法：
+- 使用后端几何/参数快照；
+- 使用后端 load/save API；
+- 不在 GUI 线程直接调用 Client；
+- 保持现有扫描配置刷新时机。
+
+10.5 main.cpp
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\main.cpp
+位置：166-175，UsbBootstrap 和配置仓库清理
+位置：176-330，hardware-test/reconnect-test/channel-hardware-test/channel-ui-test
+位置：341 起，MainWindow
+改法：
+- isolated 模式下 SDK/USB 准备和配置清理移到超声服务；
+- 自检命令改为通过后端执行，保持参数名、输出和退出码；
+- 主进程 isolated 模式不得再构造 Client。
+
+
+十一、P4 独立超声服务进程
+======================================================================
+11.1 新增工程
+建议新增：
+- D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\PA1664UltrasoundServer.pro
+- D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\ultrasound_server_main.cpp
+- D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\ultrasound_service.h/.cpp
+- D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\ultrasound_backend.h
+- D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\in_process_ultrasound_backend.h/.cpp
+- D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\isolated_ultrasound_backend.h/.cpp
+- D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\ultrasound_protocol.h/.cpp
+- D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scan_delta_bus.h/.cpp
+- D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scan_render_worker.h/.cpp
+- D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\ultrasound_metrics.h/.cpp
+
+可以新建一个 SUBDIRS 套件工程，保留现有 PA1664Workbench.pro 不变；不要直接把两个 TARGET 塞进同一个 .pro。
+
+11.2 服务进程职责
+服务进程负责：
+- UsbBootstrap::prepare
+- Client::getInstance
+- DeviceController
+- SDK 回调
+- E/B/C 解码
+- 编码器触发判定
+- B/C 权威扫描模型
+- ScanWaveformCache
+- FrameRecorder
+- 参数 get/set/readback
+- 预设应用
+- USB 恢复
+- watchdog
+- 统计和日志
+
+主进程负责：
+- UI
+- 小车驱动/IMU/纠偏/相机
+- 参数编辑展示
+- 远程控制协议外壳
+- IPC 客户端
+- 扫描显示
+
+11.3 控制通道
+使用 QLocalServer/QLocalSocket：
+- 长度前缀消息
+- protocolVersion
+- buildId
+- sessionId
+- requestId
+- operation
+- timestamp
+- checksum
+- 单条消息有大小上限
+- 每个命令有超时和明确错误码
+- 禁止每帧 JSON
+
+11.4 数据通道
+建议使用共享内存环形队列：
+- Display：latest-value 槽位，允许覆盖最老帧
+- Scan：有序、不可静默覆盖，使用 sequence 和 ack
+- 大波形：共享内存 payload + 句柄
+- 点选回看：服务端从缓存读取后返回
+
+每条记录至少包含：
+- magic
+- version
+- headerSize
+- sessionId
+- captureEpoch
+- sequence
+- timestamp
+- type
+- payloadBytes
+- geometry
+- checksum
+
+11.5 B/C 数据不要跨进程发送原始包
+- SDK 解码在服务进程完成；
+- 跨进程只发送压缩后的扫描增量；
+- 原始录制在服务进程直接写盘；
+- 否则 8 kHz 原始流量会引入更多 IPC 延迟和丢包。
+
+11.6 服务生命周期
+1. 主程序启动；
+2. 启动 PA1664UltrasoundServer.exe；
+3. 服务执行 USB 准备；
+4. 服务初始化 SDK；
+5. 服务发送 ready；
+6. 主程序创建共享内存并连接；
+7. 正常退出时停止扫描、flush 缓存和录制、断开 SDK、退出服务；
+8. 服务异常退出时主程序 UI 和小车控制不退出，服务 watchdog 重启并重新建立会话。
+
+11.7 日志风险
+文件：D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\robot_app_logger.cpp
+位置：61-73、131-177
+问题：logger mutex 是进程内静态变量，不是跨进程锁。两个进程同时写 logs\robot_console.log 会交错。
+建议：
+- 超声服务先写 logs\ultrasound_service.log；
+- 或服务通过低优先级日志队列发给主进程统一写 robot_console.log。
+不要直接让两个进程并发写同一个日志文件。
+
+11.8 文件和行为冻结
+必须保持：
+- PA1664_RAW_V1 格式
+- ScanWaveformCache 文件格式
+- latest_scan_ascan.bin 路径和清理语义
+- 参数预设格式
+- 远程控制 JSON 协议
+- CLI 自检参数和退出码
+- 页面、标签、按钮和用户流程
+- PRF 安全限幅规则
+- 自动纠偏停止规则
+- B/C 点击回看行为
+
+
+十二、线程和优先级建议
+======================================================================
+建议保留现有线程，不重复创建：
+
+驱动控制线程
+- 位置：src\robotcontrolpanel.cpp 173-187
+- 建议：主进程内保持，经测量后可小幅提升到 AboveNormal
+
+传感器/IMU/激光相机线程
+- 位置：src\robotcontrolpanel.cpp 189-213
+- 建议：保持独立；预处理和 UI 展示分离
+
+纠偏线程
+- 位置：src\robotcontrolpanel.cpp 215-357
+- 建议：保持独立，优先级不低于普通线程
+
+扫描缓存/录制线程
+- 建议：低优先级，避免阻塞采集
+
+超声扫描解码线程
+- 建议：服务进程内独立，允许处理 B/C 无损队列
+
+显示解码线程
+- 建议：普通优先级，允许 latest-value
+
+C 扫渲染线程
+- 建议：普通或低优先级，只在必要时运行
+
+禁止事项：
+- 不要给所有超声线程设置 Highest
+- 不要每帧创建 QThread
+- 不要在 SDK 回调做磁盘 IO
+- 不要在 GUI 线程做 SDK 参数读写
+- 不要队列满时静默删除
+- 不要让运动控制等待超声 IPC
+
+
+十三、小车是否能获得更多计算资源
+======================================================================
+答案：可以获得更稳定的资源，但不是增加物理 CPU 核数。
+
+独立超声进程的收益：
+- 把 SDK 回调、解码、缓存、录制移出主进程；
+- 页面切换不再直接占用超声处理；
+- 超声服务崩溃不拖垮小车控制；
+- 可以让主进程运动/纠偏线程获得更稳定的调度；
+- 可以给缓存/日志线程更低优先级。
+
+但独立进程也有成本：
+- IPC 延迟和协议复杂度；
+- 共享内存生命周期；
+- 服务启动和恢复；
+- 日志和配置路径；
+- 跨进程错误处理；
+- 需要严格的序列号、ack 和回滚。
+
+小车控制不建议第一阶段拆成独立进程。原因是安全关键路径需要额外设计急停、watchdog、反馈丢失、命令超时和进程崩溃恢复。优先做超声隔离和进程内线程优化即可。
+
+
+十四、分阶段实施顺序和回滚点
+======================================================================
+阶段 0：可观测性
+- 修改：指标结构、计数器、调试日志
+- 回滚：关闭指标开关
+
+阶段 1：队列和解码
+- 修改：DeviceController、FrameDecoderWorker
+- 回滚：保留旧队列实现开关
+
+阶段 2：UI 和缓存
+- 修改：MainWindow、scanwidgets、scanwaveformcache、framerecorder
+- 回滚：scan.delivery=legacy|sequenced；scan.render=legacy|offscreen
+
+阶段 3：后端接口
+- 修改：ParameterPanel、Preset、PulseLoadGuard、RemoteControlServer、MainWindow
+- 回滚：backend.mode=in_process
+
+阶段 4：超声服务
+- 修改：新增超声服务工程、IPC、共享内存
+- 回滚：ultrasound.backend=in_process
+
+阶段 5：可选运动服务
+- 只在超声隔离完成后，且实测运动线程仍不满足时考虑
+
+
+十五、测试和验收
+======================================================================
+15.1 数据完整性
+- 回调包数 = 解码消费数 + 明确分类的丢弃数
+- CScan FIFO 丢弃数为 0
+- UI pending 丢弃数为 0
+- B/C 编码器空间列连续
+- 扫描缓存记录数与权威模型一致
+- 切换页面不产生未记录空列
+- 录制文件可以正常回放
+
+15.2 性能
+建议基线后设置：
+- 回调临界区 P99 < 200-500 us
+- CScan 消费延迟 P99 < 5 ms
+- 解码线程下游阻塞 P99 < 5 ms
+- UI drain P99 < 8-10 ms
+- C 扫绘制 P99 < 16 ms
+- 页面切换最长阻塞 < 100 ms
+- 运动控制 tick 抖动不高于旧版本
+- 急停和纠偏停止行为完全一致
+
+15.3 功能回归
+- SDK 连接/断开
+- 冷启动和 USB 重连
+- 开始/停止采集
+- 扫描开始/暂停/停止
+- E/B/C 单扫和组合扫
+- B/C cell 点击回看
+- 参数全部字段
+- 参数回读
+- 预设保存/加载
+- PRF 自动限幅
+- 远程控制参数 patch
+- 远程启动/停止
+- 扫描缓存统计
+- 原始录制和回放
+- 双屏布局
+- 窗口失活时纠偏停止
+- 所有 CLI 自检模式和退出码
+
+15.4 故障注入
+- 超声服务被强制结束
+- 服务启动超时
+- 共享内存创建失败
+- IPC 消息损坏
+- 磁盘空间不足
+- 缓存写入失败
+- USB 拔插
+- 服务无响应
+- 页面快速切换 30 分钟以上
+- 激光相机断流
+- 驱动反馈丢失
+- 主进程关闭时服务仍在运行
+
+
+十六、最短落地清单
+======================================================================
+如果目标是尽快解决现场掉帧，先做以下 8 项：
+
+1. 在 DeviceController::packetCallback 增加 C 扫描丢包计数和队列字节数。
+2. 将 CScanPacketCapacity 改为按字节容量。
+3. 拆分 Display 和 CScan 的 mutex。
+4. 将 takeCScanPackets 改为双缓冲、锁外解析。
+5. 去掉 mainwindow.cpp 261-265 的两个 DirectConnection。
+6. 去掉 MainWindow 4096 key 的静默淘汰，增加 pending 丢弃统计。
+7. 将 CScanWidget::paintEvent 的全量 raster 构建移出或缓存。
+8. 将 FrameRecorder::append 移到独立录制线程。
+
+如果目标是长期给小车更多资源，再做：
+
+9. 抽出 IUltrasoundBackend。
+10. 参数、预设、远程控制统一走 ParameterTransactionEngine。
+11. 建立 PA1664UltrasoundServer。
+12. 使用共享内存和有序扫描增量。
+13. 用 in_process/isolated 两组配置灰度切换。
+14. 验证后再考虑运动控制独立进程。
+
+
+十七、实施纪律
+======================================================================
+1. 修改任何函数、类或方法前执行 GitNexus impact(upstream)。
+2. 遇到 HIGH/CRITICAL 影响先评审，不直接编辑。
+3. 修改后执行 detect_changes()。
+4. 本项目不主动运行完整构建，除非明确要求。
+5. 所有改动必须有独立回滚开关。
+6. 不允许通过修改参数范围、UI 文案、文件格式或 PRF 规则来“规避”掉帧。
+7. 最终验收以“现有功能行为不变 + 扫描数据完整 + 小车控制不劣化”为准。
+
+
+附录 A：绝对路径索引
+======================================================================
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\rawpacket.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\devicecontroller.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framedecoderworker.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framedecoderworker.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\mainwindow.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwidgets.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\scanwaveformcache.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framerecorder.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\framerecorder.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\parameterpanel.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\parameterpanel.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\parameterpresetstore.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\parameterpresetstore.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\pulseloadguard.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\pulseloadguard.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\remotecontrolserver.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\remotecontrolserver.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\robotcontrolpanel.h
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\robotcontrolpanel.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\robot_sensor_controller.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\laser_correction_controller.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\robot\synchronized_drive_controller.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\robot_app_logger.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\src\main.cpp
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\PA1664Workbench.pro
+D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp\PA1664CameraServer.pro
+
+
+附录 B：关键数据估算
+======================================================================
+单包字节：
+(groupOffsetWords + beamCount * (pointCount + 16)) * 2 + 32
+
+当前代码注释提到的 8 kHz 场景：
+- 1024 包约 128 ms
+- 单包 2112 字节时约 16.9 MB/s
+- 1024 包约 2.1 MB
+
+如果 PRF、采样点、声束数或分组偏移变化，必须重新计算，不能沿用固定包数。
+
+
+附录 C：最终目标结构
+======================================================================
+主进程 PA1664Workbench
+- GUI 主线程
+- 驱动控制线程
+- 激光纠偏线程
+- IMU/激光采集线程
+- USB 相机线程
+- 超声 IPC 客户端
+- 远程控制服务
+
+超声服务 PA1664UltrasoundServer
+- SDK 控制线程
+- 厂商回调线程
+- B/C 扫描解码线程
+- A/E 显示解码线程
+- 扫描缓存/录制线程
+- B/C 扫描模型和渲染 worker
+- IPC Publisher
+
+
+文档结束
+======================================================================
