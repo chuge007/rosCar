@@ -1,0 +1,30 @@
+*** Begin Patch
+*** Update File: src/common/transport/realtime_channel.h
+@@
+  void heartbeatReceived(quint64 sessionId);
+  void emergencyStopReceived(quint64 sessionId);
++  void motionLeaseExpired(quint64 sessionId);
++  void sessionTimedOut(quint64 sessionId);
++  void sessionRecovered(quint64 sessionId);
+   void packetRejected(quint64 sessionId, const QString& detail);
+@@
+     quint64 outboundSequence = 0;
+-    qint64 lastHeartbeatMs = 0;
+-    qint64 lastMotionMs = 0;
++    qint64 lastHeartbeatMs = 0;
++    qint64 motionExpiresAtMs = 0;
++    bool motionLeaseActive = false;
++    bool timedOut = false;
+   };
+ 
+   void processDatagrams();
++  void checkSessionTimeouts();
+   void writePacket(quint64 sessionId, Session* session, RealtimePacketType type,
+                    const QJsonObject& payload);
+ 
+   QUdpSocket* socket_ = nullptr;
++  QTimer* watchdogTimer_ = nullptr;
+   QHash<quint64, Session> sessions_;
+-  qint64 lastHeartbeatCheckMs_ = 0;
+ };
+*** End Patch

@@ -1,0 +1,80 @@
+# Qt Creator, Visual Studio and local analysis state
+/.qtc_clangd/
+/.qtcreator/
+/.gitnexus/
+/.vs/
+/.vscode/
+*.pro.user*
+*.qmake.stash
+*.suo
+*.user
+*.autosave
+
+# Desktop build output
+/build/
+/**/build/
+/install/
+/build64/
+/bin/
+/debug/
+/release/
+Makefile
+Makefile.*
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.o
+*.a
+*.so
+*.dylib
+*.lib
+*.exp
+*.idb
+*.ipdb
+*.tlog/
+*.lastbuildstate
+
+# The small vendor import library is required to link the desktop application.
+!vendor/phaselink/lib/client.lib
+
+# Runtime SDK/Qt files are installed separately and contain machine-local state.
+/runtime/
+/logs/
+/**/logs/
+/scan_sessions/
+/scan_cache/
+configs.recovered_*/
+*.log
+*.dmp
+*.idx
+
+# Temporary workspaces, backups and release bundles
+/tmp/
+/tmp_patch/
+/config_backups/
+/target_board_release/
+*.zip
+*.pdf
+*.xlsx
+/protocol_pages_*.txt
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Keil/STM32 generated output; project files and firmware sources remain tracked.
+MWD--MCF302CB/MDK-ARM/MWD--MCF302CB/
+MWD--MCF302CB/DebugConfig/
+*.uvguix.*
+*.uvoptx
+*.axf
+*.crf
+*.d
+*.dep
+*.hex
+*.lnp
+*.lst
+*.map
+*.htm

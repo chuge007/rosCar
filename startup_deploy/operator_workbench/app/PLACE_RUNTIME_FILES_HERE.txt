@@ -1,0 +1,10 @@
+Copy the complete PA1664Workbench runtime here.
+
+Required:
+  PA1664Workbench.exe
+  Qt runtime DLLs
+  OpenCV runtime DLLs
+  vendor DLLs
+  plugins/ and other dependency folders
+
+Do not copy only the EXE. Keep this startup folder at a stable path.

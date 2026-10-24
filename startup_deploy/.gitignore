@@ -1,0 +1,5 @@
+# Deployment payloads and live logs are machine-local.
+*/app/*
+!*/app/PLACE_RUNTIME_FILES_HERE.txt
+*/runtime/*
+!*/runtime/.gitkeep

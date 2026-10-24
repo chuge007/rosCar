@@ -1,0 +1,1199 @@
+#include "parameterpanel.h"
+
+#include "client.h"
+#include "services/ultrasound_parameter_service.h"
+#include "parameterpresetstore.h"
+#include "pulseloadguard.h"
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QFormLayout>
+#include <QGridLayout>
+#include <QGroupBox>
+#include <QHeaderView>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QSignalBlocker>
+#include <QSpinBox>
+#include <QStackedWidget>
+#include <QTabWidget>
+#include <QTimer>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QtMath>
+#include <QVBoxLayout>
+#include <QStringList>
+#include <exception>
+
+ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
+{
+    m_autoApplyTimer = new QTimer(this);
+    m_autoApplyTimer->setSingleShot(true);
+    m_autoApplyTimer->setInterval(600);
+    connect(m_autoApplyTimer, &QTimer::timeout, this, &ParameterPanel::apply);
+
+    auto *root = new QVBoxLayout(this);
+    root->setContentsMargins(4, 4, 4, 4);
+
+    auto *groupRow = new QHBoxLayout;
+    groupRow->addWidget(new QLabel(QStringLiteral("参数预设")));
+    m_group = new QComboBox;
+    groupRow->addWidget(m_group, 1);
+    auto *copy = new QPushButton(QStringLiteral("复制预设"));
+    auto *remove = new QPushButton(QStringLiteral("删除预设"));
+    groupRow->addWidget(copy);
+    groupRow->addWidget(remove);
+    root->addLayout(groupRow);
+
+    connect(m_group, &QComboBox::currentIndexChanged, this, [this](int) {
+        if (m_group->currentData().isValid()) {
+            const int requestedPreset = m_group->currentData().toInt();
+            switchPreset(requestedPreset);
+        }
+    });
+    connect(copy, &QPushButton::clicked, this, [this] {
+        auto &service = pa1664::remote::UltrasoundParameterService::instance();
+        if (remoteMode()) {
+            if (m_switchingPreset) {
+                emit message(QStringLiteral("参数预设正在切换，请稍后再复制"), true);
+                return;
+            }
+            service.copyPreset(m_currentPresetId);
+            return;
+        }
+        QString error;
+        const int newPreset = ParameterPresetStore::copyPreset(m_currentPresetId, &error);
+        refreshGroups();
+        emit message(newPreset >= 0
+                         ? QStringLiteral("已复制为参数预设 %1；硬件工作组未增加").arg(newPreset)
+                         : error,
+                     newPreset < 0);
+    });
+    connect(remove, &QPushButton::clicked, this, [this] {
+        auto &service = pa1664::remote::UltrasoundParameterService::instance();
+        const bool remote = remoteMode();
+        QString error;
+        const auto allPresets = remote ? service.presetList()
+                                       : ParameterPresetStore::presets(&error);
+        if (allPresets.size() <= 1) {
+            emit message(QStringLiteral("至少必须保留一个参数预设"), true);
+            return;
+        }
+        const int removedPreset = m_group->currentData().toInt();
+        if (remote) {
+            if (m_switchingPreset) {
+                emit message(QStringLiteral("参数预设正在切换，请稍后再删除"), true);
+                return;
+            }
+            if (removedPreset == m_currentPresetId) {
+                int targetPreset = -1;
+                for (const ParameterPresetInfo &preset : allPresets) {
+                    if (preset.id != removedPreset) {
+                        targetPreset = preset.id;
+                        break;
+                    }
+                }
+                if (targetPreset < 0) {
+                    emit message(QStringLiteral("未找到可切换的参数预设"), true);
+                    return;
+                }
+                // The host must select and persist a different preset before a
+                // running preset can be removed.
+                m_remoteRemoveAfterSwitch = removedPreset;
+                if (!switchPreset(targetPreset))
+                    m_remoteRemoveAfterSwitch = -1;
+            } else {
+                service.removePreset(removedPreset);
+            }
+            return;
+        }
+        if (removedPreset == m_currentPresetId) {
+            int targetPreset = -1;
+            for (const ParameterPresetInfo &preset : allPresets) {
+                if (preset.id != removedPreset) {
+                    targetPreset = preset.id;
+                    break;
+                }
+            }
+            if (targetPreset < 0 || !switchPreset(targetPreset))
+                return;
+        }
+        int ignoredCurrent = m_currentPresetId;
+        if (!ParameterPresetStore::removePreset(removedPreset, &ignoredCurrent, &error)) {
+            emit message(error, true);
+            return;
+        }
+        refreshGroups();
+        emit message(QStringLiteral("参数预设 %1 已删除；硬件仍只保留工作组 0")
+                         .arg(removedPreset), false);
+    });
+
+    auto *tabs = new QTabWidget;
+    tabs->setDocumentMode(true);
+    root->addWidget(tabs, 1);
+
+    auto *general = new QFormLayout;
+    addDouble(general, QStringLiteral("增益"), 0, 120, 2,
+              [this] { return pa1664::remote::UltrasoundParameterService::instance().getGain(selectedGroupId()); },
+              [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setGain(v, selectedGroupId()); }, QStringLiteral(" dB"));
+    addDouble(general, QStringLiteral("范围起点"), 0, 10000, 2,
+              [this] { return pa1664::remote::UltrasoundParameterService::instance().getRangeStart(selectedGroupId()); },
+              [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setRangeStart(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    addDouble(general, QStringLiteral("范围终点"), 0.01, 10000, 2,
+              [this] { return pa1664::remote::UltrasoundParameterService::instance().getRangeEnd(selectedGroupId()); },
+              [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setRangeEnd(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    addDouble(general, QStringLiteral("工件声速"), 100, 20000, 1,
+              [this] { return pa1664::remote::UltrasoundParameterService::instance().getWorkpieceVelocity(selectedGroupId()); },
+              [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWorkpieceVelocity(v, selectedGroupId()); }, QStringLiteral(" m/s"));
+    addInt(general, QStringLiteral("PA 电压"), 0, 1000,
+           [] { return pa1664::remote::UltrasoundParameterService::instance().getPaVoltage(); },
+           [](int v) { return pa1664::remote::UltrasoundParameterService::instance().setPaVoltage(v); }, QStringLiteral(" V"));
+    addInt(general, QStringLiteral("UT 电压"), 0, 1000,
+           [] { return pa1664::remote::UltrasoundParameterService::instance().getUtVoltage(); },
+           [](int v) { return pa1664::remote::UltrasoundParameterService::instance().setUtVoltage(v); }, QStringLiteral(" V"));
+    addInt(general, QStringLiteral("脉冲宽度"), 0, 10000,
+           [this] { return pa1664::remote::UltrasoundParameterService::instance().getPulseWidth(selectedGroupId()); },
+           [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setPulseWidth(v, selectedGroupId()); }, QStringLiteral(" ns"));
+    addEnum(general, QStringLiteral("电压极性"), {{QStringLiteral("负脉冲"),0},{QStringLiteral("正脉冲"),1},{QStringLiteral("全脉冲"),2}},
+            [this] { return int(pa1664::remote::UltrasoundParameterService::instance().getVoltagePolarity(selectedGroupId())); },
+            [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setVoltagePolarity(PolarityType(v), selectedGroupId()); });
+    addDouble(general, QStringLiteral("高通滤波"), 0, 100, 3,
+              [this] { return pa1664::remote::UltrasoundParameterService::instance().getFilterHigh(selectedGroupId()); },
+              [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setFilterHigh(v, selectedGroupId()); }, QStringLiteral(" MHz"));
+    addDouble(general, QStringLiteral("低通滤波"), 0, 100, 3,
+              [this] { return pa1664::remote::UltrasoundParameterService::instance().getFilterLow(selectedGroupId()); },
+              [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setFilterLow(v, selectedGroupId()); }, QStringLiteral(" MHz"));
+    addEnum(general, QStringLiteral("图像滤波"), {{"1 MHz",1000},{"2 MHz",2000},{"3 MHz",3000},{"4 MHz",4000},{"5 MHz",5000},{"6 MHz",6000},{"7 MHz",7000},{QStringLiteral("无"),8000}},
+            [this] { return int(pa1664::remote::UltrasoundParameterService::instance().getVideoFilterMHz(selectedGroupId())); },
+            [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setVideoFilterMHz(VideoFilter(v), selectedGroupId()); });
+    addEnum(general, QStringLiteral("检波模式"), {{QStringLiteral("射频"),0},{QStringLiteral("全波"),1},{QStringLiteral("正半波"),2},{QStringLiteral("负半波"),3}},
+            [this] { return int(pa1664::remote::UltrasoundParameterService::instance().getRectifierMode(selectedGroupId())); },
+            [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setRectifierMode(RectifierType(v), selectedGroupId()); });
+    addInt(general, QStringLiteral("采样点数"), 8, 65536,
+           [this] { return pa1664::remote::UltrasoundParameterService::instance().getPointQuantity(selectedGroupId()); },
+           [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setPointQuantity(v, selectedGroupId()); });
+    addDouble(general, QStringLiteral("零点延迟"), -100000, 100000, 2,
+              [this] { return pa1664::remote::UltrasoundParameterService::instance().getTfmRecDelay(selectedGroupId()); },
+              [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setTfmRecDelay(v, selectedGroupId()); }, QStringLiteral(" ns"));
+    addEnum(general, QStringLiteral("最大幅值"), {{"1600%",2048},{"800%",4096},{"400%",8192},{"200%",16384}},
+            [this] { return int(pa1664::remote::UltrasoundParameterService::instance().getMaxAmplitude(selectedGroupId())); },
+            [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setMaxAmplitude(MaxAmplitude(v), selectedGroupId()); });
+    addInt(general, QStringLiteral("接收抑制"), 0, 100,
+           [this] { return pa1664::remote::UltrasoundParameterService::instance().getReceiverReject(selectedGroupId()); },
+           [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setReceiverReject(v, selectedGroupId()); }, QStringLiteral(" %"));
+    addInt(general, QStringLiteral("采集帧率 PRF"), 1, 100000,
+           [] { return pa1664::remote::UltrasoundParameterService::instance().getFrameRate(); },
+           [](int v) { return pa1664::remote::UltrasoundParameterService::instance().setFrameRate(v); }, QStringLiteral(" Hz"));
+    addInt(general, QStringLiteral("全局扫查模式"), 0, 100,
+           [] { return pa1664::remote::UltrasoundParameterService::instance().getScanMode(); },
+           [](int v) { return pa1664::remote::UltrasoundParameterService::instance().setScanMode(v); });
+    tabs->addTab(pageFor(general), QStringLiteral("基本"));
+
+    auto *beam = new QFormLayout;
+    addEnum(beam, QStringLiteral("扫查类型"), {{QStringLiteral("线性扫"),1},{QStringLiteral("扇形扫"),2},{QStringLiteral("超声显微"),3},{QStringLiteral("常规 UT"),4}},
+            [this] { return int(pa1664::remote::UltrasoundParameterService::instance().getScanType(selectedGroupId())); },
+            [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setScanType(scanType(v), selectedGroupId()); });
+    addEnum(beam, QStringLiteral("波束模式"), {{QStringLiteral("单波束"),0},{QStringLiteral("双波束"),1},{QStringLiteral("四波束"),2}},
+            [this] { return int(pa1664::remote::UltrasoundParameterService::instance().getBeamMode(selectedGroupId())); },
+            [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setBeamMode(BeamMode(v), selectedGroupId()); });
+    addInt(beam, QStringLiteral("孔径"), 1, 128, [this] { return pa1664::remote::UltrasoundParameterService::instance().getBeamAperture(selectedGroupId()); }, [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setBeamAperture(v, selectedGroupId()); });
+    addInt(beam, QStringLiteral("阵元步进"), 1, 128, [this] { return pa1664::remote::UltrasoundParameterService::instance().getBeamElementStep(selectedGroupId()); }, [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setBeamElementStep(v, selectedGroupId()); });
+    addDouble(beam, QStringLiteral("角度步进"), 0.01, 180, 2, [this] { return pa1664::remote::UltrasoundParameterService::instance().getBeamAngleStep(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setBeamAngleStep(v, selectedGroupId()); }, QStringLiteral("°"));
+    addInt(beam, QStringLiteral("首阵元"), 1, 1024, [this] { return pa1664::remote::UltrasoundParameterService::instance().getBeamFirstElement(selectedGroupId()); }, [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setBeamFirstElement(v, selectedGroupId()); });
+    addInt(beam, QStringLiteral("末阵元"), 1, 1024, [this] { return pa1664::remote::UltrasoundParameterService::instance().getBeamLastElement(selectedGroupId()); }, [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setBeamLastElement(v, selectedGroupId()); });
+    addDouble(beam, QStringLiteral("最小角"), -90, 90, 2, [this] { return pa1664::remote::UltrasoundParameterService::instance().getBeamAngleMin(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setBeamAngleMin(v, selectedGroupId()); }, QStringLiteral("°"));
+    addDouble(beam, QStringLiteral("最大角"), -90, 90, 2, [this] { return pa1664::remote::UltrasoundParameterService::instance().getBeamAngleMax(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setBeamAngleMax(v, selectedGroupId()); }, QStringLiteral("°"));
+    addDouble(beam, QStringLiteral("线性角"), -90, 90, 2, [this] { return pa1664::remote::UltrasoundParameterService::instance().getBeamAngleLinear(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setBeamAngleLinear(v, selectedGroupId()); }, QStringLiteral("°"));
+    addEnum(beam, QStringLiteral("聚焦模式"), {{QStringLiteral("真深度"),0},{QStringLiteral("等声程"),1},{QStringLiteral("水平投影"),2},{QStringLiteral("不聚焦"),3}},
+            [this] { return int(pa1664::remote::UltrasoundParameterService::instance().getFocusMode(selectedGroupId())); }, [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setFocusMode(FocalType(v), selectedGroupId()); });
+    addDouble(beam, QStringLiteral("聚焦位置"), 0, 10000, 2, [this] { return pa1664::remote::UltrasoundParameterService::instance().getFocalPosition(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setFocalPosition(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    tabs->addTab(pageFor(beam), QStringLiteral("相控阵"));
+
+    auto *probe = new QFormLayout;
+    // PA-1664 当前 USB SDK 的公开 TX/RX 接口使用 1..8。配置 JSON 中可能
+    // 出现 0，那是未初始化/内部序列化值，不能作为公开 API 的通道编号。
+    // 真机回读已确认：向接口写 0 会被 SDK 修正为 1。
+    const QList<QPair<QString, int>> utChannels = {
+        {QStringLiteral("通道 1"), 1}, {QStringLiteral("通道 2"), 2},
+        {QStringLiteral("通道 3"), 3}, {QStringLiteral("通道 4"), 4},
+        {QStringLiteral("通道 5"), 5}, {QStringLiteral("通道 6"), 6},
+        {QStringLiteral("通道 7"), 7}, {QStringLiteral("通道 8"), 8}
+    };
+    auto *channelHint = new QLabel(QStringLiteral(
+        "当前工作组的一激一收通道。界面通道与 SDK 公开接口均为 1–8；"
+        "激励与接收可选同一路，也可选不同路。"));
+    channelHint->setWordWrap(true);
+    channelHint->setStyleSheet(QStringLiteral("color:#52606d;padding:4px 0 8px 0"));
+    probe->addRow(channelHint);
+    addEnum(probe, QStringLiteral("激励通道（TX）"), utChannels,
+            [this] { return pa1664::remote::UltrasoundParameterService::instance().getTransmissionChannel(selectedGroupId()); },
+            [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setTransmissionChannel(v, selectedGroupId()); });
+    addEnum(probe, QStringLiteral("接收通道（RX）"), utChannels,
+            [this] { return pa1664::remote::UltrasoundParameterService::instance().getReceptionChannel(selectedGroupId()); },
+            [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setReceptionChannel(v, selectedGroupId()); });
+    addDouble(probe, QStringLiteral("探头频率"), 0.01, 100, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getProbeFrequency(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setProbeFrequency(v, selectedGroupId()); }, QStringLiteral(" MHz"));
+    addBool(probe, QStringLiteral("双晶探头"), [this] { return pa1664::remote::UltrasoundParameterService::instance().getDualCrystalEnable(selectedGroupId()); }, [this](bool v) { return pa1664::remote::UltrasoundParameterService::instance().setDualCrystalEnable(v, selectedGroupId()); });
+    addBool(probe, QStringLiteral("反向安装"), [this] { return pa1664::remote::UltrasoundParameterService::instance().getReverseEnable(selectedGroupId()); }, [this](bool v) { return pa1664::remote::UltrasoundParameterService::instance().setReverseEnable(v, selectedGroupId()); });
+    addInt(probe, QStringLiteral("主轴阵元数"), 1, 1024, [this] { return pa1664::remote::UltrasoundParameterService::instance().getProbePrimaryElements(selectedGroupId()); }, [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setProbePrimaryElements(v, selectedGroupId()); });
+    addDouble(probe, QStringLiteral("主轴间距"), 0.001, 100, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getProbePrimaryElementsPitch(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setProbePrimaryElementsPitch(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    addInt(probe, QStringLiteral("次轴阵元数"), 1, 1024, [this] { return pa1664::remote::UltrasoundParameterService::instance().getProbeSecondaryElements(selectedGroupId()); }, [this](int v) { return pa1664::remote::UltrasoundParameterService::instance().setProbeSecondaryElements(v, selectedGroupId()); });
+    addDouble(probe, QStringLiteral("次轴间距"), 0.001, 100, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getProbeSecondaryElementsPitch(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setProbeSecondaryElementsPitch(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    addDouble(probe, QStringLiteral("工件厚度"), 0, 100000, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getThickness(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setThickness(v, selectedGroupId()); }, QStringLiteral(" mm"));
+
+    // TOFD 探头中心距（PCS）计算：交汇深度比例是纯界面参数，不写入 SDK。
+    m_tofdDepthFraction = new QDoubleSpinBox;
+    m_tofdDepthFraction->setRange(0.1, 1.0);
+    m_tofdDepthFraction->setDecimals(3);
+    m_tofdDepthFraction->setSingleStep(0.05);
+    m_tofdDepthFraction->setValue(2.0 / 3.0);
+    m_tofdDepthFraction->setKeyboardTracking(false);
+    m_tofdDepthFraction->setToolTip(QStringLiteral("交汇深度 = 比例 × 工件厚度（TOFD 常用 2/3 板厚）"));
+    probe->addRow(QStringLiteral("交汇深度比例"), m_tofdDepthFraction);
+    connect(m_tofdDepthFraction, &QDoubleSpinBox::valueChanged,
+            this, &ParameterPanel::recomputeTofdPcs);
+
+    auto *tofdGroup = new QGroupBox(QStringLiteral("TOFD 探头中心距（PCS）"));
+    auto *tofdForm = new QFormLayout(tofdGroup);
+    tofdForm->setContentsMargins(8, 6, 8, 6);
+    m_tofdAngleLabel = new QLabel(QStringLiteral("--"));
+    m_tofdDepthLabel = new QLabel(QStringLiteral("--"));
+    m_tofdPcsLabel = new QLabel(QStringLiteral("--"));
+    m_tofdPcsLabel->setStyleSheet(QStringLiteral("font-weight:700;color:#174a75;"));
+    tofdForm->addRow(QStringLiteral("钢内折射角 θ"), m_tofdAngleLabel);
+    tofdForm->addRow(QStringLiteral("交汇深度 d"), m_tofdDepthLabel);
+    tofdForm->addRow(QStringLiteral("PCS"), m_tofdPcsLabel);
+    auto *tofdHint = new QLabel(QStringLiteral("PCS = 2 × d × tanθ；θ 由楔块角度经斯涅尔定律换算"));
+    tofdHint->setWordWrap(true);
+    tofdHint->setStyleSheet(QStringLiteral("color:#52606d;"));
+    tofdForm->addRow(tofdHint);
+    probe->addRow(tofdGroup);
+
+    tabs->addTab(pageFor(probe), QStringLiteral("探头"));
+
+    auto *wedge = new QFormLayout;
+    addBool(wedge, QStringLiteral("启用楔块"), [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeEnable(selectedGroupId()); }, [this](bool v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeEnable(v, selectedGroupId()); });
+    addDouble(wedge, QStringLiteral("楔块角度"), -90, 90, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeAngle(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeAngle(v, selectedGroupId()); }, QStringLiteral("°"));
+    addDouble(wedge, QStringLiteral("楔块声速"), 100, 20000, 1, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeVelocity(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeVelocity(v, selectedGroupId()); }, QStringLiteral(" m/s"));
+    addDouble(wedge, "X", -10000, 10000, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeX(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeX(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    addDouble(wedge, "Z", -10000, 10000, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeZ(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeZ(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    addDouble(wedge, QStringLiteral("屋顶角"), -90, 90, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeRoofAngle(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeRoofAngle(v, selectedGroupId()); }, QStringLiteral("°"));
+    addDouble(wedge, "GCP", -10000, 10000, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeGCp(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeGCp(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    addDouble(wedge, QStringLiteral("长度"), 0, 10000, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeLength(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeLength(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    addDouble(wedge, QStringLiteral("宽度"), 0, 10000, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeWidth(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeWidth(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    addDouble(wedge, QStringLiteral("高度"), 0, 10000, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeHeight(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeHeight(v, selectedGroupId()); }, QStringLiteral(" mm"));
+    tabs->addTab(pageFor(wedge), QStringLiteral("楔块"));
+
+    addGateTab(tabs);
+    addTcgTab(tabs);
+
+    auto *other = new QFormLayout;
+    addEnum(other, QStringLiteral("编码器方向"), {{QStringLiteral("正向"),0},{QStringLiteral("反向"),1}},
+            [] { return int(pa1664::remote::UltrasoundParameterService::instance().getScannerDirection()); }, [](int v) { return pa1664::remote::UltrasoundParameterService::instance().setScannerDirection(ScannerDir(v)); });
+    m_wheelDiameter = new QDoubleSpinBox;
+    m_wheelDiameter->setRange(1.0, 100000.0);
+    m_wheelDiameter->setDecimals(2);
+    m_wheelDiameter->setValue(500.0);
+    m_wheelDiameter->setSuffix(QStringLiteral(" mm"));
+    m_wheelDiameter->setKeyboardTracking(false);
+    other->addRow(QStringLiteral("编码器轮子直径"), m_wheelDiameter);
+    connect(m_wheelDiameter, &QDoubleSpinBox::valueChanged,
+            this, &ParameterPanel::encoderCalibrationChanged);
+    m_encoderResolution = new QSpinBox;
+    m_encoderResolution->setRange(1, 1000000);
+    m_encoderResolution->setValue(4096);
+    m_encoderResolution->setSuffix(QStringLiteral(" 脉冲/圈"));
+    m_encoderResolution->setKeyboardTracking(false);
+    other->addRow(QStringLiteral("编码器分辨率"), m_encoderResolution);
+    connect(m_encoderResolution, &QSpinBox::valueChanged,
+            this, &ParameterPanel::encoderCalibrationChanged);
+    auto &parameterService =
+        pa1664::remote::UltrasoundParameterService::instance();
+    if (remoteMode()) {
+        connect(&parameterService, &pa1664::remote::UltrasoundParameterService::presetsChanged,
+                this, &ParameterPanel::refreshGroups);
+        connect(&parameterService, &pa1664::remote::UltrasoundParameterService::remoteApplyFinished,
+                this, [this](bool ok, const QString &text) {
+                    m_applying = false;
+                    reload();
+                    QString finalText = text;
+                    if (m_remoteApplyLocalFailures > 0) {
+                        if (!finalText.isEmpty()) finalText += QStringLiteral("；");
+                        finalText += QStringLiteral("%1 项参数未发送：%2")
+                                         .arg(m_remoteApplyLocalFailures)
+                                         .arg(m_remoteApplyLocalErrors.join(
+                                             QStringLiteral("；")));
+                    }
+                    const bool finalOk =
+                        ok && m_remoteApplyLocalFailures == 0;
+                    m_remoteApplyLocalFailures = 0;
+                    m_remoteApplyLocalErrors.clear();
+                    emit applyFinished(finalOk, finalText);
+                    emit message(finalText.isEmpty()
+                                     ? (finalOk ? QStringLiteral("参数修改已由主机确认")
+                                                : QStringLiteral("参数修改失败"))
+                                     : finalText,
+                                 !finalOk);
+                });
+        connect(&parameterService,
+                &pa1664::remote::UltrasoundParameterService::remotePresetOperationFinished,
+                this, &ParameterPanel::finishRemotePresetOperation);
+        connect(&parameterService,
+                &pa1664::remote::UltrasoundParameterService::scanPrecisionChanged,
+                this, &ParameterPanel::scanPrecisionChanged);
+        connect(&parameterService,
+                &pa1664::remote::UltrasoundParameterService::encoderCalibrationReady,
+                this, [this](double wheelDiameterMm, int resolution) {
+                    const QSignalBlocker diameterBlocker(m_wheelDiameter);
+                    const QSignalBlocker resolutionBlocker(m_encoderResolution);
+                    m_updatingEncoderSnapshot = true;
+                    m_wheelDiameter->setValue(wheelDiameterMm);
+                    m_encoderResolution->setValue(resolution);
+                    m_updatingEncoderSnapshot = false;
+                });
+        QTimer::singleShot(0, this, [service = &parameterService] {
+            service->refreshPresets();
+            service->requestEncoderCalibration();
+        });
+    } else {
+        double savedDiameter = 500.0;
+        int savedResolution = 4096;
+        ParameterPresetStore::loadEncoderCalibration(&savedDiameter, &savedResolution);
+        m_wheelDiameter->setValue(savedDiameter);
+        m_encoderResolution->setValue(savedResolution);
+    }
+    tabs->addTab(pageFor(other), QStringLiteral("编码器"));
+
+    QTimer::singleShot(0, this, &ParameterPanel::refreshGroups);
+}
+
+QWidget *ParameterPanel::pageFor(QFormLayout *form)
+{
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    auto *body = new QWidget;
+    body->setLayout(form);
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidget(body);
+    return scroll;
+}
+
+void ParameterPanel::addDouble(QFormLayout *form, const QString &name, double min, double max,
+                               int decimals, const std::function<double()> &getter,
+                               const std::function<bool(double)> &setter, const QString &suffix)
+{
+    auto *w = new QDoubleSpinBox;
+    w->setProperty("parameterName", name);
+    w->setRange(min, max); w->setDecimals(decimals); w->setSuffix(suffix); w->setKeyboardTracking(false);
+    form->addRow(name, w);
+    m_fields.push_back({name, w, [getter] { return getter(); }, [setter](const QVariant &v) { return setter(v.toDouble()); }, {}});
+    connect(w, &QDoubleSpinBox::valueChanged, this, &ParameterPanel::scheduleAutoApply);
+}
+
+void ParameterPanel::addInt(QFormLayout *form, const QString &name, int min, int max,
+                            const std::function<int()> &getter,
+                            const std::function<bool(int)> &setter, const QString &suffix)
+{
+    auto *w = new QSpinBox;
+    w->setProperty("parameterName", name);
+    w->setRange(min, max); w->setSuffix(suffix); w->setKeyboardTracking(false);
+    form->addRow(name, w);
+    m_fields.push_back({name, w, [getter] { return getter(); }, [setter](const QVariant &v) { return setter(v.toInt()); }, {}});
+    connect(w, &QSpinBox::valueChanged, this, &ParameterPanel::scheduleAutoApply);
+}
+
+void ParameterPanel::addBool(QFormLayout *form, const QString &name,
+                             const std::function<bool()> &getter,
+                             const std::function<bool(bool)> &setter)
+{
+    auto *w = new QCheckBox(QStringLiteral("启用"));
+    w->setProperty("parameterName", name);
+    form->addRow(name, w);
+    m_fields.push_back({name, w, [getter] { return getter(); }, [setter](const QVariant &v) { return setter(v.toBool()); }, {}});
+    connect(w, &QCheckBox::toggled, this, &ParameterPanel::scheduleAutoApply);
+}
+
+void ParameterPanel::addEnum(QFormLayout *form, const QString &name,
+                             const QList<QPair<QString, int>> &items,
+                             const std::function<int()> &getter,
+                             const std::function<bool(int)> &setter)
+{
+    auto *w = new QComboBox;
+    w->setProperty("parameterName", name);
+    for (const auto &item : items) w->addItem(item.first, item.second);
+    form->addRow(name, w);
+    m_fields.push_back({name, w, [getter] { return getter(); }, [setter](const QVariant &v) { return setter(v.toInt()); }, {}});
+    connect(w, &QComboBox::currentIndexChanged, this, &ParameterPanel::scheduleAutoApply);
+}
+
+void ParameterPanel::scheduleAutoApply()
+{
+    if (!m_applying)
+        m_autoApplyTimer->start();
+}
+
+void ParameterPanel::addGateTab(QTabWidget *tabs)
+{
+    auto *page = new QWidget;
+    auto *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(8);
+
+    auto *body = new QHBoxLayout;
+    body->setSpacing(8);
+    m_gateTree = new QTreeWidget;
+    m_gateTree->setHeaderHidden(true);
+    m_gateTree->setRootIsDecorated(true);
+    m_gateTree->setMinimumWidth(150);
+    m_gateTree->setMaximumWidth(220);
+    body->addWidget(m_gateTree, 1);
+    m_gateEditorStack = new QStackedWidget;
+    body->addWidget(m_gateEditorStack, 2);
+    layout->addLayout(body, 1);
+
+    struct GateApi {
+        QString name;
+        std::function<bool()> enabled; std::function<bool(bool)> setEnabled;
+        std::function<int()> sync; std::function<bool(int)> setSync;
+        std::function<double()> start; std::function<bool(double)> setStart;
+        std::function<double()> end; std::function<bool(double)> setEnd;
+        std::function<double()> threshold; std::function<bool(double)> setThreshold;
+        std::function<int()> measure; std::function<bool(int)> setMeasure;
+    };
+    const QVector<GateApi> gates = {
+        {"A", [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateAEnable(selectedGroupId());}, [this](bool v){return pa1664::remote::UltrasoundParameterService::instance().setGateAEnable(v, selectedGroupId());}, [this]{return int(pa1664::remote::UltrasoundParameterService::instance().getGateASynchronMode(selectedGroupId()));}, [this](int v){return pa1664::remote::UltrasoundParameterService::instance().setGateASynchronMode(GateSynchron(v), selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateAStart(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateAStart(v, selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateAEnd(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateAEnd(v, selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateAThreshold(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateAThreshold(v, selectedGroupId());}, [this]{return int(pa1664::remote::UltrasoundParameterService::instance().getGateAMeasureType(selectedGroupId()));}, [this](int v){return pa1664::remote::UltrasoundParameterService::instance().setGateAMeasureType(measureType(v), selectedGroupId());}},
+        {"B", [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateBEnable(selectedGroupId());}, [this](bool v){return pa1664::remote::UltrasoundParameterService::instance().setGateBEnable(v, selectedGroupId());}, [this]{return int(pa1664::remote::UltrasoundParameterService::instance().getGateBSynchronMode(selectedGroupId()));}, [this](int v){return pa1664::remote::UltrasoundParameterService::instance().setGateBSynchronMode(GateSynchron(v), selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateBStart(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateBStart(v, selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateBEnd(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateBEnd(v, selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateBThreshold(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateBThreshold(v, selectedGroupId());}, [this]{return int(pa1664::remote::UltrasoundParameterService::instance().getGateBMeasureType(selectedGroupId()));}, [this](int v){return pa1664::remote::UltrasoundParameterService::instance().setGateBMeasureType(measureType(v), selectedGroupId());}},
+        {"C", [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateCEnable(selectedGroupId());}, [this](bool v){return pa1664::remote::UltrasoundParameterService::instance().setGateCEnable(v, selectedGroupId());}, [this]{return int(pa1664::remote::UltrasoundParameterService::instance().getGateCSynchronMode(selectedGroupId()));}, [this](int v){return pa1664::remote::UltrasoundParameterService::instance().setGateCSynchronMode(GateSynchron(v), selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateCStart(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateCStart(v, selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateCEnd(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateCEnd(v, selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateCThreshold(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateCThreshold(v, selectedGroupId());}, [this]{return int(pa1664::remote::UltrasoundParameterService::instance().getGateCMeasureType(selectedGroupId()));}, [this](int v){return pa1664::remote::UltrasoundParameterService::instance().setGateCMeasureType(measureType(v), selectedGroupId());}},
+        {"I", [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateIEnable(selectedGroupId());}, [this](bool v){return pa1664::remote::UltrasoundParameterService::instance().setGateIEnable(v, selectedGroupId());}, [this]{return int(pa1664::remote::UltrasoundParameterService::instance().getGateISynchronMode(selectedGroupId()));}, [this](int v){return pa1664::remote::UltrasoundParameterService::instance().setGateISynchronMode(GateSynchron(v), selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateIStart(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateIStart(v, selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateIEnd(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateIEnd(v, selectedGroupId());}, [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateIThreshold(selectedGroupId());}, [this](double v){return pa1664::remote::UltrasoundParameterService::instance().setGateIThreshold(v, selectedGroupId());}, [this]{return int(pa1664::remote::UltrasoundParameterService::instance().getGateIMeasureType(selectedGroupId()));}, [this](int v){return pa1664::remote::UltrasoundParameterService::instance().setGateIMeasureType(measureType(v), selectedGroupId());}}
+    };
+    for (const auto &g : gates) {
+        auto *form = new QFormLayout;
+        const int base = m_fields.size();
+        addBool(form, QStringLiteral("使能"), g.enabled, g.setEnabled);
+        addEnum(form, QStringLiteral("同步"), {{QStringLiteral("激励"),0},{"Gate I",1},{"Gate A",2},{"Gate B",3}}, g.sync, g.setSync);
+        addDouble(form, QStringLiteral("起点"), 0, 10000, 3, g.start, g.setStart, QStringLiteral(" mm"));
+        addDouble(form, QStringLiteral("终点"), 0, 10000, 3, g.end, g.setEnd, QStringLiteral(" mm"));
+        addDouble(form, QStringLiteral("阈值"), 0, 100, 2, g.threshold, g.setThreshold, QStringLiteral(" %"));
+        addEnum(form, QStringLiteral("测量方式"), {{QStringLiteral("最大峰值"),0},{QStringLiteral("波前"),1}}, g.measure, g.setMeasure);
+        if (g.name == "I")
+            addBool(form, QStringLiteral("同步采集"), [this]{return pa1664::remote::UltrasoundParameterService::instance().getGateISyncSample(selectedGroupId());}, [this](bool v){return pa1664::remote::UltrasoundParameterService::instance().setGateISyncSample(v, selectedGroupId());});
+        auto *plotButton = new QPushButton(QStringLiteral("在 A 扫图上设置闸门"));
+        form->addRow(plotButton);
+
+        GateWidgets widgets;
+        widgets.name = g.name;
+        widgets.enabled = qobject_cast<QCheckBox *>(m_fields[base].editor);
+        widgets.sync = qobject_cast<QComboBox *>(m_fields[base + 1].editor);
+        widgets.start = qobject_cast<QDoubleSpinBox *>(m_fields[base + 2].editor);
+        widgets.end = qobject_cast<QDoubleSpinBox *>(m_fields[base + 3].editor);
+        widgets.threshold = qobject_cast<QDoubleSpinBox *>(m_fields[base + 4].editor);
+        widgets.measure = qobject_cast<QComboBox *>(m_fields[base + 5].editor);
+        widgets.page = pageFor(form);
+        m_gateWidgets.push_back(widgets);
+        m_gateEditorStack->addWidget(widgets.page);
+        const int gateIndex = m_gateWidgets.size() - 1;
+        connect(plotButton, &QPushButton::clicked, this, [this, gateIndex] {
+            emit gatePlacementRequested(gateIndex);
+        });
+
+        connect(widgets.enabled, &QCheckBox::toggled, this, [this] {
+            if (!m_syncingGateUi) {
+                refreshGateTree();
+                emit gateVisualizationChanged();
+            }
+        });
+        connect(widgets.start, &QDoubleSpinBox::valueChanged, this, [this](double) {
+            if (!m_syncingGateUi) emit gateVisualizationChanged();
+        });
+        connect(widgets.end, &QDoubleSpinBox::valueChanged, this, [this](double) {
+            if (!m_syncingGateUi) emit gateVisualizationChanged();
+        });
+        connect(widgets.threshold, &QDoubleSpinBox::valueChanged, this, [this](double) {
+            if (!m_syncingGateUi) emit gateVisualizationChanged();
+        });
+    }
+
+    auto *surfacePage = new QWidget;
+    auto *surfaceLayout = new QVBoxLayout(surfacePage);
+    surfaceLayout->setContentsMargins(8, 8, 8, 8);
+    auto *surfaceForm = new QFormLayout;
+    m_surfaceEnabled = new QCheckBox(QStringLiteral("启用表面跟踪"));
+    m_surfaceStart = new QDoubleSpinBox;
+    m_surfaceStart->setRange(0.0, 10000.0);
+    m_surfaceStart->setDecimals(3);
+    m_surfaceStart->setSuffix(QStringLiteral(" mm"));
+    m_surfaceLength = new QDoubleSpinBox;
+    m_surfaceLength->setRange(0.001, 10000.0);
+    m_surfaceLength->setDecimals(3);
+    m_surfaceLength->setSuffix(QStringLiteral(" mm"));
+    m_surfaceLength->setValue(5.0);
+    m_surfaceThreshold = new QDoubleSpinBox;
+    m_surfaceThreshold->setRange(0.1, 100.0);
+    m_surfaceThreshold->setDecimals(2);
+    m_surfaceThreshold->setSuffix(QStringLiteral(" %"));
+    m_surfaceThreshold->setValue(20.0);
+    m_surfaceHold = new QCheckBox(QStringLiteral("漏检时保持上一有效表面"));
+    m_surfaceHold->setChecked(true);
+    surfaceForm->addRow(m_surfaceEnabled);
+    surfaceForm->addRow(QStringLiteral("搜索起点"), m_surfaceStart);
+    surfaceForm->addRow(QStringLiteral("搜索长度"), m_surfaceLength);
+    surfaceForm->addRow(QStringLiteral("触发阈值"), m_surfaceThreshold);
+    surfaceForm->addRow(m_surfaceHold);
+    surfaceLayout->addLayout(surfaceForm);
+
+    auto *followBox = new QGroupBox(QStringLiteral("随表面移动的闸门"));
+    auto *followLayout = new QGridLayout(followBox);
+    const QString gateNames = QStringLiteral("ABCI");
+    for (int i = 0; i < 4; ++i) {
+        auto *check = new QCheckBox(QStringLiteral("Gate %1").arg(gateNames.mid(i, 1)));
+        m_surfaceGateChecks.push_back(check);
+        followLayout->addWidget(check, i / 2, i % 2);
+    }
+    surfaceLayout->addWidget(followBox);
+    m_surfaceStatus = new QLabel(QStringLiteral("请先在 A 扫图上设置搜索窗口"));
+    m_surfaceStatus->setWordWrap(true);
+    m_surfaceStatus->setStyleSheet(QStringLiteral("color:#52606d;padding:6px;background:#f4f8fc;border-radius:4px"));
+    surfaceLayout->addWidget(m_surfaceStatus);
+    auto *surfacePickButton = new QPushButton(QStringLiteral("在 A 扫图上划定区域"));
+    surfaceLayout->addWidget(surfacePickButton);
+    surfaceLayout->addStretch(1);
+    m_gateEditorStack->addWidget(surfacePage);
+
+    connect(m_gateTree, &QTreeWidget::currentItemChanged, this,
+            [this](QTreeWidgetItem *current) {
+        if (!current) return;
+        const int index = current->data(0, Qt::UserRole).toInt();
+        m_gateEditorStack->setCurrentIndex(index);
+        emit gateVisualizationChanged();
+    });
+    connect(m_gateTree, &QTreeWidget::itemChanged, this,
+            [this](QTreeWidgetItem *item, int column) {
+        if (!item || column != 0 || m_syncingGateUi)
+            return;
+        const int index = item->data(0, Qt::UserRole).toInt();
+        const bool checked = item->checkState(0) == Qt::Checked;
+        m_syncingGateUi = true;
+        if (index >= 0 && index < m_gateWidgets.size()) {
+            m_gateWidgets[index].enabled->setChecked(checked);
+            emit gateVisualizationChanged();
+        } else if (index == m_gateWidgets.size()) {
+            m_surfaceEnabled->setChecked(checked);
+            emit surfaceTrackingChanged();
+        }
+        m_syncingGateUi = false;
+        QTimer::singleShot(0, this, &ParameterPanel::refreshGateTree);
+    });
+    connect(surfacePickButton, &QPushButton::clicked, this, &ParameterPanel::surfaceWindowPlacementRequested);
+
+    const auto surfaceChanged = [this] {
+        if (m_syncingGateUi)
+            return;
+        refreshGateTree();
+        emit surfaceTrackingChanged();
+    };
+    connect(m_surfaceEnabled, &QCheckBox::toggled, this, surfaceChanged);
+    connect(m_surfaceStart, &QDoubleSpinBox::valueChanged, this, [surfaceChanged](double) { surfaceChanged(); });
+    connect(m_surfaceLength, &QDoubleSpinBox::valueChanged, this, [surfaceChanged](double) { surfaceChanged(); });
+    connect(m_surfaceThreshold, &QDoubleSpinBox::valueChanged, this, [surfaceChanged](double) { surfaceChanged(); });
+    connect(m_surfaceHold, &QCheckBox::toggled, this, surfaceChanged);
+    for (QCheckBox *check : m_surfaceGateChecks)
+        connect(check, &QCheckBox::toggled, this, surfaceChanged);
+
+    refreshGateTree();
+    selectGate(0);
+    tabs->addTab(page, QStringLiteral("闸门"));
+}
+
+void ParameterPanel::addTcgTab(QTabWidget *tabs)
+{
+    auto *form = new QFormLayout;
+    addBool(form, QStringLiteral("启用 TCG"), [this]{return pa1664::remote::UltrasoundParameterService::instance().getTcgEnable(selectedGroupId());}, [this](bool v){return pa1664::remote::UltrasoundParameterService::instance().setTcgEnable(v, selectedGroupId());});
+    auto *scope = new QComboBox;
+    scope->addItem(QStringLiteral("整组（所有声束）"), 0);
+    scope->addItem(QStringLiteral("指定声束"), 1);
+    form->addRow(QStringLiteral("编辑范围"), scope);
+    auto *beam = new QSpinBox;
+    beam->setRange(0, 4095);
+    form->addRow(QStringLiteral("声束索引（从 0 开始）"), beam);
+    connect(scope, &QComboBox::currentIndexChanged, beam, [scope, beam] { beam->setEnabled(scope->currentData().toInt() == 1); });
+    connect(scope, &QComboBox::currentIndexChanged, this, &ParameterPanel::reload);
+    connect(beam, &QSpinBox::editingFinished, this, &ParameterPanel::reload);
+    beam->setEnabled(false);
+    for (int i = 1; i <= 10; ++i) {
+        addDouble(form, QStringLiteral("点 %1 深度").arg(i), 0, 100000, 3,
+                  [this, i, scope, beam]{ return scope->currentData().toInt() == 0
+                      ? pa1664::remote::UltrasoundParameterService::instance().getTcgPointDepthIndex(i, selectedGroupId())
+                      : pa1664::remote::UltrasoundParameterService::instance().getTcgPointDepth(i, beam->value(), selectedGroupId()); },
+                  [this, i, scope, beam](double v){ return scope->currentData().toInt() == 0
+                      ? pa1664::remote::UltrasoundParameterService::instance().setTcgPointDepthIndex(i, v, selectedGroupId())
+                      : pa1664::remote::UltrasoundParameterService::instance().setTcgPointDepth(i, v, beam->value(), selectedGroupId()); }, QStringLiteral(" mm"));
+        addDouble(form, QStringLiteral("点 %1 增益").arg(i), -120, 120, 2,
+                  [this, i, scope, beam]{ return scope->currentData().toInt() == 0
+                      ? pa1664::remote::UltrasoundParameterService::instance().getTcgPointGainIndex(i, selectedGroupId())
+                      : pa1664::remote::UltrasoundParameterService::instance().getTcgPointGain(i, beam->value(), selectedGroupId()); },
+                  [this, i, scope, beam](double v){ return scope->currentData().toInt() == 0
+                      ? pa1664::remote::UltrasoundParameterService::instance().setTcgPointGainIndex(i, v, selectedGroupId())
+                      : pa1664::remote::UltrasoundParameterService::instance().setTcgPointGain(i, v, beam->value(), selectedGroupId()); }, QStringLiteral(" dB"));
+    }
+    tabs->addTab(pageFor(form), "TCG");
+}
+
+int ParameterPanel::selectedGroupId() const
+{
+    return ParameterPresetStore::HardwareGroupId;
+}
+
+double ParameterPanel::wheelDiameter() const
+{
+    return m_wheelDiameter ? m_wheelDiameter->value() : 500.0;
+}
+
+int ParameterPanel::encoderResolution() const
+{
+    return m_encoderResolution ? m_encoderResolution->value() : 4096;
+}
+
+bool ParameterPanel::remoteMode() const
+{
+    return pa1664::remote::UltrasoundParameterService::instance().isRemote();
+}
+
+bool ParameterPanel::persistConfiguration(QString *errorMessage) const
+{
+    if (remoteMode()) {
+        // The host captures its own hardware state as part of commit.  An
+        // operator-side write here would create a second, divergent preset DB.
+        if (errorMessage) errorMessage->clear();
+        return true;
+    }
+    return ParameterPresetStore::captureCurrentHardware(m_currentPresetId,
+                                                         errorMessage);
+}
+
+void ParameterPanel::refreshGroups()
+{
+    // stop()/resume() emit statusChanged synchronously while a preset is being
+    // switched.  Rebuilding the combo in that window used to restore the old
+    // preset (normally preset 0) before the target had finished loading.
+    if (m_switchingPreset)
+        return;
+
+    auto &service = pa1664::remote::UltrasoundParameterService::instance();
+    const bool remote = remoteMode();
+    const QSignalBlocker blocker(m_group);
+    QString error;
+    const auto available = remote ? service.presetList()
+                                  : ParameterPresetStore::presets(&error);
+    int current = remote ? service.currentPresetId()
+                         : ParameterPresetStore::currentPresetId();
+    m_group->clear();
+    for (const ParameterPresetInfo &preset : available)
+        m_group->addItem(preset.name, preset.id);
+    if (m_group->count() == 0) {
+        emit message(error.isEmpty() ? QStringLiteral("没有可用的参数预设") : error, true);
+        return;
+    }
+    int index = m_group->findData(current);
+    if (index < 0) {
+        index = 0;
+        current = m_group->itemData(0).toInt();
+    }
+    m_group->setCurrentIndex(index);
+    m_currentPresetId = current;
+    reload();
+    emit groupChanged();
+}
+
+bool ParameterPanel::switchPreset(int presetId)
+{
+    if (presetId == m_currentPresetId)
+        return true;
+    if (m_switchingPreset)
+        return false;
+
+    if (m_autoApplyTimer)
+        m_autoApplyTimer->stop();
+    m_switchingPreset = true;
+    emit applyStarted();
+
+    if (remoteMode()) {
+        // No optimistic current-preset update: the host owns both the preset
+        // database and the hardware.  Completion is reported by the response.
+        pa1664::remote::UltrasoundParameterService::instance().switchPreset(presetId);
+        return true;
+    }
+
+    const int previousPresetId = m_currentPresetId;
+    QString error;
+    if (!ParameterPresetStore::captureCurrentHardware(previousPresetId, &error)) {
+        m_switchingPreset = false;
+        emit presetSwitchFinished(false,
+                                  QStringLiteral("切换前保存当前参数预设失败：%1").arg(error));
+        return false;
+    }
+
+    // Commit the logical selection before loading the SDK.  DeviceController
+    // status notifications can refresh the UI during load/push; they must see
+    // the target preset instead of writing the previous id back to disk.
+    if (!ParameterPresetStore::setCurrentPresetId(presetId, &error)) {
+        m_switchingPreset = false;
+        emit presetSwitchFinished(false,
+                                  QStringLiteral("保存目标参数预设失败：%1").arg(error));
+        return false;
+    }
+    m_currentPresetId = presetId;
+    {
+        const QSignalBlocker blocker(m_group);
+        const int targetIndex = m_group->findData(presetId);
+        if (targetIndex >= 0)
+            m_group->setCurrentIndex(targetIndex);
+    }
+
+    QString result;
+    if (!ParameterPresetStore::applyPresetToHardware(presetId, &result, &error)) {
+        QString rollbackError;
+        ParameterPresetStore::setCurrentPresetId(previousPresetId, &rollbackError);
+        ParameterPresetStore::applyPresetToHardware(previousPresetId, nullptr, nullptr);
+        m_currentPresetId = previousPresetId;
+        {
+            const QSignalBlocker blocker(m_group);
+            const int previousIndex = m_group->findData(previousPresetId);
+            if (previousIndex >= 0)
+                m_group->setCurrentIndex(previousIndex);
+        }
+        m_switchingPreset = false;
+        if (!rollbackError.isEmpty())
+            error += QStringLiteral("；恢复原预设选择失败：%1").arg(rollbackError);
+        const QString text =
+            QStringLiteral("参数预设 %1 切换失败：%2").arg(presetId).arg(error);
+        emit presetSwitchFinished(false, text);
+        return false;
+    }
+
+    m_switchingPreset = false;
+    reload();
+    emit groupChanged();
+    emit presetSwitchFinished(true, result);
+    emit message(result, false);
+    return true;
+}
+
+void ParameterPanel::finishRemotePresetOperation(const QString &operation,
+                                                 bool ok, int presetId,
+                                                 const QString &text)
+{
+    if (operation == QStringLiteral("ultrasound.presets.switch")) {
+        m_switchingPreset = false;
+        if (ok) {
+            refreshGroups();
+            emit presetSwitchFinished(true, text);
+            emit message(text.isEmpty()
+                             ? QStringLiteral("主机已切换参数预设 %1").arg(presetId)
+                             : text,
+                         false);
+            if (m_remoteRemoveAfterSwitch >= 0) {
+                const int removeId = m_remoteRemoveAfterSwitch;
+                m_remoteRemoveAfterSwitch = -1;
+                pa1664::remote::UltrasoundParameterService::instance()
+                    .removePreset(removeId);
+            }
+        } else {
+            refreshGroups();
+            emit presetSwitchFinished(false, text);
+            m_remoteRemoveAfterSwitch = -1;
+            emit message(text, true);
+        }
+        return;
+    }
+
+    if (operation.startsWith(QStringLiteral("ultrasound.presets."))) {
+        if (ok) refreshGroups();
+        emit message(text.isEmpty()
+                         ? (ok ? QStringLiteral("主机已完成参数预设操作")
+                               : QStringLiteral("参数预设操作失败"))
+                         : text,
+                     !ok);
+    }
+}
+
+void ParameterPanel::reload()
+{
+    for (auto &field : m_fields) {
+        const QSignalBlocker blocker(field.editor);
+        const QVariant value = field.getter();
+        if (auto *w = qobject_cast<QDoubleSpinBox *>(field.editor)) w->setValue(value.toDouble());
+        else if (auto *w = qobject_cast<QSpinBox *>(field.editor)) w->setValue(value.toInt());
+        else if (auto *w = qobject_cast<QCheckBox *>(field.editor)) w->setChecked(value.toBool());
+        else if (auto *w = qobject_cast<QComboBox *>(field.editor)) {
+            const int index = w->findData(value);
+            if (index >= 0) w->setCurrentIndex(index);
+        }
+        if (auto *w = qobject_cast<QDoubleSpinBox *>(field.editor)) field.loadedValue = w->value();
+        else if (auto *w = qobject_cast<QSpinBox *>(field.editor)) field.loadedValue = w->value();
+        else if (auto *w = qobject_cast<QCheckBox *>(field.editor)) field.loadedValue = w->isChecked();
+        else if (auto *w = qobject_cast<QComboBox *>(field.editor)) field.loadedValue = w->currentData();
+    }
+    refreshGateTree();
+    recomputeTofdPcs();
+    emit configurationChanged();
+}
+
+void ParameterPanel::recomputeTofdPcs()
+{
+    if (!m_tofdAngleLabel || !m_tofdDepthLabel || !m_tofdPcsLabel)
+        return;
+    double thickness = 0.0;
+    double wedgeAngle = 0.0;
+    double wedgeVelocity = 0.0;
+    double workpieceVelocity = 0.0;
+    try {
+        thickness = pa1664::remote::UltrasoundParameterService::instance().getThickness(selectedGroupId());
+        wedgeAngle = pa1664::remote::UltrasoundParameterService::instance().getWedgeAngle(selectedGroupId());
+        wedgeVelocity = pa1664::remote::UltrasoundParameterService::instance().getWedgeVelocity(selectedGroupId());
+        workpieceVelocity = pa1664::remote::UltrasoundParameterService::instance().getWorkpieceVelocity(selectedGroupId());
+    } catch (...) {
+        m_tofdAngleLabel->setText(QStringLiteral("--"));
+        m_tofdDepthLabel->setText(QStringLiteral("--"));
+        m_tofdPcsLabel->setText(QStringLiteral("--"));
+        return;
+    }
+    const double fraction = m_tofdDepthFraction ? m_tofdDepthFraction->value()
+                                                : (2.0 / 3.0);
+
+    // 斯涅尔定律：楔块入射角 → 钢内折射角。sinθ_钢 = sinθ_楔 × c_钢 / c_楔。
+    const double ratio = qSin(qDegreesToRadians(wedgeAngle))
+                         * workpieceVelocity / qMax(1.0, wedgeVelocity);
+    if (ratio > 1.0) {
+        m_tofdAngleLabel->setText(QStringLiteral("全反射（无折射角）"));
+        m_tofdDepthLabel->setText(QStringLiteral("--"));
+        m_tofdPcsLabel->setText(QStringLiteral("--"));
+        return;
+    }
+    const double thetaSteel = qAsin(ratio);
+    const double depth = fraction * thickness;
+    const double pcs = 2.0 * depth * qTan(thetaSteel);
+
+    m_tofdAngleLabel->setText(QStringLiteral("%1°").arg(qRadiansToDegrees(thetaSteel), 0, 'f', 1));
+    m_tofdDepthLabel->setText(QStringLiteral("%1 mm").arg(depth, 0, 'f', 1));
+    m_tofdPcsLabel->setText(QStringLiteral("%1 mm").arg(pcs, 0, 'f', 1));
+}
+
+void ParameterPanel::apply()
+{
+    if (m_applying)
+        return;
+
+    struct PendingChange {
+        Field *field = nullptr;
+        QVariant value;
+    };
+    QVector<PendingChange> changes;
+    changes.reserve(m_fields.size());
+    for (auto &field : m_fields) {
+        QVariant value;
+        if (auto *w = qobject_cast<QDoubleSpinBox *>(field.editor)) value = w->value();
+        else if (auto *w = qobject_cast<QSpinBox *>(field.editor)) value = w->value();
+        else if (auto *w = qobject_cast<QCheckBox *>(field.editor)) value = w->isChecked();
+        else if (auto *w = qobject_cast<QComboBox *>(field.editor)) value = w->currentData();
+        if (value != field.loadedValue)
+            changes.push_back({&field, value});
+    }
+
+    if (changes.isEmpty())
+        return;
+
+    m_applying = true;
+    emit applyStarted();
+
+    int failed = 0;
+    int applied = 0;
+    QStringList errors;
+    for (auto &change : changes) {
+        auto &field = *change.field;
+        const QVariant &value = change.value;
+        bool ok = false;
+        try {
+            ok = field.setter(value);
+            if (ok && !pa1664::remote::UltrasoundParameterService::instance().isRemote() && (field.name == QStringLiteral("激励通道（TX）")
+                       || field.name == QStringLiteral("接收通道（RX）"))) {
+                const int readBack = field.getter().toInt();
+                if (readBack != value.toInt()) {
+                    ok = false;
+                    errors << QStringLiteral("%1：写入通道 %2 后回读为通道 %3")
+                                  .arg(field.name).arg(value.toInt()).arg(readBack);
+                }
+            }
+        } catch (const std::exception &e) {
+            errors << QStringLiteral("%1：SDK 异常 %2").arg(field.name, QString::fromLocal8Bit(e.what()));
+        } catch (...) {
+            errors << QStringLiteral("%1：SDK 抛出未知异常").arg(field.name);
+        }
+        if (ok) {
+            field.loadedValue = value;
+            ++applied;
+        } else {
+            ++failed;
+            if (errors.isEmpty() || !errors.last().startsWith(field.name))
+                errors << QStringLiteral("%1：SDK 拒绝该值").arg(field.name);
+        }
+    }
+    auto &remoteService = pa1664::remote::UltrasoundParameterService::instance();
+    if (remoteService.isRemote()) {
+        m_remoteApplyLocalFailures = failed;
+        m_remoteApplyLocalErrors = errors;
+        if (applied == 0) {
+            m_applying = false;
+            const QString text = QStringLiteral("参数修改未发送：%1")
+                                     .arg(errors.join(QStringLiteral("；")));
+            emit applyFinished(false, text);
+            emit message(text, true);
+            return;
+        }
+        // Host is the sole safety authority.  It performs PRF limiting,
+        // writes the SDK, reads values back and captures the active preset.
+        remoteService.commitPendingChanges(m_currentPresetId);
+        return;
+    }
+
+    // getBeamCounts() can still report one beam before the vendor mapper has
+    // rebuilt a changed PA group. Derive the focal-law count from scan geometry
+    // as well, so a multi-group edit cannot persist an unsafe PRF.
+    int actualFrameRate = pa1664::remote::UltrasoundParameterService::instance().getFrameRate();
+    const PulseLoadGuard::Estimate pulseLoad = PulseLoadGuard::fromSdk(actualFrameRate);
+    QString prfAdjustment;
+    if (pulseLoad.limited()) {
+        const int safeFrameRate = pulseLoad.safeFrameRate;
+        bool limited = false;
+        try {
+            limited = pa1664::remote::UltrasoundParameterService::instance().setFrameRate(safeFrameRate);
+        } catch (...) {
+            limited = false;
+        }
+        if (limited) {
+            for (auto &field : m_fields) {
+                if (field.name != QStringLiteral("采集帧率 PRF"))
+                    continue;
+                if (auto *editor = qobject_cast<QSpinBox *>(field.editor)) {
+                    const QSignalBlocker blocker(editor);
+                    editor->setValue(safeFrameRate);
+                }
+                field.loadedValue = safeFrameRate;
+                break;
+            }
+            prfAdjustment = QStringLiteral("；为防止 USB 停流，PRF 已由 %1 Hz 自动限制为 %2 Hz"
+                                           "（有效脉冲 %3/帧，负载上限 %4）")
+                                .arg(actualFrameRate).arg(safeFrameRate)
+                                .arg(pulseLoad.pulsesPerFrame)
+                                .arg(PulseLoadGuard::MaximumEffectivePulseRate);
+            actualFrameRate = safeFrameRate;
+        } else {
+            ++failed;
+            errors << QStringLiteral("采集帧率 PRF：有效负载 %1 超过硬件上限 %2，且自动限制失败")
+                          .arg(pulseLoad.effectivePulseRate())
+                          .arg(PulseLoadGuard::MaximumEffectivePulseRate);
+        }
+    }
+
+    QString persistenceError;
+    const bool persisted = persistConfiguration(&persistenceError);
+    m_applying = false;
+    // 每次只下发实际改变的字段，随后立即以 SDK 的真实值覆盖界面，
+    // 避免设备端限幅或修正后界面仍显示旧输入值。
+    reload();
+    emit applyFinished(failed == 0, errors.join(QStringLiteral("；")));
+    if (failed == 0) {
+        emit message(persisted
+                         ? QStringLiteral("参数预设 %1：已自动下发 %2 项修改、从 SDK 回读并独立保存%3")
+                               .arg(m_currentPresetId).arg(applied).arg(prfAdjustment)
+                         : QStringLiteral("参数预设 %1：已自动下发 %2 项修改并从 SDK 回读%3；%4")
+                               .arg(m_currentPresetId).arg(applied)
+                               .arg(prfAdjustment, persistenceError),
+                     !persisted);
+    } else {
+        emit message(QStringLiteral("已应用 %1 项，%2 项失败：%3%4")
+                         .arg(applied).arg(failed).arg(errors.join(QStringLiteral("；")))
+                         .arg(persisted ? QString() : QStringLiteral("；%1").arg(persistenceError)), true);
+    }
+}
+
+QVector<QVector<double>> ParameterPanel::currentGates() const
+{
+    QVector<QVector<double>> result;
+    for (const GateWidgets &gate : m_gateWidgets) {
+        result.push_back({gate.enabled && gate.enabled->isChecked() ? 1.0 : 0.0,
+                          gate.start ? gate.start->value() : 0.0,
+                          gate.end ? gate.end->value() : 0.0,
+                          gate.threshold ? gate.threshold->value() : 0.0});
+    }
+    return result;
+}
+
+int ParameterPanel::activeGate() const
+{
+    if (!m_gateTree || !m_gateTree->currentItem())
+        return -1;
+    const int index = m_gateTree->currentItem()->data(0, Qt::UserRole).toInt();
+    return index >= 0 && index < m_gateWidgets.size() ? index : -1;
+}
+
+bool ParameterPanel::surfaceTrackingEnabled() const
+{
+    return m_surfaceEnabled && m_surfaceEnabled->isChecked();
+}
+
+double ParameterPanel::surfaceWindowStart() const
+{
+    return m_surfaceStart ? m_surfaceStart->value() : 0.0;
+}
+
+double ParameterPanel::surfaceWindowEnd() const
+{
+    return surfaceWindowStart() + (m_surfaceLength ? m_surfaceLength->value() : 0.0);
+}
+
+double ParameterPanel::surfaceThreshold() const
+{
+    return m_surfaceThreshold ? m_surfaceThreshold->value() : 0.0;
+}
+
+bool ParameterPanel::surfaceHoldMissing() const
+{
+    return m_surfaceHold && m_surfaceHold->isChecked();
+}
+
+QVector<bool> ParameterPanel::surfaceTrackedGates() const
+{
+    QVector<bool> result;
+    result.reserve(m_surfaceGateChecks.size());
+    for (QCheckBox *check : m_surfaceGateChecks)
+        result.push_back(check && check->isChecked());
+    return result;
+}
+
+void ParameterPanel::setGateRangeFromPlot(int gateIndex, double start, double end)
+{
+    if (gateIndex < 0 || gateIndex >= m_gateWidgets.size())
+        return;
+    GateWidgets &gate = m_gateWidgets[gateIndex];
+    m_syncingGateUi = true;
+    gate.enabled->setChecked(true);
+    gate.start->setValue(qMin(start, end));
+    gate.end->setValue(qMax(start, end));
+    m_syncingGateUi = false;
+    selectGate(gateIndex);
+    refreshGateTree();
+    emit gateVisualizationChanged();
+    scheduleAutoApply();
+}
+
+void ParameterPanel::setGateThresholdFromPlot(int gateIndex, double threshold)
+{
+    if (gateIndex < 0 || gateIndex >= m_gateWidgets.size())
+        return;
+    m_syncingGateUi = true;
+    m_gateWidgets[gateIndex].threshold->setValue(qBound(0.0, threshold, 100.0));
+    m_syncingGateUi = false;
+    emit gateVisualizationChanged();
+    scheduleAutoApply();
+}
+
+void ParameterPanel::setSurfaceWindowFromPlot(double start, double end)
+{
+    if (!m_surfaceStart || !m_surfaceLength || !m_surfaceEnabled)
+        return;
+    const QSignalBlocker startBlocker(m_surfaceStart);
+    const QSignalBlocker lengthBlocker(m_surfaceLength);
+    const QSignalBlocker enabledBlocker(m_surfaceEnabled);
+    m_surfaceStart->setValue(qMin(start, end));
+    m_surfaceLength->setValue(qMax(0.001, qAbs(end - start)));
+    m_surfaceEnabled->setChecked(true);
+    refreshGateTree();
+    emit surfaceTrackingChanged();
+}
+
+void ParameterPanel::selectGate(int gateIndex)
+{
+    if (!m_gateTree || gateIndex < 0 || gateIndex >= m_gateWidgets.size())
+        return;
+    for (int i = 0; i < m_gateTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *top = m_gateTree->topLevelItem(i);
+        const QList<QTreeWidgetItem *> candidates = [&] {
+            QList<QTreeWidgetItem *> items{top};
+            for (int child = 0; child < top->childCount(); ++child)
+                items.push_back(top->child(child));
+            return items;
+        }();
+        for (QTreeWidgetItem *item : candidates) {
+            if (item->data(0, Qt::UserRole).toInt() == gateIndex) {
+                m_gateTree->setCurrentItem(item);
+                m_gateEditorStack->setCurrentIndex(gateIndex);
+                return;
+            }
+        }
+    }
+}
+
+void ParameterPanel::refreshGateTree()
+{
+    if (!m_gateTree)
+        return;
+    int selected = activeGate();
+    if (m_gateTree->currentItem()
+        && m_gateTree->currentItem()->data(0, Qt::UserRole).toInt() == m_gateWidgets.size())
+        selected = m_gateWidgets.size();
+    const QSignalBlocker blocker(m_gateTree);
+    m_gateTree->clear();
+    auto *surface = new QTreeWidgetItem(m_gateTree);
+    surface->setData(0, Qt::UserRole, m_gateWidgets.size());
+    surface->setFlags(surface->flags() | Qt::ItemIsUserCheckable);
+    surface->setCheckState(0, surfaceTrackingEnabled() ? Qt::Checked : Qt::Unchecked);
+    surface->setText(0, surfaceTrackingEnabled() ? QStringLiteral("表面跟踪  已启用")
+                                                 : QStringLiteral("表面跟踪  已关闭"));
+    for (int i = 0; i < m_gateWidgets.size(); ++i) {
+        const GateWidgets &gate = m_gateWidgets[i];
+        const bool enabled = gate.enabled && gate.enabled->isChecked();
+        const bool tracked = i < m_surfaceGateChecks.size()
+                             && m_surfaceGateChecks[i]->isChecked();
+        auto *item = tracked ? new QTreeWidgetItem(surface)
+                             : new QTreeWidgetItem(m_gateTree);
+        item->setData(0, Qt::UserRole, i);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, enabled ? Qt::Checked : Qt::Unchecked);
+        item->setText(0, QStringLiteral("Gate %1  %2")
+                         .arg(gate.name)
+                         .arg(enabled ? QStringLiteral("已启用") : QStringLiteral("已关闭")));
+    }
+    surface->setExpanded(true);
+    for (int i = 0; i < m_gateTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *top = m_gateTree->topLevelItem(i);
+        if (top->data(0, Qt::UserRole).toInt() == selected) {
+            m_gateTree->setCurrentItem(top);
+            return;
+        }
+        for (int child = 0; child < top->childCount(); ++child) {
+            QTreeWidgetItem *item = top->child(child);
+            if (item->data(0, Qt::UserRole).toInt() == selected) {
+                m_gateTree->setCurrentItem(item);
+                return;
+            }
+        }
+    }
+}
+
+void ParameterPanel::updateSurfaceStatus(bool valid, double reference, double current)
+{
+    if (!m_surfaceStatus)
+        return;
+    if (!surfaceTrackingEnabled()) {
+        m_surfaceStatus->setText(QStringLiteral("表面跟踪未启用"));
+    } else if (!valid) {
+        m_surfaceStatus->setText(QStringLiteral("搜索区域内暂未找到超过阈值的回波"));
+    } else {
+        m_surfaceStatus->setText(QStringLiteral("参考表面 %1 mm · 当前表面 %2 mm · 偏移 %3 mm")
+                                 .arg(reference, 0, 'f', 3)
+                                 .arg(current, 0, 'f', 3)
+                                 .arg(current - reference, 0, 'f', 3));
+    }
+}
