@@ -32,6 +32,7 @@ PA-1664 超声设备的新上位机项目。项目基于厂商 `USB-SDK-1.0.0.10
 操作电脑连接的小车 IP 在 `startup_deploy\operator_workbench\config\workbench.psd1` 中设置。详细部署步骤见 `startup_deploy\README.md`。
 
 登录自启动运行在已登录的交互用户会话中，不是 Session 0 Windows 服务，以避免 USB、相机和厂商 SDK 无法访问。若需要无人值守，应为专用 Windows 用户配置受控自动登录。
+
 ## 已实现功能
 
 - USB/Combo 模式 SDK 连接、断开、启动、停止和编码器复位

@@ -6,7 +6,13 @@ $root = $PSScriptRoot
 $startScript = Join-Path $root 'StartRobotHost.ps1'
 $appExe = Join-Path $root 'app\PA1664RobotHost.exe'
 $shortcutName = 'PA1664 Robot Host.lnk'
-$powerShellExe = Join-Path $PSHOME 'powershell.exe'
+$powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+if (-not (Test-Path -LiteralPath $powerShellExe -PathType Leaf)) {
+    $powerShellExe = Join-Path $PSHOME 'powershell.exe'
+}
+if (-not (Test-Path -LiteralPath $powerShellExe -PathType Leaf)) {
+    throw 'Windows PowerShell executable was not found.'
+}
 
 if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) {
     throw ('Missing start script: ' + $startScript)

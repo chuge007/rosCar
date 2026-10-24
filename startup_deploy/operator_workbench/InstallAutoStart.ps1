@@ -7,7 +7,13 @@ $startScript = Join-Path $root 'StartOperatorWorkbench.ps1'
 $appExe = Join-Path $root 'app\PA1664Workbench.exe'
 $configPath = Join-Path $root 'config\workbench.psd1'
 $shortcutName = 'PA1664 Operator Workbench.lnk'
-$powerShellExe = Join-Path $PSHOME 'powershell.exe'
+$powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+if (-not (Test-Path -LiteralPath $powerShellExe -PathType Leaf)) {
+    $powerShellExe = Join-Path $PSHOME 'powershell.exe'
+}
+if (-not (Test-Path -LiteralPath $powerShellExe -PathType Leaf)) {
+    throw 'Windows PowerShell executable was not found.'
+}
 
 if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) {
     throw ('Missing start script: ' + $startScript)
@@ -20,8 +26,17 @@ if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
 }
 
 $config = Import-PowerShellDataFile -Path $configPath
-if ([string]::IsNullOrWhiteSpace([string]$config.Host)) {
+$hostName = ([string]$config.Host).Trim()
+if ([string]::IsNullOrWhiteSpace($hostName)) {
     throw 'Set Host to the robot-car computer IP in config\workbench.psd1.'
+}
+if ($hostName -match '\s') {
+    throw 'Host must be an IPv4 address or DNS host name without spaces.'
+}
+$controlPort = 0
+if (-not [int]::TryParse([string]$config.ControlPort, [ref]$controlPort) -or
+    $controlPort -lt 1 -or $controlPort -gt 65535) {
+    throw 'ControlPort must be an integer from 1 to 65535.'
 }
 
 $startupFolder = [Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
