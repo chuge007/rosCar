@@ -883,6 +883,45 @@ QWidget *RobotControlPanel::buildConfigurationPage()
             group->layout()->setSpacing(4);
         }
     };
+    QList<QCheckBox *> configLocks;
+    const auto addConfigLock = [&configLocks](QGroupBox *group,
+                                               QWidget *keepEnabled) {
+        auto *lockRow = new QWidget(group);
+        auto *lockLayout = new QHBoxLayout(lockRow);
+        lockLayout->setContentsMargins(0, 0, 0, 0);
+        lockLayout->setSpacing(0);
+        lockLayout->addStretch(1);
+        auto *lock = new QCheckBox(QStringLiteral("锁定"), lockRow);
+        lock->setToolTip(QStringLiteral("勾选后锁定此配置子项；取消勾选后才能修改"));
+        lockLayout->addWidget(lock);
+
+        if (auto *form = qobject_cast<QFormLayout *>(group->layout())) {
+            form->insertRow(0, lockRow);
+        } else if (auto *column = qobject_cast<QVBoxLayout *>(group->layout())) {
+            column->insertWidget(0, lockRow);
+        } else {
+            return;
+        }
+
+        QObject::connect(lock, &QCheckBox::toggled, group,
+                         [group, lockRow, keepEnabled](bool locked) {
+            const auto children = group->findChildren<QWidget *>(
+                Qt::FindDirectChildrenOnly);
+            for (QWidget *child : children) {
+                if (child == lockRow || child == keepEnabled)
+                    continue;
+                if (locked) {
+                    child->setProperty("configEnabledBeforeLock", child->isEnabled());
+                    child->setEnabled(false);
+                } else {
+                    child->setEnabled(
+                        child->property("configEnabledBeforeLock").toBool());
+                }
+            }
+        });
+        configLocks.append(lock);
+        lock->setChecked(true);
+    };
     const auto buttonRow = [](std::initializer_list<QPushButton *> buttons) {
         auto *row = new QWidget;
         auto *rowLayout = new QHBoxLayout(row);
@@ -918,6 +957,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                                         QStringLiteral("调大抑制摆动更稳；调小响应更灵但易振荡")));
     correctionLayout->addLayout(correctionForm);
     compactGroup(correctionGroup);
+    addConfigLock(correctionGroup, nullptr);
     rightColumn->addWidget(correctionGroup);
 
     auto *adapter = new QGroupBox(QStringLiteral("MWD RS485 适配器"), page);
@@ -993,6 +1033,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
             this, [updateWheelTransportUi](int) { updateWheelTransportUi(); });
     updateWheelTransportUi();
     compactGroup(adapter);
+    addConfigLock(adapter, nullptr);
     leftColumn->addWidget(adapter);
 
     auto *mapping = new QGroupBox(QStringLiteral("轮子与底盘几何"), page);
@@ -1005,6 +1046,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     mappingForm->addRow(QStringLiteral("轮距 (mm)"), m_trackWidth);
     mappingForm->addRow(QStringLiteral("输出轴到车轮传动比"), m_ratio);
     compactGroup(mapping);
+    addConfigLock(mapping, nullptr);
     rightColumn->addWidget(mapping);
 
     auto *imu = new QGroupBox(QStringLiteral("RIM302 IMU"), page);
@@ -1031,6 +1073,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                                       Qt::QueuedConnection);
     });
     compactGroup(imu);
+    addConfigLock(imu, nullptr);
     leftColumn->addWidget(imu);
 
     auto *laser = new QGroupBox(QStringLiteral("MV3DLP 激光相机"), page);
@@ -1067,6 +1110,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
             m_laserSerial->setText(m_laserDevice->itemText(index).section(QStringLiteral(" | "), 0, 0));
     });
     compactGroup(laser);
+    addConfigLock(laser, nullptr);
     rightColumn->addWidget(laser);
 
     auto *usb = new QGroupBox(QStringLiteral("摄像头配置"), page);
@@ -1190,6 +1234,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     usbOuterLayout->addWidget(usb2);
     compactGroup(usb2);
     compactGroup(usb);
+    addConfigLock(usb, nullptr);
     // The outer box only wraps the two channel groups, so let it grow with them
     // instead of collapsing to a single row like the leaf configuration groups.
     usb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -1234,6 +1279,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                                       Qt::QueuedConnection);
     });
     compactGroup(clamp);
+    addConfigLock(clamp, nullptr);
     rightColumn->addWidget(clamp);
 
     auto *limits = new QGroupBox(QStringLiteral("速度与同步参数"), page);
@@ -1279,6 +1325,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                        wrapWithHint(m_syncMinSpeed,
                                     QStringLiteral("调大低速不同步；调小低速仍同步")));
     compactGroup(limits);
+    addConfigLock(limits, nullptr);
     rightColumn->insertWidget(1, limits);
 
     auto *safety = new QGroupBox(QStringLiteral("安全看门狗"), page);
@@ -1300,11 +1347,13 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     safetyForm->addRow(QStringLiteral("使能等待超时"), m_armingTimeout);
     safetyForm->addRow(QStringLiteral("激光轮廓输入超时"), m_laserInputTimeout);
     auto *save = actionButton(QStringLiteral("保存并应用全部参数"), "primary");
+    save->setToolTip(QStringLiteral("保存全部参数后，所有配置子项将自动锁定"));
     safetyForm->addRow(QString(), save);
     m_laserConfigState->setWordWrap(true);
     m_laserFrameState->setWordWrap(true);
     m_imuConfigState->setWordWrap(true);
     compactGroup(safety);
+    addConfigLock(safety, save);
     leftColumn->addWidget(safety);
 
     auto *logGroup = new QGroupBox(QStringLiteral("接口日志"), page);
@@ -1318,7 +1367,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     compactGroup(logGroup);
     rightColumn->addWidget(logGroup);
 
-    connect(save, &QPushButton::clicked, this, [this] {
+    connect(save, &QPushButton::clicked, this, [this, configLocks] {
         const QString error = settingsFromUi().validationError();
         if (!error.isEmpty()) {
             appendLog(error);
@@ -1326,6 +1375,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
             return;
         }
         saveSettings();
+        for (QCheckBox *lock : configLocks)
+            lock->setChecked(true);
         if (m_connected)
             connectConfiguredDevices();
     });
