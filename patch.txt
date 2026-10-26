@@ -1,0 +1,9 @@
+*** Begin Patch
+*** Update File: src/laser_correction_controller.h
+@@ int imageTimeoutMs = 180;
+- int imageTimeoutMs = 180;
++ // 激光原始帧采集超时阈值（毫秒）。提升至 500ms 以容忍短暂的处理延迟。
++ // 在纠偏过程中，焊道检测可能正常但激光数据传输出现短暂波动（~200ms）。
++ // 过低的阈值会导致误触发停止。与 detectionTimeoutMs 对齐。
++ int imageTimeoutMs = 500;
+*** End Patch
