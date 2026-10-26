@@ -157,6 +157,16 @@ struct ChannelHardwareTestState {
 
 int main(int argc, char *argv[])
 {
+    // Enable comprehensive touchscreen support for Windows (including remote desktop scenarios)
+    // Convert touch events to mouse events so UI components respond to finger touches
+    QCoreApplication::setAttribute(Qt::AA_SynthesizeMouseForUnhandledTouchEvents, true);
+
+    // Disable synthetic touch events from mouse to avoid input confusion in RDP sessions
+    QCoreApplication::setAttribute(Qt::AA_SynthesizeTouchForUnhandledMouseEvents, false);
+
+    // Use native Windows event handling for better touch recognition
+    QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL, true);
+
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName("PA1664");
     QCoreApplication::setApplicationName("PA1664Workbench");

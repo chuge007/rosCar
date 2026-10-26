@@ -14,6 +14,8 @@
 #include <QVector3D>
 #include <QStringList>
 #include <QWidget>
+#include <QFile>
+#include <QTextStream>
 
 class QComboBox;
 class QCamera;
@@ -168,6 +170,10 @@ private:
     bool m_autoCorrectionStartPending = false;
     bool m_autoCorrectionPaused = false;
     bool m_profileDetectionLogSessionActive = false;
+
+    // 触摸输入调试日志文件
+    QFile m_touchInputLogFile;
+    QTextStream m_touchInputLog;
 
     QLabel *m_stateLabel = nullptr;
     QLabel *m_connectionLabel = nullptr;

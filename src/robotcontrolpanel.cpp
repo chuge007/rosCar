@@ -3,6 +3,7 @@
 #include "robot_profile_view.h"
 #include "robot_app_logger.h"
 #include "profile_weld_detector.h"
+#include "jog_button_touch_filter.h"
 #include "robot_sensor_controller.h"
 #include "robot_usb_camera_controller.h"
 #include "clamp_motor_controller.h"
@@ -147,6 +148,16 @@ RobotControlPanel::RobotControlPanel(crawling::ClampMotorController *clampContro
                                      QWidget *parent)
     : QWidget(parent), m_clampController(clampController)
 {
+    // 初始化触摸输入日志文件
+    m_touchInputLogFile.setFileName("touch_input_debug.txt");
+    if (m_touchInputLogFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        m_touchInputLog.setDevice(&m_touchInputLogFile);
+        m_touchInputLog << "\n========== 新会话开始 "
+                        << QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss")
+                        << " ==========\n";
+        m_touchInputLog.flush();
+    }
+
     qRegisterMetaType<crawling::DriveSettings>("crawling::DriveSettings");
     qRegisterMetaType<crawling::DriveState>("crawling::DriveState");
     qRegisterMetaType<crawling::DriveTelemetry>("crawling::DriveTelemetry");
@@ -831,24 +842,84 @@ void RobotControlPanel::buildUi()
         button->setAutoRepeat(false);
         button->setFocusPolicy(Qt::NoFocus);
         button->setToolTip(QStringLiteral("按住3秒可锁定该方向"));
+
+        // 安装触摸事件过滤器,解决Windows触摸屏按钮无法按住的问题
+        auto *touchFilter = new JogButtonTouchFilter(button, this);
+        button->installEventFilter(touchFilter);
         connect(button, &QPushButton::pressed, this, [this, button, flag] {
+            // 写入触摸输入日志文件
+            if (m_touchInputLog.device()) {
+                m_touchInputLog << "[PRESSED] " << button->text()
+                                << " | flag_addr=" << (void*)flag
+                                << " | flag_value=" << *flag
+                                << " | m_autoCorrectionActive=" << m_autoCorrectionActive
+                                << " | m_forward=" << m_forward
+                                << " | m_reverse=" << m_reverse
+                                << " | m_left=" << m_left
+                                << " | m_right=" << m_right
+                                << "\n";
+                m_touchInputLog.flush();
+            }
             clearJogLatch();
             m_pressedJogButton = button;
             m_pressedJogFlag = flag;
             m_jogHoldTimer->start();
             setMotion(*flag, true);
+            if (m_touchInputLog.device()) {
+                m_touchInputLog << "[AFTER_PRESSED] " << button->text()
+                                << " | flag_value=" << *flag
+                                << " | m_forward=" << m_forward
+                                << " | m_reverse=" << m_reverse
+                                << " | m_left=" << m_left
+                                << " | m_right=" << m_right
+                                << "\n";
+                m_touchInputLog.flush();
+            }
         });
         connect(button, &QPushButton::released, this, [this, button, flag] {
+            // 写入触摸输入日志文件
+            if (m_touchInputLog.device()) {
+                m_touchInputLog << "[RELEASED] " << button->text()
+                                << " | m_pressedJogButton=" << (m_pressedJogButton ? m_pressedJogButton->text() : "null")
+                                << " | flag_addr=" << (void*)flag
+                                << " | latched=" << m_jogLatched
+                                << " | m_forward=" << m_forward
+                                << " | m_reverse=" << m_reverse
+                                << " | m_left=" << m_left
+                                << " | m_right=" << m_right
+                                << "\n";
+                m_touchInputLog.flush();
+            }
             if (m_pressedJogButton == button) {
                 m_jogHoldTimer->stop();
                 m_pressedJogButton = nullptr;
                 m_pressedJogFlag = nullptr;
                 if (!m_jogLatched)
                     setMotion(*flag, false);
+                if (m_touchInputLog.device()) {
+                    m_touchInputLog << "[AFTER_RELEASED_PATH1] " << button->text()
+                                    << " | flag_value=" << *flag
+                                    << " | m_forward=" << m_forward
+                                    << " | m_reverse=" << m_reverse
+                                    << " | m_left=" << m_left
+                                    << " | m_right=" << m_right
+                                    << "\n";
+                    m_touchInputLog.flush();
+                }
                 return;
             }
             if (!m_jogLatched)
                 setMotion(*flag, false);
+            if (m_touchInputLog.device()) {
+                m_touchInputLog << "[AFTER_RELEASED_PATH2] " << button->text()
+                                << " | flag_value=" << *flag
+                                << " | m_forward=" << m_forward
+                                << " | m_reverse=" << m_reverse
+                                << " | m_left=" << m_left
+                                << " | m_right=" << m_right
+                                << "\n";
+                m_touchInputLog.flush();
+            }
         });
     };
     bindJog(forward, &m_forward);
@@ -2225,9 +2296,20 @@ void RobotControlPanel::connectConfiguredUsbCamera()
 {
     m_settings = settingsFromUi();
     saveSettings();
-    for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
-        connectConfiguredUsbCameraSlot(slot);
+
+    // Always rescan devices before reconnecting to ensure fresh device list
+    // This helps recover from disconnected cameras
+    appendLog(QStringLiteral("[摄像头重连] 重新扫描USB设备..."));
+    if (m_usbCameraController) {
+        QMetaObject::invokeMethod(m_usbCameraController, "scanDevices", Qt::QueuedConnection);
     }
+
+    // Delay connection slightly to allow scan to complete
+    QTimer::singleShot(500, this, [this]() {
+        for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
+            connectConfiguredUsbCameraSlot(slot);
+        }
+    });
 }
 
 void RobotControlPanel::connectConfiguredUsbCameraSlot(int slot)
@@ -2241,34 +2323,51 @@ void RobotControlPanel::connectConfiguredUsbCameraSlot(int slot)
         appendLog(QStringLiteral("USB 摄像头 %1 连接已跳过：未勾选自动连接").arg(slot + 1));
         return;
     }
-    if (cam.cameraSource == crawling::CameraSource::Network) {
-        if (cam.networkCameraUrl.trimmed().isEmpty()) {
-            appendLog(QStringLiteral("摄像头 %1 连接已跳过：已选择网络，但地址为空").arg(slot + 1));
+
+    // Always disconnect first to ensure clean state for reconnection
+    if (m_usbCameraController) {
+        QMetaObject::invokeMethod(m_usbCameraController, "disconnectCamera",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(int, slot));
+    }
+
+    // Brief delay to allow disconnection to complete
+    QTimer::singleShot(100, this, [this, slot, cam]() {
+        if (cam.cameraSource == crawling::CameraSource::Network) {
+            if (cam.networkCameraUrl.trimmed().isEmpty()) {
+                appendLog(QStringLiteral("摄像头 %1 连接已跳过：已选择网络，但地址为空").arg(slot + 1));
+                return;
+            }
+            if (m_usbCameraController) {
+                appendLog(QStringLiteral("[摄像头重连] 正在连接网络摄像头 %1: %2")
+                         .arg(slot + 1).arg(cam.networkCameraUrl));
+                QMetaObject::invokeMethod(m_usbCameraController, "connectNetworkCamera",
+                                          Qt::QueuedConnection,
+                                          Q_ARG(int, slot),
+                                          Q_ARG(QString, cam.networkCameraUrl),
+                                          Q_ARG(bool, cam.usbCameraFlipHorizontal),
+                                          Q_ARG(bool, cam.usbCameraFlipVertical));
+            }
+            pushUsbDisplaySize(slot);
             return;
         }
-        if (m_usbCameraController)
-            QMetaObject::invokeMethod(m_usbCameraController, "connectNetworkCamera",
+        if (cam.usbCameraDeviceIndex < 0) {
+            appendLog(QStringLiteral("摄像头 %1 连接已跳过：已选择 USB，但未配置设备，请先扫描并选择").arg(slot + 1));
+            return;
+        }
+        if (m_usbCameraController) {
+            appendLog(QStringLiteral("[摄像头重连] 正在连接USB摄像头 %1 (设备索引=%2, fps=%3)")
+                     .arg(slot + 1).arg(cam.usbCameraDeviceIndex).arg(cam.usbCameraFps));
+            QMetaObject::invokeMethod(m_usbCameraController, "connectCamera",
                                       Qt::QueuedConnection,
                                       Q_ARG(int, slot),
-                                      Q_ARG(QString, cam.networkCameraUrl),
+                                      Q_ARG(int, cam.usbCameraDeviceIndex),
+                                      Q_ARG(int, cam.usbCameraFps),
                                       Q_ARG(bool, cam.usbCameraFlipHorizontal),
                                       Q_ARG(bool, cam.usbCameraFlipVertical));
+        }
         pushUsbDisplaySize(slot);
-        return;
-    }
-    if (cam.usbCameraDeviceIndex < 0) {
-        appendLog(QStringLiteral("摄像头 %1 连接已跳过：已选择 USB，但未配置设备，请先扫描并选择").arg(slot + 1));
-        return;
-    }
-    if (m_usbCameraController)
-        QMetaObject::invokeMethod(m_usbCameraController, "connectCamera",
-                                  Qt::QueuedConnection,
-                                  Q_ARG(int, slot),
-                                  Q_ARG(int, cam.usbCameraDeviceIndex),
-                                  Q_ARG(int, cam.usbCameraFps),
-                                  Q_ARG(bool, cam.usbCameraFlipHorizontal),
-                                  Q_ARG(bool, cam.usbCameraFlipVertical));
-    pushUsbDisplaySize(slot);
+    });
 }
 
 bool RobotControlPanel::saveClampSettings()
@@ -2339,10 +2438,41 @@ void RobotControlPanel::persistAutoConnectSetting(bool enabled)
 
 void RobotControlPanel::setMotion(bool &flag, bool active)
 {
-    if (m_autoCorrectionActive)
+    // 日志：记录setMotion调用前的状态
+    if (m_touchInputLog.device()) {
+        m_touchInputLog << "[setMotion_BEFORE] flag_addr=" << (void*)&flag
+                        << " | active=" << active
+                        << " | m_autoCorrectionActive=" << m_autoCorrectionActive
+                        << " | m_forward=" << m_forward
+                        << " | m_reverse=" << m_reverse
+                        << " | m_left=" << m_left
+                        << " | m_right=" << m_right
+                        << "\n";
+        m_touchInputLog.flush();
+    }
+
+    if (m_autoCorrectionActive) {
+        if (m_touchInputLog.device()) {
+            m_touchInputLog << "[setMotion_BLOCKED] 自动纠偏激活，阻止手动运动\n";
+            m_touchInputLog.flush();
+        }
         return;
+    }
+
     flag = active;
     sendMotionCommand();
+
+    // 日志：记录setMotion调用后的状态
+    if (m_touchInputLog.device()) {
+        m_touchInputLog << "[setMotion_AFTER] flag_addr=" << (void*)&flag
+                        << " | flag_value=" << flag
+                        << " | m_forward=" << m_forward
+                        << " | m_reverse=" << m_reverse
+                        << " | m_left=" << m_left
+                        << " | m_right=" << m_right
+                        << " | sendMotionCommand已调用\n";
+        m_touchInputLog.flush();
+    }
 }
 
 void RobotControlPanel::clearJogLatch()
@@ -2427,8 +2557,26 @@ void RobotControlPanel::setAutoCorrectionPaused(bool paused)
 
 void RobotControlPanel::sendMotionCommand()
 {
-    if (!m_controller || m_autoCorrectionActive)
+    // 日志：记录sendMotionCommand调用
+    if (m_touchInputLog.device()) {
+        m_touchInputLog << "[sendMotionCommand] m_controller=" << (m_controller ? "存在" : "nullptr")
+                        << " | m_autoCorrectionActive=" << m_autoCorrectionActive
+                        << " | m_forward=" << m_forward
+                        << " | m_reverse=" << m_reverse
+                        << " | m_left=" << m_left
+                        << " | m_right=" << m_right
+                        << "\n";
+        m_touchInputLog.flush();
+    }
+
+    if (!m_controller || m_autoCorrectionActive) {
+        if (m_touchInputLog.device()) {
+            m_touchInputLog << "[sendMotionCommand_BLOCKED] 控制器不存在或自动纠偏激活\n";
+            m_touchInputLog.flush();
+        }
         return;
+    }
+
     const auto settings = settingsFromUi();
     const double scale = m_speedSlider->value() / 100.0;
     const int forward = m_forward ? 1 : 0;
@@ -2444,6 +2592,17 @@ void RobotControlPanel::sendMotionCommand()
                                          2.0 * synchronizedLimit / settings.trackWidthM);
     const double linear = (forward - reverse) * linearLimit * scale;
     const double angular = (right - left) * angularLimit * scale;
+
+    // 日志：记录计算的运动参数
+    if (m_touchInputLog.device()) {
+        m_touchInputLog << "[sendMotionCommand_PARAMS] scale=" << scale
+                        << " | forward=" << forward << " reverse=" << reverse
+                        << " | left=" << left << " right=" << right
+                        << " | linear=" << linear << " angular=" << angular
+                        << "\n";
+        m_touchInputLog.flush();
+    }
+
     QMetaObject::invokeMethod(m_controller, "setInputCommand",
                               Qt::QueuedConnection, Q_ARG(double, linear),
                               Q_ARG(double, angular));

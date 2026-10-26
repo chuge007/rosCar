@@ -109,27 +109,44 @@ void RobotUsbCameraController::scanDevices() {
 }
 
 void RobotUsbCameraController::teardownSlot(UsbSlot& slot) {
-  if (slot.camera)
+  // Improved camera resource cleanup for reliable reconnection
+  if (slot.camera) {
+    // Disconnect all signals to prevent spurious callbacks during teardown
+    disconnect(slot.camera, nullptr, this, nullptr);
     slot.camera->stop();
+    // Give Qt's media system time to release hardware resources
+    slot.camera->deleteLater();
+    slot.camera = nullptr;
+  }
+
+  if (slot.videoSink) {
+    disconnect(slot.videoSink, nullptr, this, nullptr);
+    slot.videoSink->deleteLater();
+    slot.videoSink = nullptr;
+  }
+
   if (slot.captureSession) {
     slot.captureSession->setCamera(nullptr);
     slot.captureSession->setVideoSink(nullptr);
+    slot.captureSession->deleteLater();
+    slot.captureSession = nullptr;
   }
-  delete slot.camera;
-  slot.camera = nullptr;
-  delete slot.videoSink;
-  slot.videoSink = nullptr;
-  delete slot.captureSession;
-  slot.captureSession = nullptr;
 
   stopNetworkReader(slot);
-  delete slot.networkWatchdog;
-  slot.networkWatchdog = nullptr;
-  delete slot.networkReconnectTimer;
-  slot.networkReconnectTimer = nullptr;
+  if (slot.networkWatchdog) {
+    slot.networkWatchdog->stop();
+    delete slot.networkWatchdog;
+    slot.networkWatchdog = nullptr;
+  }
+  if (slot.networkReconnectTimer) {
+    slot.networkReconnectTimer->stop();
+    delete slot.networkReconnectTimer;
+    slot.networkReconnectTimer = nullptr;
+  }
   slot.networkWanted = false;
   slot.reconnectAttempts = 0;
   slot.frameProcessing.storeRelease(0);
+  slot.lastFrameTime = 0;
 }
 
 void RobotUsbCameraController::disconnectCamera(int slot) {
@@ -216,12 +233,34 @@ void RobotUsbCameraController::connectCamera(int slot, int deviceIndex, int fps,
 
   // Fallback to in-process mode
   UsbSlot& target = slots_[slot];
+
+  // Log reconnection attempt
+  AppLogger::write(QStringLiteral("USB_CAMERA.CONNECTION"),
+                   QStringLiteral("event=reconnect_attempt slot=%1 device=%2 fps=%3")
+                       .arg(slot).arg(deviceIndex).arg(fps));
+
+  // Teardown existing resources - this now uses deleteLater for safer cleanup
   teardownSlot(target);
 
   const QList<QCameraDevice> cameras = QMediaDevices::videoInputs();
   if (deviceIndex < 0 || deviceIndex >= cameras.size()) {
     const QString message =
-        CRAWLING_TEXT("%1 打开失败：设备编号 %2 不存在，请先重新扫描")
+        CRAWLING_TEXT("%1 打开失败：设备编号 %2 不存在（扫描到 %3 个设备），请先重新扫描")
+            .arg(slotLabel(slot))
+            .arg(deviceIndex)
+            .arg(cameras.size());
+    emit connectionChanged(slot, false, message);
+    emit logMessage(message);
+    AppLogger::error(QStringLiteral("USB_CAMERA.CONNECTION"), message);
+    return;
+  }
+
+  const QCameraDevice device = cameras.at(deviceIndex);
+
+  // Validate device is actually available
+  if (!device.isNull() && device.description().isEmpty()) {
+    const QString message =
+        CRAWLING_TEXT("%1 打开失败：设备 %2 信息无效，可能已断开")
             .arg(slotLabel(slot))
             .arg(deviceIndex);
     emit connectionChanged(slot, false, message);
@@ -230,7 +269,6 @@ void RobotUsbCameraController::connectCamera(int slot, int deviceIndex, int fps,
     return;
   }
 
-  const QCameraDevice device = cameras.at(deviceIndex);
   target.flipHorizontal = flipHorizontal;
   target.flipVertical = flipVertical;
 
@@ -246,15 +284,21 @@ void RobotUsbCameraController::connectCamera(int slot, int deviceIndex, int fps,
             applyFrame(slots_[slotIndexForLambda], slotIndexForLambda, frame);
           });
   connect(target.camera, &QCamera::errorOccurred, this,
-          [this, slot, slotIndexForLambda](QCamera::Error, const QString& errorText) {
+          [this, slot, slotIndexForLambda](QCamera::Error errorCode, const QString& errorText) {
             (void)slotIndexForLambda;
             const QString message =
-                CRAWLING_TEXT("%1 错误：%2")
+                CRAWLING_TEXT("%1 错误：%2（错误代码=%3）")
                     .arg(slotLabel(slot))
-                    .arg(errorText.isEmpty() ? CRAWLING_TEXT("未知采集错误") : errorText);
+                    .arg(errorText.isEmpty() ? CRAWLING_TEXT("未知采集错误") : errorText)
+                    .arg(static_cast<int>(errorCode));
             emit connectionChanged(slot, false, message);
             emit logMessage(message);
-            AppLogger::error(QStringLiteral("USB_CAMERA.ACQUISITION"), message);
+            AppLogger::error(QStringLiteral("USB_CAMERA.ACQUISITION"),
+                           QStringLiteral("slot=%1 error_code=%2 error_text=\"%3\"")
+                               .arg(slot).arg(static_cast<int>(errorCode)).arg(errorText));
+
+            // Cleanup the failed slot to allow clean reconnection
+            teardownSlot(slots_[slot]);
           });
 
   QCameraFormat selectedFormat;
