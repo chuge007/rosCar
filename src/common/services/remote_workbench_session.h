@@ -10,13 +10,16 @@
 #include <QString>
 #include <QStringList>
 
+class QThread;
+
 namespace pa1664::remote {
 
 class ControlClient;
 class RealtimeClient;
 class MediaClient;
 class BulkClient;
-class QThread;
+// Defined in transport/control_client.h.
+enum class ConnectionState;
 
 enum class WorkbenchConnectionState {
   Offline,

@@ -1,5 +1,6 @@
 #include "workbench_data_codec.h"
 
+#include "protocol/protocol_types.h"
 #include <QBuffer>
 #include <QDataStream>
 #include <QIODevice>
@@ -21,18 +22,11 @@ void setError(QString* error, const QString& detail) {
   if (error) *error = detail;
 }
 
-QDataStream makeWriter(QByteArray* bytes) {
-  QDataStream stream(bytes, QIODevice::WriteOnly);
+// QDataStream is not copyable in Qt 6, so streams are constructed at the call
+// site and configured in place.
+void configureStream(QDataStream& stream) {
   stream.setByteOrder(QDataStream::LittleEndian);
   stream.setVersion(QDataStream::Qt_6_0);
-  return stream;
-}
-
-QDataStream makeReader(const QByteArray& bytes) {
-  QDataStream stream(bytes);
-  stream.setByteOrder(QDataStream::LittleEndian);
-  stream.setVersion(QDataStream::Qt_6_0);
-  return stream;
 }
 
 void writeImage(QDataStream& stream, const QImage& image, int jpegQuality) {
@@ -174,7 +168,8 @@ bool readFrame(QDataStream& stream, DecodedFrame* frame, QString* error) {
 
 QByteArray encodeDecodedFrame(const DecodedFrame& frame) {
   QByteArray body;
-  QDataStream stream = makeWriter(&body);
+  QDataStream stream(&body, QIODevice::WriteOnly);
+  configureStream(stream);
   stream << kDataMagic << kDataVersion << static_cast<quint8>(1);
   writeFrame(stream, frame);
   return stream.status() == QDataStream::Ok ? qCompress(body, 4) : QByteArray();
@@ -189,7 +184,8 @@ bool decodeDecodedFrame(const QByteArray& payload, DecodedFrame* frame,
     setError(error, QStringLiteral("超声帧压缩载荷无效"));
     return false;
   }
-  QDataStream stream = makeReader(body);
+  QDataStream stream(body);
+  configureStream(stream);
   quint32 magic = 0;
   quint16 version = 0;
   quint8 type = 0;
@@ -204,7 +200,8 @@ bool decodeDecodedFrame(const QByteArray& payload, DecodedFrame* frame,
 
 QByteArray encodeGroupScanBatch(const GroupScanFrameBatch& batch) {
   QByteArray body;
-  QDataStream stream = makeWriter(&body);
+  QDataStream stream(&body, QIODevice::WriteOnly);
+  configureStream(stream);
   stream << kDataMagic << kDataVersion << static_cast<quint8>(2);
   stream << static_cast<quint32>(batch.size());
   for (const GroupScanFrame& item : batch) {
@@ -225,7 +222,8 @@ bool decodeGroupScanBatch(const QByteArray& payload,
     setError(error, QStringLiteral("扫描批量压缩载荷无效"));
     return false;
   }
-  QDataStream stream = makeReader(body);
+  QDataStream stream(body);
+  configureStream(stream);
   quint32 magic = 0;
   quint16 version = 0;
   quint8 type = 0;
@@ -252,7 +250,8 @@ bool decodeGroupScanBatch(const QByteArray& payload,
 
 QByteArray encodeImuSample(const crawling::ImuSample& sample) {
   QByteArray bytes;
-  QDataStream stream = makeWriter(&bytes);
+  QDataStream stream(&bytes, QIODevice::WriteOnly);
+  configureStream(stream);
   stream << sample.rollRad << sample.pitchRad << sample.yawRad
          << sample.gyroXRadps << sample.gyroYRadps << sample.gyroZRadps
          << sample.accelerationXMps2 << sample.accelerationYMps2
@@ -267,7 +266,8 @@ bool decodeImuSample(const QByteArray& payload, crawling::ImuSample* sample,
     if (error) *error = QStringLiteral("IMU 载荷长度无效");
     return false;
   }
-  QDataStream stream = makeReader(payload);
+  QDataStream stream(payload);
+  configureStream(stream);
   crawling::ImuSample decoded;
   stream >> decoded.rollRad >> decoded.pitchRad >> decoded.yawRad
       >> decoded.gyroXRadps >> decoded.gyroYRadps >> decoded.gyroZRadps
@@ -283,7 +283,8 @@ bool decodeImuSample(const QByteArray& payload, crawling::ImuSample* sample,
 
 QByteArray encodeImagePayload(const QImage& image, int jpegQuality) {
   QByteArray body;
-  QDataStream stream = makeWriter(&body);
+  QDataStream stream(&body, QIODevice::WriteOnly);
+  configureStream(stream);
   stream << kDataMagic << kDataVersion << static_cast<quint8>(3);
   writeImage(stream, image, jpegQuality);
   return stream.status() == QDataStream::Ok ? body : QByteArray();
@@ -293,7 +294,8 @@ bool decodeImagePayload(const QByteArray& payload, QImage* image,
                         QString* error) {
   if (error) error->clear();
   if (!image || payload.size() > kMaxMediaMessageBytes) return false;
-  QDataStream stream = makeReader(payload);
+  QDataStream stream(payload);
+  configureStream(stream);
   quint32 magic = 0;
   quint16 version = 0;
   quint8 type = 0;
@@ -307,7 +309,8 @@ bool decodeImagePayload(const QByteArray& payload, QImage* image,
 
 QByteArray encodePointCloud(const QVector<QVector3D>& points) {
   QByteArray body;
-  QDataStream stream = makeWriter(&body);
+  QDataStream stream(&body, QIODevice::WriteOnly);
+  configureStream(stream);
   stream << kDataMagic << kDataVersion << static_cast<quint8>(4)
          << static_cast<quint32>(points.size());
   for (const QVector3D& point : points)
@@ -324,7 +327,8 @@ bool decodePointCloud(const QByteArray& payload, QVector<QVector3D>* points,
     setError(error, QStringLiteral("点云压缩载荷无效"));
     return false;
   }
-  QDataStream stream = makeReader(body);
+  QDataStream stream(body);
+  configureStream(stream);
   quint32 magic = 0;
   quint16 version = 0;
   quint8 type = 0;

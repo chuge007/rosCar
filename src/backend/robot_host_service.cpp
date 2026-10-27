@@ -1,5 +1,6 @@
 #include "robot_host_service.h"
 
+#include "protocol/protocol_types.h"
 #include "services/robot_json_codec.h"
 #include "robot/synchronized_drive_controller.h"
 

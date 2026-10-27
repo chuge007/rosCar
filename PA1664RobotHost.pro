@@ -1,7 +1,10 @@
-﻿QT += core gui network serialport multimedia
+QT += core gui network serialport multimedia
 CONFIG += c++17 console
 CONFIG += force_debug_info
 CONFIG -= app_bundle
+# src/main.cpp and src/backend/main.cpp share a basename; without no_batch
+# the MSVC batch inference rules compile src/main.cpp (the GUI entry point).
+CONFIG += no_batch
 
 TARGET = PA1664RobotHost
 DESTDIR = $$PWD/bin
@@ -27,6 +30,9 @@ SOURCES += \
     src/backend/robot_peripheral_host_service.cpp \
     src/backend/ultrasound_host_service.cpp \
     src/backend/ultrasound_parameter_rpc.cpp \
+    src/services/ultrasound_parameter_service.cpp \
+    src/common/services/remote_workbench_session.cpp \
+    src/common/transport/control_client.cpp \
     src/devicecontroller.cpp \
     src/framedecoderworker.cpp \
     src/packetdecoder.cpp \
@@ -93,6 +99,9 @@ HEADERS += \
     src/common/transport/media_channel.h \
     src/common/transport/bulk_channel.h \
     src/common/services/workbench_data_codec.h \
+    src/common/services/remote_workbench_session.h \
+    src/common/transport/control_client.h \
+    src/services/ultrasound_parameter_service.h \
     src/common/transport/control_server.h \
     src/common/transport/realtime_channel.h \
     src/common/services/robot_json_codec.h \

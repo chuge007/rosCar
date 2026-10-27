@@ -67,8 +67,8 @@ int alignCellDown(qint64 value, int quantum)
     const qint64 aligned = value >= 0
                                ? (value / q) * q
                                : -((-value + q - 1) / q) * q;
-    return int(qBound<qint64>(std::numeric_limits<int>::min(),
-                              aligned, std::numeric_limits<int>::max()));
+    return int(qBound(qint64(std::numeric_limits<int>::min()),
+                              qint64(aligned), qint64(std::numeric_limits<int>::max())));
 }
 
 int alignCellUp(qint64 value, int quantum)
@@ -77,8 +77,8 @@ int alignCellUp(qint64 value, int quantum)
     const qint64 aligned = value >= 0
                                ? ((value + q - 1) / q) * q
                                : -((-value) / q) * q;
-    return int(qBound<qint64>(std::numeric_limits<int>::min(),
-                              aligned, std::numeric_limits<int>::max()));
+    return int(qBound(qint64(std::numeric_limits<int>::min()),
+                              qint64(aligned), qint64(std::numeric_limits<int>::max())));
 }
 
 struct CScanViewGeometry
@@ -212,7 +212,7 @@ public:
             if (update.gate < 0 || update.gate >= m_gateCells.size())
                 continue;
             auto &cells = m_gateCells[update.gate];
-            const auto existing = cells.constFind(update.cell);
+            auto existing = cells.find(update.cell);
             if (existing != cells.constEnd()) {
                 if (*existing >= update.amplitude)
                     continue;

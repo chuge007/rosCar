@@ -204,7 +204,7 @@ QVector<ControlFrame> ControlStreamDecoder::append(const QByteArray& bytes,
     const QByteArray oneFrame = buffer_.left(static_cast<int>(totalBytes));
     ControlFrame frame;
     int consumed = 0;
-    const DecodeResult result = decodeOne(oneFrame, &frame, &consumed, error);
+    const DecodeResult result = ControlCodec::decodeOne(oneFrame, &frame, &consumed, error);
     if (result != DecodeResult::Ok) {
       buffer_.clear();
       break;

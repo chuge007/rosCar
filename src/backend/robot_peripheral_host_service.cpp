@@ -1,5 +1,6 @@
 #include "robot_peripheral_host_service.h"
 
+#include "robot_host_service.h"
 #include "clamp_motor_controller.h"
 #include "laser_correction_controller.h"
 #include "robot_sensor_controller.h"
@@ -1260,7 +1261,8 @@ void RobotPeripheralHostService::handleClampRequest(
       return;
     }
     QMetaObject::invokeMethod(clamp_, "connectDevice", Qt::QueuedConnection);
-    emit eventReady(sessionId, QStringLiteral("robot.clamp.connecting"));
+    emit eventReady(sessionId, QStringLiteral("robot.clamp.connecting"),
+                    QJsonObject{});
     respond(sessionId, requestId, true,
             QJsonObject{{QStringLiteral("queued"), true}});
     return;

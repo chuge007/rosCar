@@ -1,9 +1,10 @@
 #include "robot_json_codec.h"
 
-#include <QBuffer>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonValue>
 #include <QSettings>
+#include <QTemporaryFile>
 
 #include <cmath>
 
@@ -47,16 +48,21 @@ void readMotor(const QJsonObject& value, crawling::MotorFeedback* motor) {
 }  // namespace
 
 QJsonObject driveSettingsToJson(const crawling::DriveSettings& settings) {
-  QByteArray ini;
-  QBuffer buffer(&ini);
-  if (!buffer.open(QIODevice::WriteOnly)) return {};
+  // QSettings only works with file paths, so round-trip through a temp file.
+  QTemporaryFile temp;
+  if (!temp.open()) return {};
+  const QString iniPath = temp.fileName();
+  temp.close();
   {
-    QSettings stored(&buffer, QSettings::IniFormat);
+    QSettings stored(iniPath, QSettings::IniFormat);
     settings.save(stored);
     stored.sync();
     if (stored.status() != QSettings::NoError) return {};
   }
-  buffer.close();
+  QFile iniFile(iniPath);
+  if (!iniFile.open(QIODevice::ReadOnly)) return {};
+  const QByteArray ini = iniFile.readAll();
+  iniFile.close();
   QJsonObject json;
   json.insert(QStringLiteral("schema"),
               crawling::DriveSettings::kCurrentSettingsSchemaVersion);
@@ -84,13 +90,14 @@ bool driveSettingsFromJson(const QJsonObject& json,
     if (error) *error = QStringLiteral("底盘配置内容无效");
     return false;
   }
-  QBuffer buffer;
-  buffer.setData(ini);
-  if (!buffer.open(QIODevice::ReadOnly)) {
+  QTemporaryFile temp;
+  if (!temp.open() || temp.write(ini) != ini.size() || !temp.flush()) {
     if (error) *error = QStringLiteral("无法读取底盘配置");
     return false;
   }
-  QSettings stored(&buffer, QSettings::IniFormat);
+  const QString iniPath = temp.fileName();
+  temp.close();
+  QSettings stored(iniPath, QSettings::IniFormat);
   if (!stored.contains(QStringLiteral("drive/settingsSchemaVersion"))) {
     if (error) *error = QStringLiteral("底盘配置缺少版本字段");
     return false;

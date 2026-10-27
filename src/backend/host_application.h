@@ -8,6 +8,8 @@
 #include <QQueue>
 #include <QString>
 
+class QThread;
+
 namespace pa1664::remote {
 
 class BulkServer;
@@ -17,7 +19,6 @@ class MediaServer;
 class RealtimeServer;
 class RobotHostService;
 class RobotPeripheralHostService;
-class QThread;
 
 class HostApplication final : public QObject {
   Q_OBJECT

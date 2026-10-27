@@ -3,3 +3,5 @@
 !*/app/PLACE_RUNTIME_FILES_HERE.txt
 */runtime/*
 !*/runtime/.gitkeep
+# Local build logs.
+/*-Build-log.txt

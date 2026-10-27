@@ -227,6 +227,10 @@ class UltrasoundParameterService final : public QObject {
   bool setWorkpieceVelocity(double velocity, int groupId = -1);
 
  private:
+  struct GetRequest {
+    QString method;
+    QJsonArray args;
+  };
   struct SetRequest {
     QString method;
     QJsonArray args;

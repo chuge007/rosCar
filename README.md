@@ -1,111 +1,286 @@
-# PA1664Workbench
+# PA1664 Robot Control System - Deployment Guide
 
-PA-1664 超声设备的新上位机项目。项目基于厂商 `USB-SDK-1.0.0.10`，采用 Qt 6.8.3 / MSVC 2022，运行在 Windows x64。
+## 项目概述
 
-## 直接运行
+PA1664 爬壁机器人控制系统 - 上位机/下位机架构
 
-1. 先关闭厂商 `Phaselink.exe`。同一块 USB 设备不能被两个程序同时占用。
-2. 双击 `bin\PA1664Workbench.exe`。
-3. 等待约 2～3 秒，让底层 USB 框架完成初始化。
-4. 点击“连接 SDK”，再点击“开始采集”或按 `F5`。
-5. 只有界面显示绿色“USB 硬件在线”才表示真正收到设备帧；“SDK 已连接”只说明本地服务连接成功。
+- **下位机（小车端）**: PA1664RobotHost.exe - 后台服务，控制硬件
+- **上位机（操作端）**: PA1664Workbench.exe - 图形界面，远程控制
 
-连接成功后厂商 SDK 还要异步下发工作组配置。此时可以立即点击“开始采集”：程序会显示“开始已排队”，等待约 3 秒后自动启动；若 SDK 暂时拒绝启动，程序会每隔 1.5 秒自动重试，最多三次。
+---
 
-停止采集快捷键为 `F6`。首次调试时建议保持已验证的探头、增益、电压和 PRF 参数，不要一次修改很多激励参数。
+## 🚀 快速开始
 
-## 双端独立启动目录和登录自启动
+### Step 1: 编译打包（开发机）
 
-远程控制部署分为两个互相独立的目录：
+**进入 startup_deploy 目录，选择编译模式：**
 
-- `startup_deploy\robot_host`：放到小车电脑，启动 `PA1664RobotHost.exe`；
-- `startup_deploy\operator_workbench`：放到操作电脑，启动原有 `PA1664Workbench.exe` 并连接 Host。
+#### 首次使用（必须）
+`
+双击：【完整构建】Full-Build.cmd
+等待：5-10 分钟
+`
 
-两个目录都提供：
+#### 日常开发（推荐）
+`
+双击：【快速构建】Quick-Build.cmd
+等待：1-2 分钟（快 5 倍！）
+`
 
-- `Start...cmd`：手动启动；
-- `InstallAutoStart.cmd`：创建桌面快捷方式和当前 Windows 用户登录自启动；
-- `UninstallAutoStart.cmd`：删除快捷方式和自启动；
-- `runtime\launcher.log`：启动器日志；
-- 独立配置文件。
+### Step 2: 部署小车端
 
-操作电脑连接的小车 IP 在 `startup_deploy\operator_workbench\config\workbench.psd1` 中设置。详细部署步骤见 `startup_deploy\README.md`。
+`
+复制 startup_deploy\robot_host\ 到小车电脑
+编辑 robot_host\config\host.psd1（可选）
+双击 robot_host\启动小车程序.cmd
+`
 
-登录自启动运行在已登录的交互用户会话中，不是 Session 0 Windows 服务，以避免 USB、相机和厂商 SDK 无法访问。若需要无人值守，应为专用 Windows 用户配置受控自动登录。
+### Step 3: 部署控制端
 
-## 已实现功能
+`
+复制 startup_deploy\operator_workbench\ 到操作电脑
+编辑 operator_workbench\config\workbench.psd1 填写小车IP
+双击 operator_workbench\启动操作界面.cmd
+`
 
-- USB/Combo 模式 SDK 连接、断开、启动、停止和编码器复位
-- 真实帧看门狗：拔掉 USB 后不会继续显示硬件在线
-- 多工作组选择、复制和删除，自动计算组数据偏移
-- A 扫实时波形、声束切换、A/B/C/I 闸门叠加
-- E 扫原始截面图
-- C 扫累积图，可选择 A/B/C/I 的幅值或位置
-- E/B/C 扫描为三个独立开关，可全部开启、任意两项/单项开启或全部关闭；切换显示页签不会停止后台扫描
-- 帧号、时间戳、五路编码器位置和帧错误显示
-- 增益、声程、声速、电压、脉宽、极性、滤波、检波、采样点、零点、幅值范围、抑制和 PRF
-- 线性/扇形/UT 扫查、孔径、阵元步进、角度和聚焦参数
-- 探头、楔块参数
-- PA-1664 八路一激一收选择：界面通道 1–8 直接对应当前 USB SDK 公开 TX/RX 接口的 1–8；可同通道脉冲回波，也可异通道一发一收
-  - 厂家 JSON 中可能出现通道值 0，但真机回读确认公开 API 写入 0 会被修正为 1，不能用 JSON 的内部值推断 API 为零基编号
-  - 当前 SDK 版本的 TX/RX 接口必须使用默认 `groupId=-1` 操作当前活动工作组；显式传入界面组号可能抛出 `Key not found in group`
-  - 每次通道写入后立即通过 getter 回读校验，回读不一致时不会把界面值误报为已应用
-- Gate A/B/C/I 全部参数和 Gate I 同步采样
-- TCG 10 点整组设置及指定声束设置
-- 编码器方向和工件厚度
-- SDK JSON 配置加载与保存
-- 参数采用自动差异提交：用户完成输入约 600 ms 后，只下发实际改变的字段，随后自动从 SDK 回读；提交前自动暂停采集，完成后自动恢复，不再需要“从 SDK 读取 / 应用已修改参数 / 整批推送设备”三个按钮
-- 参数恢复状态机：无修改时不再无意义地重启采集；有修改时进入约 5 秒设备配置稳定期，再自动启动并等待真实硬件帧
-- 有效 PRF 保护：有效 PRF 约等于“采集帧率 × 所有工作组总 beam 数”；当前真机日志确认上限为 `12848`，超限时自动下调采集帧率，避免 USB 数据流运行片刻后停止
-- 原始帧录制与回放；录制时同时保存对应 JSON 配置
-- 集成 LanRemoteQt 远程桌面入口（`工具 -> 打开远程桌面`），远控组件与主程序使用隔离的 Qt 5/Qt 6 运行目录
-- PA-1664 专用远程控制台：远程连接/断开 SDK、启停采集、编码器复位、状态监视及常用参数读写
-- 同用户命名管道控制边界：远控组件只能调用固定白名单，不开放采集 SDK 的任意命令执行能力
-- 正式产品式双工作区：主窗口内直接切换“超声检测 / 小车控制”，也可使用 `Ctrl+Shift+M`；超声工具栏不再放置重复的小车按钮
-- 小车控制核心已复制到本工程 `src/robot`，直接集成双轮 RS485 控制、差速混合、双轮同步、安全状态机、反馈看门狗、紧急停止和现场参数持久化；编译不再读取原小车工程
-- 小车页采用左侧“SDK 实时轮廓与焊道定位 / USB 摄像头”、右侧“手动调节 / 底盘接口参数”的产品布局，整页支持鼠标滚轮和纵向滚动条；USB 摄像头通过 Qt Multimedia 可直接刷新、选择、连接和预览
-- 菜单“信息 -> 小车信息”打开独立小窗，左侧显示小车状态，右侧显示运行日志
-- 夹具 X/Y/Z 点动已移至超声检测右侧“探头调节”页签
+---
 
-## 编译
+## 📁 项目结构
 
-双击 `build.cmd`，或者在 PowerShell 中运行：
+`
+PA1664WorkbenchTmpSeparate\
+│
+├── PA1664RobotHost.pro           # 小车端项目（Qt）
+├── PA1664Workbench.pro           # 控制端项目（Qt）
+│
+├── bin\                          # 编译输出目录
+│   ├── PA1664RobotHost.exe
+│   ├── PA1664Workbench.exe
+│   └── *.dll
+│
+├── runtime\                      # 运行时依赖
+│
+├── README.md                     # 本文件
+├── 超简单README.md               # 极简指南
+│
+└── startup_deploy\               # 🔥 部署包目录（所有命令都在这里）
+    │
+    ├── 【完整构建】Full-Build.cmd      # 完整构建命令
+    ├── 【快速构建】Quick-Build.cmd     # 快速构建命令
+    │
+    ├── build-all.ps1                   # 编译脚本
+    ├── deploy-to-startup.ps1           # 打包脚本
+    │
+    ├── README.md                       # 快速参考
+    ├── 使用说明.md                     # 详细指南
+    │
+    ├── robot_host\               # 小车电脑部署包
+    │   ├── app\                  # 编译后生成
+    │   ├── config\
+    │   ├── 启动小车程序.cmd
+    │   └── Install/UninstallAutoStart.ps1
+    │
+    └── operator_workbench\       # 操作电脑部署包
+        ├── app\                  # 编译后生成
+        ├── config\
+        ├── 启动操作界面.cmd
+        └── Install/UninstallAutoStart.ps1
+`
 
-```powershell
-& 'D:\car\PA1664Workbench\build.cmd'
-```
+---
 
-脚本会调用 VS 2022、Qt 6.8.3、qmake 和 jom，并把 `runtime` 中经过真机验证的依赖部署到 `bin`。编译需要官方 Qt 6.8.3 Serial Port 模块；小车控制源码和默认参数均已包含在本工程，不依赖相邻的小车工程目录。如果设置了 `LANREMOTEQT_DIST_DIR`，还会把对应的 LanRemoteQt 发布目录复制到 `bin\RemoteDesktop`。
+## 🔥 两种编译模式
 
-真机自动自检：
+### 完整构建（Full Build）
+- **命令**: 双击 startup_deploy\【完整构建】Full-Build.cmd
+- **用途**: 首次编译、依赖变化
+- **时间**: 5-10 分钟
+- **更新**: EXE + 所有 DLL、plugins
 
-```powershell
-& 'D:\car\PA1664Workbench\bin\PA1664Workbench.exe' --hardware-test
-```
+### 快速构建（Quick Build）⚡
+- **命令**: 双击 startup_deploy\【快速构建】Quick-Build.cmd
+- **用途**: 日常代码修改
+- **时间**: 1-2 分钟
+- **更新**: 仅 EXE 文件
 
-返回码 `0` 表示 SDK 已连接、硬件已启动且收到至少一个真实数据帧；`2` 表示 SDK 连接失败，`3` 表示未收到硬件帧。
+**加速效果：约 5 倍！**
 
-## 目录
+---
 
-- `src`：新上位机源码
-- `src\robot`：已迁入本工程的小车运动控制核心
-- `vendor\phaselink`：厂商公开头文件和 import library
-- `runtime`：SDK、USB 框架、固件、插件及设备配置的部署源
-- `bin`：可运行程序和部署后的运行环境
-- `bin\RemoteDesktop`：隔离部署的 Qt 5 远程桌面组件，由工作台菜单启动
-- `bin\config\drive_settings.ini`：内置小车控制页使用的现场校准与安全参数
-- `docs`：协议和架构说明
+## 💻 命令行方式
 
-程序启动后日志写入 `bin\logs`。设备当前绑定序列号为 `00101d491c23185c`，配置位于 `runtime\configs\device_0\prefs.json`。
+`powershell
+# 进入部署目录
+cd startup_deploy
 
-## 小车集成边界
+# 完整构建
+.\build-all.ps1
 
-双轮运动控制已作为 Qt 6 内部模块运行在专用控制线程中，主界面关闭时会先下发急停和安全关闭，再释放串口。已迁入的源码位于 `src\robot`；原项目仅作为迁移来源，不参与编译，也没有被修改。
+# 快速构建
+.\build-all.ps1 -QuickMode
 
-USB 相机画面使用 Qt Multimedia 接入。MV3DLP 激光采集驱动按 `crawling_robot_desktop2` 实际编译的 `modules/mv3dlp_laser_profile/windows_x64` 实现迁入本工程；焊道检测、轨迹估计和自动纠偏沿用该项目算法，界面保留工作台布局。预览使用完整的最新 X/Z 扫描，不使用抽样后的点云进行焊道检测。排查步骤见 [激光轮廓调试](docs/laser-profile-debugging.md)。
+# 指定 Qt 路径
+.\build-all.ps1 -QtPath "D:\Qt\6.8.3\msvc2022_64"
 
-超声与运动目前可以在同一主程序中独立操作，但还没有自动扫查任务编排。下一阶段可增加“自动扫查”页，把运动距离、速度、B/C/E 扫选择、自动启停和结果保存组合为可审计的任务，同时继续由小车安全状态机裁决急停、通信超时、限速和故障停车。
+# 强制重新收集依赖
+.\build-all.ps1 -Force
+`
 
-## 参数修改自动下发
+---
 
-数值输入完成或开关/下拉框改变后，界面会等待约 600 ms 合并连续操作，只下发发生变化的字段。写入结束后立即从 SDK 回读真实值，并按安全时序恢复采集，因此不再需要手工点击应用或读取按钮。
+## 📡 网络架构
+
+### 通信通道（4 个端口）
+
+| 端口 | 协议 | 用途 |
+|------|------|------|
+| 43100 | TCP | 命令控制 |
+| 43101 | UDP | 实时数据 |
+| 43102 | UDP | 媒体流 |
+| 43103 | TCP | 批量数据 |
+
+### 配置文件
+
+**小车端** (obot_host\config\host.psd1):
+`powershell
+@{
+    TcpCommandPort = 43100
+    UdpRealtimePort = 43101
+    UdpMediaPort = 43102
+    TcpBulkPort = 43103
+}
+`
+
+**控制端** (operator_workbench\config\workbench.psd1):
+`powershell
+@{
+    RobotHostIP = "192.168.1.100"  # 小车IP
+    TcpCommandPort = 43100
+    UdpRealtimePort = 43101
+    UdpMediaPort = 43102
+    TcpBulkPort = 43103
+}
+`
+
+---
+
+## 🛠️ 开发环境要求
+
+### 编译环境
+- Qt 6.8.x (MSVC 2022 64-bit)
+- Visual Studio 2022 (MSVC v143)
+- CMake 或 qmake
+- OpenCV 5.0
+- PhaseLink SDK
+
+### 运行环境
+- Windows 10/11 64-bit
+- .NET Framework 4.8+
+- Visual C++ Redistributable 2022
+
+---
+
+## 📖 详细文档
+
+- **极简指南**: 超简单README.md
+- **快速参考**: startup_deploy\README.md
+- **完整指南**: startup_deploy\使用说明.md
+- **架构设计**: docs\REMOTE_CONTROL_ARCHITECTURE.md
+
+---
+
+## ⚙️ 开机自启动
+
+### 安装（需管理员权限）
+`powershell
+# 小车端
+cd robot_host
+.\InstallAutoStart.ps1
+
+# 控制端
+cd operator_workbench
+.\InstallAutoStart.ps1
+`
+
+### 卸载
+`powershell
+.\UninstallAutoStart.ps1
+`
+
+---
+
+## 🐛 故障排查
+
+### 1. 编译问题
+
+#### 找不到 qmake
+`powershell
+# 指定 Qt 路径
+cd startup_deploy
+.\build-all.ps1 -QtPath "D:\Qt\6.8.3\msvc2022_64"
+`
+
+#### 找不到 nmake
+`
+打开 "x64 Native Tools Command Prompt for VS 2022"
+cd startup_deploy
+powershell -ExecutionPolicy Bypass -File .\build-all.ps1
+`
+
+#### 快速构建失败："app not found"
+`
+原因：首次必须运行完整构建
+解决：双击【完整构建】Full-Build.cmd
+`
+
+### 2. 连接问题
+
+- ✅ 小车程序是否运行
+- ✅ IP 地址配置是否正确
+- ✅ 防火墙是否允许端口 43100-43103
+- ✅ 网络是否互通（ping 测试）
+
+### 3. 日志位置
+
+- 小车端: obot_host\app\logs\
+- 控制端: operator_workbench\app\logs\
+
+---
+
+## 🎯 典型工作流
+
+### 首次部署
+1. 进入 startup_deploy 目录
+2. 双击 【完整构建】Full-Build.cmd
+3. 等待编译完成（5-10 分钟）
+4. 复制 obot_host 到小车电脑
+5. 复制 operator_workbench 到操作电脑
+6. 配置 IP 地址
+7. 测试运行
+
+### 日常开发
+1. 修改代码
+2. 进入 startup_deploy 目录
+3. 双击 【快速构建】Quick-Build.cmd
+4. 等待 1-2 分钟
+5. 仅更新 EXE 文件到对应电脑
+6. 重启程序测试
+
+### 依赖变化时
+1. 进入 startup_deploy 目录
+2. 双击 【完整构建】Full-Build.cmd
+3. 重新复制整个文件夹到目标电脑
+
+---
+
+## 📞 技术支持
+
+详细架构和设计文档请参考:
+- docs\REMOTE_CONTROL_ARCHITECTURE.md
+- startup_deploy\README.md
+- startup_deploy\使用说明.md
+
+---
+
+**版本**: v2.0 - Separated Build Commands  
+**最后更新**: 2024-10-27

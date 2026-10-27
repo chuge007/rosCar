@@ -96,7 +96,7 @@ void UltrasoundParameterService::bindRemoteSession(RemoteWorkbenchSession* sessi
     applyErrors_.clear();
     commitRequested_ = false;
     snapshotRequested_ = false;
-    emit message(QStringLiteral("超声参数缓存已失效：%1").arg(reason), false);
+    emit this->message(QStringLiteral("超声参数缓存已失效：%1").arg(reason), false);
     scheduleChanged();
   });
   connect(remote_, &RemoteWorkbenchSession::responseReceived, this,
@@ -222,7 +222,7 @@ void UltrasoundParameterService::exportPresetFile(const QString& path) {
 void UltrasoundParameterService::saveScanPrecisionMmPerCell(int presetId,
                                                              double mmPerCell) {
   if (!remote_ || !remote_->isReady()) {
-    emit message(QStringLiteral("小车主机尚未连接，扫查精度未保存"), true);
+    emit this->message(QStringLiteral("小车主机尚未连接，扫查精度未保存"), true);
     return;
   }
   const quint64 requestId = remote_->request(
@@ -230,7 +230,7 @@ void UltrasoundParameterService::saveScanPrecisionMmPerCell(int presetId,
       QJsonObject{{QStringLiteral("presetId"), presetId},
                   {QStringLiteral("mmPerCell"), mmPerCell}});
   if (requestId == 0) {
-    emit message(QStringLiteral("扫查精度保存请求发送失败"), true);
+    emit this->message(QStringLiteral("扫查精度保存请求发送失败"), true);
     return;
   }
   scanPrecisionRequests_.insert(requestId, qMakePair(presetId, mmPerCell));
@@ -245,7 +245,7 @@ void UltrasoundParameterService::requestScanPrecision(int presetId) {
 void UltrasoundParameterService::saveEncoderCalibration(double wheelDiameterMm,
                                                         int resolution) {
   if (!remote_ || !remote_->isReady()) {
-    emit message(QStringLiteral("小车主机尚未连接，编码器标定未保存"), true);
+    emit this->message(QStringLiteral("小车主机尚未连接，编码器标定未保存"), true);
     return;
   }
   const quint64 requestId = remote_->request(
@@ -253,7 +253,7 @@ void UltrasoundParameterService::saveEncoderCalibration(double wheelDiameterMm,
       QJsonObject{{QStringLiteral("wheelDiameterMm"), wheelDiameterMm},
                   {QStringLiteral("resolution"), resolution}});
   if (requestId == 0) {
-    emit message(QStringLiteral("编码器标定保存请求发送失败"), true);
+    emit this->message(QStringLiteral("编码器标定保存请求发送失败"), true);
     return;
   }
   encoderCalibrationRequests_.insert(
@@ -1317,10 +1317,10 @@ void UltrasoundParameterService::onResponse(const QString& operation,
           data.value(QStringLiteral("importedPresetIds")).toArray();
       QStringList encoded;
       for (const QJsonValue& id : ids) encoded << QString::number(id.toInt());
-      emit message(QStringLiteral("主机已导入 %1 个参数预设：%2")
-                       .arg(ids.size())
-                       .arg(encoded.join(QStringLiteral(", "))),
-                   false);
+      const QString msg = QStringLiteral("主机已导入 %1 个参数预设：%2")
+                              .arg(ids.size())
+                              .arg(encoded.join(QStringLiteral(", ")));
+      emit this->message(msg, false);
     }
     activePresetRequestId_ = 0;
     activePresetOperation_.clear();
@@ -1335,18 +1335,20 @@ void UltrasoundParameterService::onResponse(const QString& operation,
       emit scanPrecisionChanged(
           data.value(QStringLiteral("presetId")).toInt(currentPresetId_),
           data.value(QStringLiteral("mmPerCell")).toDouble());
-    else
-      emit message(QStringLiteral("读取主机扫查精度失败 [%1]：%2")
-                       .arg(errorCode, errorText),
-                   true);
+    else {
+      const QString msg = QStringLiteral("读取主机扫查精度失败 [%1]：%2")
+                              .arg(errorCode, errorText);
+      emit this->message(msg, true);
+    }
     return;
   }
   if (operation == QStringLiteral("ultrasound.scan.precision.set")) {
     const auto it = scanPrecisionRequests_.find(requestId);
-    if (!ok) {
-      emit message(QStringLiteral("远程保存扫查精度失败 [%1]：%2")
-                       .arg(errorCode, errorText),
-                   true);
+    if (!ok) { {
+      const QString msg = QStringLiteral("远程保存扫查精度失败 [%1]：%2")
+                              .arg(errorCode, errorText);
+      emit this->message(msg, true);
+    }
       if (it != scanPrecisionRequests_.end())
         scanPrecisionRequests_.erase(it);
     } else if (it != scanPrecisionRequests_.end()) {
@@ -1361,24 +1363,25 @@ void UltrasoundParameterService::onResponse(const QString& operation,
           data.value(QStringLiteral("wheelDiameterMm")).toDouble(500.0),
           data.value(QStringLiteral("resolution")).toInt(4096));
     } else {
-      emit message(QStringLiteral("读取主机编码器标定失败 [%1]：%2")
-                       .arg(errorCode, errorText),
-                   true);
+      const QString msg = QStringLiteral("读取主机编码器标定失败 [%1]：%2")
+                              .arg(errorCode, errorText);
+      emit this->message(msg, true);
     }
     return;
   }
   if (operation == QStringLiteral("ultrasound.encoder.calibration.set")) {
     const auto it = encoderCalibrationRequests_.find(requestId);
-    if (!ok) {
-      emit message(QStringLiteral("远程保存编码器标定失败 [%1]：%2")
-                       .arg(errorCode, errorText),
-                   true);
+    if (!ok) { {
+      const QString msg = QStringLiteral("远程保存编码器标定失败 [%1]：%2")
+                              .arg(errorCode, errorText);
+      emit this->message(msg, true);
+    }
       if (it != encoderCalibrationRequests_.end())
         encoderCalibrationRequests_.erase(it);
     } else if (it != encoderCalibrationRequests_.end()) {
       // The controls already contain the requested value. Re-emitting a
       // snapshot here would echo the save back through the operator UI.
-      emit message(QStringLiteral("编码器标定已保存"), false);
+      emit this->message(QStringLiteral("编码器标定已保存"), false);
       encoderCalibrationRequests_.erase(it);
     }
     return;
@@ -1387,10 +1390,11 @@ void UltrasoundParameterService::onResponse(const QString& operation,
   if (operation == QStringLiteral("ultrasound.presets.list")) {
     if (ok)
       applyPresetState(data, true);
-    else
-      emit message(QStringLiteral("读取主机参数预设失败 [%1]：%2")
-                       .arg(errorCode, errorText),
-                   true);
+    else {
+      const QString msg = QStringLiteral("读取主机参数预设失败 [%1]：%2")
+                              .arg(errorCode, errorText);
+      emit this->message(msg, true);
+    }
     return;
   }
 
@@ -1430,9 +1434,9 @@ void UltrasoundParameterService::onResponse(const QString& operation,
           finishRemoteApply(false, QStringLiteral("参数提交请求发送失败"));
       }
     } else if (!ok) {
-      emit message(QStringLiteral("远程参数应用未完全成功 [%1]：%2")
-                       .arg(errorCode, errorText),
-                   true);
+      const QString msg = QStringLiteral("远程参数应用未完全成功 [%1]：%2")
+                              .arg(errorCode, errorText);
+      emit this->message(msg, true);
     }
     return;
   }
@@ -1451,10 +1455,11 @@ void UltrasoundParameterService::onResponse(const QString& operation,
   }
 
   if (!ok) {
-    if (operation.startsWith(QStringLiteral("ultrasound.")))
-      emit message(QStringLiteral("%1 失败 [%2]：%3")
-                       .arg(operation, errorCode, errorText),
-                   true);
+    if (operation.startsWith(QStringLiteral("ultrasound."))) {
+      const QString msg = QStringLiteral("%1 失败 [%2]：%3")
+                              .arg(operation, errorCode, errorText);
+      emit this->message(msg, true);
+    }
     return;
   }
   if (operation == QStringLiteral("ultrasound.parameters.snapshot")) {

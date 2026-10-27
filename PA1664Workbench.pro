@@ -1,4 +1,4 @@
-﻿QT += core gui widgets network serialport multimedia
+QT += core gui widgets network serialport multimedia
 CONFIG += c++17 release console
 CONFIG += force_debug_info
 CONFIG -= app_bundle
