@@ -7,6 +7,9 @@
 
 namespace {
 constexpr qint64 kGroupScanUiEmitIntervalMs = 20;
+// Longer than draining the 36-packet display queue at 30 FPS.
+constexpr qint64 kDecoderIdleAfterMs = 1500;
+constexpr int kDecoderIdleIntervalMs = 200;
 }
 
 FrameDecoderWorker::FrameDecoderWorker(DeviceController *source)
@@ -20,12 +23,49 @@ void FrameDecoderWorker::startPolling()
         return;
     m_pollTimer = new QTimer(this);
     m_pollTimer->setTimerType(Qt::PreciseTimer);
-    m_pollTimer->setInterval(33);
+    m_pollTimer->setInterval(activeIntervalMs());
     connect(m_pollTimer, &QTimer::timeout,
             this, &FrameDecoderWorker::processLatestPacket);
+    if (m_source)
+        connect(m_source, &DeviceController::packetsAvailable,
+                this, &FrameDecoderWorker::wakeFromIdle, Qt::QueuedConnection);
     m_pollTimer->start();
     m_telemetryClock.start();
     m_groupScanEmitClock.start();
+    m_activityClock.start();
+}
+
+void FrameDecoderWorker::wakeFromIdle()
+{
+    m_activityClock.restart();
+    if (!m_idle || !m_pollTimer)
+        return;
+    m_idle = false;
+    m_pollTimer->setInterval(activeIntervalMs());
+    processLatestPacket();
+}
+
+void FrameDecoderWorker::updateIdleState()
+{
+    const quint64 frames = m_source ? m_source->totalFrames() : 0;
+    const bool backlog = m_scanPacketIndex < m_scanPackets.size()
+                         || !m_pendingUiScanFrames.isEmpty();
+    if (frames != m_lastSourceFrames || backlog) {
+        m_lastSourceFrames = frames;
+        m_activityClock.restart();
+        if (m_idle) {
+            m_idle = false;
+            m_pollTimer->setInterval(activeIntervalMs());
+        }
+        return;
+    }
+    if (m_idle || m_activityClock.elapsed() < kDecoderIdleAfterMs || !m_source)
+        return;
+    m_idle = true;
+    m_pollTimer->setInterval(kDecoderIdleIntervalMs);
+    m_source->armPacketWake();
+    if (m_source->totalFrames() != m_lastSourceFrames)
+        wakeFromIdle();
 }
 
 bool FrameDecoderWorker::triggerGeometryChanged(const GroupScanSettings &left,
@@ -88,7 +128,7 @@ void FrameDecoderWorker::updateSettings(QVector<GroupScanSettings> groups,
         m_source->setCScanPacketCollection(m_hasEncoderScans);
     }
     if (m_pollTimer)
-        m_pollTimer->setInterval(m_hasEncoderScans ? 5 : 33);
+        m_pollTimer->setInterval(m_idle ? kDecoderIdleIntervalMs : activeIntervalMs());
 }
 
 const GroupScanSettings *FrameDecoderWorker::displaySettings() const
@@ -112,6 +152,8 @@ void FrameDecoderWorker::processLatestPacket()
         processDisplayPacket();
     }
     emitTelemetryIfNeeded();
+    if (m_pollTimer)
+        updateIdleState();
 }
 
 void FrameDecoderWorker::processDisplayPacket()

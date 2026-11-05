@@ -15,6 +15,7 @@
 #include <windows.h>
 #include <setupapi.h>
 #include <winusb.h>
+#include <QWinEventNotifier>
 #endif
 
 namespace crawling {
@@ -96,6 +97,7 @@ struct CandleCanAdapter::Private {
   bool pending = false;
   bool started = false;
   QTimer pollTimer;
+  QWinEventNotifier* receiveNotifier = nullptr;
   QString receiveError;
 
   bool control(UCHAR request, bool read, USHORT value, USHORT index,
@@ -123,6 +125,7 @@ struct CandleCanAdapter::Private {
     receiveError = windowsError(GetLastError());
     running = false;
     pollTimer.stop();
+    if (receiveNotifier) receiveNotifier->setEnabled(false);
     if (started)
       emit owner->faulted(QStringLiteral("candle CAN 接收失败：") + receiveError);
   }
@@ -168,6 +171,11 @@ struct CandleCanAdapter::Private {
 
   void close() {
     pollTimer.stop();
+    if (receiveNotifier) {
+      receiveNotifier->setEnabled(false);
+      receiveNotifier->deleteLater();
+      receiveNotifier = nullptr;
+    }
     running = false;
     if (usb) {
       if (started) mode(0);
@@ -193,7 +201,7 @@ struct CandleCanAdapter::Private {
 CandleCanAdapter::CandleCanAdapter(QObject* parent)
     : QObject(parent), d_(new Private) {
 #ifdef Q_OS_WIN
-  d_->pollTimer.setInterval(5);
+  d_->pollTimer.setInterval(100);
   connect(&d_->pollTimer, &QTimer::timeout, this, [this] { d_->pollReceive(this); });
 #endif
 }
@@ -311,6 +319,9 @@ bool CandleCanAdapter::open(const QString& port, int bitrate, QString* error) {
     return fail(QStringLiteral("启动 candle USB 接收失败: ") + d_->receiveError);
   if (!d_->mode(1)) return failWindows(QStringLiteral("启动 candle CAN 通道失败"));
   d_->started = true;
+  d_->receiveNotifier = new QWinEventNotifier(d_->receive.hEvent, this);
+  connect(d_->receiveNotifier, &QWinEventNotifier::activated, this,
+          [this] { d_->pollReceive(this); });
   d_->pollTimer.start();
   return true;
 #else

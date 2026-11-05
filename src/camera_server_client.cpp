@@ -10,7 +10,8 @@ namespace crawling {
 
 namespace {
 constexpr int kSharedMemorySize = 4 * 1024 * 1024;
-constexpr int kPollIntervalMs = 33;  // ~30fps polling
+// Frames are pushed as "FRAME <slot>" lines; polling is only a fallback.
+constexpr int kPollIntervalMs = 200;
 }
 
 CameraServerClient::CameraServerClient(QObject* parent)
@@ -77,6 +78,7 @@ bool CameraServerClient::start() {
 
 void CameraServerClient::stop() {
   pollTimer_->stop();
+  outputBuffer_.clear();
 
   if (serverProcess_) {
     serverProcess_->terminate();
@@ -130,37 +132,52 @@ void CameraServerClient::onServerError(QProcess::ProcessError error) {
 void CameraServerClient::onServerOutput() {
   if (!serverProcess_)
     return;
-  const QByteArray output = serverProcess_->readAllStandardOutput();
-  qInfo().noquote() << "[CameraServer]" << QString::fromUtf8(output).trimmed();
+  outputBuffer_.append(serverProcess_->readAllStandardOutput());
+  int newline = -1;
+  while ((newline = outputBuffer_.indexOf('\n')) >= 0) {
+    const QByteArray line = outputBuffer_.left(newline).trimmed();
+    outputBuffer_.remove(0, newline + 1);
+    if (line.startsWith("FRAME ")) {
+      bool ok = false;
+      const int slot = line.mid(6).toInt(&ok);
+      if (ok && slot >= 0 && slot < kUsbCameraChannelCount)
+        readSlot(slot, false);
+    } else if (!line.isEmpty()) {
+      qInfo().noquote() << "[CameraServer]" << QString::fromUtf8(line);
+    }
+  }
 }
 
 void CameraServerClient::pollSharedMemory() {
-  for (int slot = 0; slot < kUsbCameraChannelCount; ++slot) {
-    QSharedMemory* shm = sharedMemory_[slot];
-    if (!shm || !shm->isAttached())
-      continue;
+  for (int slot = 0; slot < kUsbCameraChannelCount; ++slot)
+    readSlot(slot, true);
+}
 
-    shm->lock();
-    const quint32 dataSize = *reinterpret_cast<const quint32*>(shm->constData());
+void CameraServerClient::readSlot(int slot, bool skipUnchanged) {
+  QSharedMemory* shm = sharedMemory_[slot];
+  if (!shm || !shm->isAttached())
+    return;
 
-    // Check if a complete frame is available. The writer publishes the payload
-    // before its length, so a stable nonzero size means the frame is complete.
-    if (dataSize > 0 && dataSize <= kSharedMemorySize - sizeof(quint32) &&
-        dataSize != lastFrameSize_[slot]) {
-      lastFrameSize_[slot] = dataSize;
+  shm->lock();
+  const quint32 dataSize = *reinterpret_cast<const quint32*>(shm->constData());
 
-      // Read JPEG data
-      const char* dataPtr = static_cast<const char*>(shm->constData()) + sizeof(quint32);
-      QByteArray imageData(dataPtr, static_cast<int>(dataSize));
-      shm->unlock();
+  // Check if a complete frame is available. The writer publishes the payload
+  // before its length, so a stable nonzero size means the frame is complete.
+  if (dataSize > 0 && dataSize <= kSharedMemorySize - sizeof(quint32) &&
+      (!skipUnchanged || dataSize != lastFrameSize_[slot])) {
+    lastFrameSize_[slot] = dataSize;
 
-      QImage image;
-      if (image.loadFromData(imageData, "JPG")) {
-        emit frameReady(slot, image);
-      }
-    } else {
-      shm->unlock();
+    // Read JPEG data
+    const char* dataPtr = static_cast<const char*>(shm->constData()) + sizeof(quint32);
+    QByteArray imageData(dataPtr, static_cast<int>(dataSize));
+    shm->unlock();
+
+    QImage image;
+    if (image.loadFromData(imageData, "JPG")) {
+      emit frameReady(slot, image);
     }
+  } else {
+    shm->unlock();
   }
 }
 

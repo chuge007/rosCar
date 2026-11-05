@@ -118,6 +118,7 @@ private:
     void settingsToUi(const crawling::DriveSettings &settings);
     void setMotion(bool &flag, bool active);
     void clearJogLatch();
+    void clearJogToggle();
     void requestEnable(bool enabled);
     void emergencyStop();
     void stopMotion();
@@ -163,6 +164,10 @@ private:
     bool *m_pressedJogFlag = nullptr;
     QPushButton *m_latchedJogButton = nullptr;
     bool *m_latchedJogFlag = nullptr;
+    bool m_jogToggled = false;
+    QPushButton *m_toggledJogButton = nullptr;
+    bool *m_toggledJogFlag = nullptr;
+    QElapsedTimer m_jogPressTimer;
     QTimer *m_jogHoldTimer = nullptr;
     bool m_forward = false;
     bool m_reverse = false;

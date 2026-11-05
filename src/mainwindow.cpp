@@ -206,7 +206,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_scanUiTimer->setInterval(30);
     connect(m_scanUiTimer, &QTimer::timeout,
             this, &MainWindow::drainPendingGroupScanBatches);
-    m_scanUiTimer->start();
     m_scanUiTimerClock.start();
     m_scanUiTelemetryClock.start();
 
@@ -1535,6 +1534,10 @@ void MainWindow::enqueueGroupScanBatch(const GroupScanFrameBatch &frames,
 {
     if (frames.isEmpty())
         return;
+    if (!m_scanUiTimer->isActive()) {
+        m_scanUiTimerClock.start();
+        m_scanUiTimer->start();
+    }
     static constexpr qint64 PendingByteCapacity = qint64(64) * 1024 * 1024;
     static constexpr int PendingKeyCapacity = 4096;
 
@@ -1650,6 +1653,7 @@ void MainWindow::drainPendingGroupScanBatches()
     }
     if (m_drainScanOrder.isEmpty()) {
         m_lastDrainDurationUs = drainClock.nsecsElapsed() / 1000;
+        m_scanUiTimer->stop();
         return;
     }
 

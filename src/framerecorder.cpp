@@ -12,7 +12,7 @@ FrameRecorder::FrameRecorder(QObject *parent) : QObject(parent)
 {
     m_writeTimer = new QTimer(this);
     m_writeTimer->setTimerType(Qt::CoarseTimer);
-    m_writeTimer->setInterval(15);
+    m_writeTimer->setInterval(50);
     connect(m_writeTimer, &QTimer::timeout, this, &FrameRecorder::drainQueue);
 }
 

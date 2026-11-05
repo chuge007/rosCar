@@ -96,6 +96,7 @@ public:
     PointCloudFrame convertDepthToPointCloud(const Frame& frame) const;
 
     void setExceptionHandler(std::function<void(std::string)> handler);
+    void setFrameReadyHandler(std::function<void()> handler);
 
 private:
     class Impl;

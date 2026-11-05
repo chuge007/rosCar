@@ -15,6 +15,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <QWinEventNotifier>
 #endif
 
 namespace crawling {
@@ -79,6 +80,7 @@ static_assert(sizeof(PcanChannelInfo) == 52 && offsetof(PcanChannelInfo, deviceI
 constexpr quint32 kQueueEmpty = 0x20;
 constexpr quint32 kCaution = 0x2000000;
 constexpr quint8 kChannelCondition = 0x0D;
+constexpr quint8 kReceiveEvent = 0x03;
 constexpr quint8 kAttachedCount = 0x2A;
 constexpr quint8 kAttachedChannels = 0x2B;
 
@@ -105,6 +107,7 @@ class PcanApi {
   using Read = quint32 (__stdcall*)(quint16, PcanMessage*, PcanTimestamp*);
   using Write = quint32 (__stdcall*)(quint16, PcanMessage*);
   using GetValue = quint32 (__stdcall*)(quint16, quint8, void*, quint32);
+  using SetValue = quint32 (__stdcall*)(quint16, quint8, void*, quint32);
   using GetStatus = quint32 (__stdcall*)(quint16);
   using GetErrorText = quint32 (__stdcall*)(quint32, quint16, char*);
   Initialize initialize = nullptr;
@@ -112,6 +115,7 @@ class PcanApi {
   Read read = nullptr;
   Write write = nullptr;
   GetValue getValue = nullptr;
+  SetValue setValue = nullptr;
   GetStatus getStatus = nullptr;
   GetErrorText getErrorText = nullptr;
 
@@ -134,6 +138,7 @@ class PcanApi {
       read = reinterpret_cast<Read>(library_.resolve("CAN_Read"));
       write = reinterpret_cast<Write>(library_.resolve("CAN_Write"));
       getValue = reinterpret_cast<GetValue>(library_.resolve("CAN_GetValue"));
+      setValue = reinterpret_cast<SetValue>(library_.resolve("CAN_SetValue"));
       getStatus = reinterpret_cast<GetStatus>(library_.resolve("CAN_GetStatus"));
       getErrorText = reinterpret_cast<GetErrorText>(library_.resolve("CAN_GetErrorText"));
       if (init && uninitialize && read && write && getValue && getStatus && getErrorText) {
@@ -168,10 +173,45 @@ struct PcanCanAdapter::Private {
   quint16 channel = 0;
   bool initialized = false;
   QTimer pollTimer;
+  HANDLE receiveEvent = nullptr;
+  QWinEventNotifier* receiveNotifier = nullptr;
+
+  bool attachReceiveEvent(PcanCanAdapter* owner) {
+    if (!api.setValue) return false;
+    receiveEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!receiveEvent) return false;
+    HANDLE value = receiveEvent;
+    if (api.setValue(channel, kReceiveEvent, &value, sizeof(value)) != 0) {
+      CloseHandle(receiveEvent);
+      receiveEvent = nullptr;
+      return false;
+    }
+    receiveNotifier = new QWinEventNotifier(receiveEvent, owner);
+    QObject::connect(receiveNotifier, &QWinEventNotifier::activated, owner,
+                     [this, owner] { pollReceive(owner); });
+    return true;
+  }
+
+  void detachReceiveEvent() {
+    if (receiveNotifier) {
+      receiveNotifier->setEnabled(false);
+      receiveNotifier->deleteLater();
+      receiveNotifier = nullptr;
+    }
+    if (receiveEvent) {
+      if (initialized && channel) {
+        HANDLE none = nullptr;
+        api.setValue(channel, kReceiveEvent, &none, sizeof(none));
+      }
+      CloseHandle(receiveEvent);
+      receiveEvent = nullptr;
+    }
+  }
 
   void close() {
     pollTimer.stop();
     running = false;
+    detachReceiveEvent();
     // Never uninitialize NONEBUS: that would release other clients' channels.
     if (initialized && channel) api.uninitialize(channel);
     initialized = false;
@@ -181,6 +221,7 @@ struct PcanCanAdapter::Private {
   void fail(PcanCanAdapter* owner, quint32 status) {
     if (!running || !fault.isEmpty()) return;
     pollTimer.stop();
+    if (receiveNotifier) receiveNotifier->setEnabled(false);
     fault = QStringLiteral("%1 通信故障：%2")
         .arg(channelName(channel), api.errorText(status));
     // The direct controller slot tries stop frames while this channel can still
@@ -191,7 +232,8 @@ struct PcanCanAdapter::Private {
 
   void pollReceive(PcanCanAdapter* owner) {
     // Forward bus frames, but never treat status/error/RTR frames as motor replies.
-    for (int count = 0; running && count < 1024; ++count) {
+    int count = 0;
+    for (; running && count < 1024; ++count) {
       PcanMessage message{};
       const quint32 status = api.read(channel, &message, nullptr);
       if (status == kQueueEmpty) break;
@@ -201,6 +243,7 @@ struct PcanCanAdapter::Private {
             QByteArray(reinterpret_cast<const char*>(message.data), message.length),
             (message.type & 0x02) != 0);
     }
+    if (count == 1024 && receiveEvent) SetEvent(receiveEvent);
     if (running) {
       const quint32 status = api.getStatus(channel);
       if (status != 0) fail(owner, status);
@@ -311,6 +354,7 @@ bool PcanCanAdapter::open(const QString& port, int bitrate, QString* error) {
   d_->channel = handle;
   d_->initialized = true;
   d_->running = true;
+  d_->pollTimer.setInterval(d_->attachReceiveEvent(this) ? 100 : 10);
   d_->pollTimer.start();
   return true;
 #else

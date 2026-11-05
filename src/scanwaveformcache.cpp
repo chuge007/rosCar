@@ -75,7 +75,6 @@ void ScanWaveformCache::initialize()
         m_drainTimer->setInterval(20);
         connect(m_drainTimer, &QTimer::timeout,
                 this, &ScanWaveformCache::drainPendingBatches);
-        m_drainTimer->start();
     }
     m_bIndex.clear();
     m_cIndex.clear();
@@ -308,6 +307,10 @@ void ScanWaveformCache::enqueueBatch(const GroupScanFrameBatch &batch,
         }
     }
     locker.unlock();
+    if (m_drainTimer && !m_drainTimer->isActive()) {
+        m_drainTimerClock.start();
+        m_drainTimer->start();
+    }
     if (firstEviction) {
         qWarning().noquote()
             << QStringLiteral("SCAN_CACHE_PRESSURE capacity eviction started; "
@@ -378,6 +381,7 @@ void ScanWaveformCache::drainPendingBatches()
     if (m_drainOrder.isEmpty()) {
         m_lastDrainDurationUs = drainClock.nsecsElapsed() / 1000;
         emitTelemetry();
+        m_drainTimer->stop();
         return;
     }
 

@@ -836,14 +836,44 @@ void RobotControlPanel::buildUi()
         button->setAutoRepeat(false);
         button->setFocusPolicy(Qt::NoFocus);
         button->setToolTip(QStringLiteral("按住3秒可锁定该方向"));
+        // Remote-desktop touch input arrives as an instant click (0-3 ms), so a
+        // short press toggles the direction on/off; holding still jogs.
         connect(button, &QPushButton::pressed, this, [this, button, flag] {
+            m_jogPressTimer.start();
             clearJogLatch();
+            if (m_toggledJogButton != button)
+                clearJogToggle();
             m_pressedJogButton = button;
             m_pressedJogFlag = flag;
             m_jogHoldTimer->start();
             setMotion(*flag, true);
         });
         connect(button, &QPushButton::released, this, [this, button, flag] {
+            if (!m_jogPressTimer.isValid())
+                return;
+            const qint64 pressDuration = m_jogPressTimer.elapsed();
+            m_jogPressTimer.invalidate();
+            if (pressDuration < 250) {
+                m_jogHoldTimer->stop();
+                m_pressedJogButton = nullptr;
+                m_pressedJogFlag = nullptr;
+                if (m_toggledJogButton == button) {
+                    clearJogToggle();
+                    return;
+                }
+                if (!*flag)
+                    return;
+                m_jogToggled = true;
+                m_toggledJogButton = button;
+                m_toggledJogFlag = flag;
+                button->setProperty("latched", true);
+                button->style()->unpolish(button);
+                button->style()->polish(button);
+                button->setToolTip(QStringLiteral("运动中，再点一次停止"));
+                return;
+            }
+            if (m_toggledJogButton == button)
+                clearJogToggle();
             if (m_pressedJogButton == button) {
                 m_jogHoldTimer->stop();
                 m_pressedJogButton = nullptr;
@@ -2373,6 +2403,26 @@ void RobotControlPanel::clearJogLatch()
     }
 }
 
+void RobotControlPanel::clearJogToggle()
+{
+    if (!m_jogToggled)
+        return;
+    m_jogToggled = false;
+    if (m_toggledJogButton) {
+        m_toggledJogButton->setProperty("latched", false);
+        m_toggledJogButton->style()->unpolish(m_toggledJogButton);
+        m_toggledJogButton->style()->polish(m_toggledJogButton);
+        m_toggledJogButton->setToolTip(QStringLiteral("按住3秒可锁定该方向"));
+    }
+    bool *toggledFlag = m_toggledJogFlag;
+    m_toggledJogButton = nullptr;
+    m_toggledJogFlag = nullptr;
+    if (toggledFlag && *toggledFlag) {
+        *toggledFlag = false;
+        sendMotionCommand();
+    }
+}
+
 void RobotControlPanel::requestEnable(bool enabled)
 {
     if (m_controller)
@@ -2389,6 +2439,7 @@ void RobotControlPanel::emergencyStop()
             .arg(m_autoCorrectionStartPending ? 1 : 0));
     stopAutoCorrection();
     clearJogLatch();
+    clearJogToggle();
     m_forward = m_reverse = m_left = m_right = false;
     for (QSlider *slider : findChildren<QSlider *>(QStringLiteral("clampMotorSpeed"))) {
         const QSignalBlocker blocker(slider);
@@ -2508,8 +2559,11 @@ void RobotControlPanel::updateState(crawling::DriveState state, const QString &r
         if (m_correctionStatus)
             m_correctionStatus->setText(QStringLiteral("未启动"));
     }
-    if (state != crawling::DriveState::Enabled && m_jogLatched)
-        clearJogLatch();
+    if (state != crawling::DriveState::Enabled) {
+        if (m_jogLatched)
+            clearJogLatch();
+        clearJogToggle();
+    }
     const bool canEnable = m_connected && state != crawling::DriveState::Enabled &&
                            state != crawling::DriveState::Arming;
     m_enableButton->setEnabled(canEnable);
@@ -2525,8 +2579,11 @@ void RobotControlPanel::updateState(crawling::DriveState state, const QString &r
 void RobotControlPanel::updateConnection(bool connected, const QString &message)
 {
     m_connected = connected;
-    if (!connected && m_jogLatched)
-        clearJogLatch();
+    if (!connected) {
+        if (m_jogLatched)
+            clearJogLatch();
+        clearJogToggle();
+    }
     if (!connected && m_autoCorrectionStartPending && !m_autoCorrectionActive) {
         m_autoCorrectionStartPending = false;
         setAutoCorrectionPaused(false);
@@ -2793,6 +2850,7 @@ void RobotControlPanel::startAutoCorrection()
              .arg(static_cast<int>(settings.detector.profileDetectionMode))
             .arg(QCoreApplication::applicationFilePath()));
 
+    clearJogToggle();
     m_forward = m_reverse = m_left = m_right = false;
     const bool prestartStopQueued = QMetaObject::invokeMethod(
         m_controller, "setInputCommand", Qt::QueuedConnection,
@@ -3266,6 +3324,7 @@ void RobotControlPanel::changeEvent(QEvent *event)
         stopAutoCorrection();
     }
     clearJogLatch();
+    clearJogToggle();
     const bool wasJogging = m_forward || m_reverse || m_left || m_right;
     m_forward = m_reverse = m_left = m_right = false;
     if (wasJogging)

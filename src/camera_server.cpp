@@ -96,11 +96,6 @@ void CameraServer::cleanupSlot(CameraSlot& slot, bool releaseSharedMemory) {
     delete slot.networkVideoSink;
     slot.networkVideoSink = nullptr;
   }
-  if (slot.bufferClearTimer) {
-    slot.bufferClearTimer->stop();
-    delete slot.bufferClearTimer;
-    slot.bufferClearTimer = nullptr;
-  }
   if (releaseSharedMemory && slot.sharedMemory) {
     delete slot.sharedMemory;
     slot.sharedMemory = nullptr;
@@ -203,23 +198,6 @@ void CameraServer::connectNetworkCamera(int slot, const QString& url,
   connect(s.networkVideoSink, &QVideoSink::videoFrameChanged, this,
           [this, slot](const QVideoFrame& frame) { applyFrame(slot, frame); });
 
-  // Periodic buffer clear to prevent accumulation
-  s.bufferClearTimer = new QTimer(this);
-  s.bufferClearTimer->setInterval(50);  // Every 50ms, aggressively clear old frames
-  connect(s.bufferClearTimer, &QTimer::timeout, this, [this, slot]() {
-    CameraSlot& s = slots_[slot];
-    if (s.consecutiveDrops > 5) {
-      // If we're dropping too many frames, the stream might be buffering
-      // Force a position update to flush buffer
-      if (s.networkPlayer && s.networkPlayer->isPlaying()) {
-        qint64 pos = s.networkPlayer->position();
-        s.networkPlayer->setPosition(pos);
-      }
-      s.consecutiveDrops = 0;
-    }
-  });
-  s.bufferClearTimer->start();
-
   s.networkPlayer->setSource(QUrl(url));
   s.networkPlayer->play();
 
@@ -246,9 +224,11 @@ void CameraServer::applyFrame(int slot, const QVideoFrame& frame) {
 
   CameraSlot& s = slots_[slot];
   if (!s.frameProcessing.testAndSetAcquire(0, 1)) {
-    // Frame dropped - increment counter for network streams
-    if (s.networkPlayer) {
-      s.consecutiveDrops++;
+    // Repeated drops mean the stream is buffering; flush it by re-seeking.
+    if (s.networkPlayer && ++s.consecutiveDrops > 5) {
+      if (s.networkPlayer->isPlaying())
+        s.networkPlayer->setPosition(s.networkPlayer->position());
+      s.consecutiveDrops = 0;
     }
     return;  // Drop frame if previous is still processing
   }

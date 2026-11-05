@@ -10,6 +10,7 @@
 #include <QPointF>
 #include <QVector>
 #include <QVector3D>
+#include <atomic>
 #include <memory>
 
 namespace mv3dlp { class Driver; }
@@ -59,6 +60,7 @@ class RobotSensorController final : public QObject {
   void readImu();
   void checkImuHealth();
   void captureCameraFrame();
+  void drainCameraFrames();
  private:
   void startProfilePreview();
   void resetCameraDiagnostics();
@@ -66,6 +68,7 @@ class RobotSensorController final : public QObject {
   Rim302FrameParser imuParser_;
   QTimer* imuWatchdogTimer_ = nullptr;
   QTimer* cameraTimer_ = nullptr;
+  std::atomic<int> cameraFramesPending_{0};
   std::unique_ptr<mv3dlp::Driver> camera_;
   qint64 lastPointCloudEmitMs_ = -1000;
   qint64 lastCorrectionProfileEmitMs_ = -1000;

@@ -44,12 +44,14 @@ class CameraServerClient : public QObject {
 
  private:
   void sendCommand(const QString& command);
+  void readSlot(int slot, bool skipUnchanged);
   QImage readFrameFromSharedMemory(int slot);
 
   QProcess* serverProcess_ = nullptr;
   QSharedMemory* sharedMemory_[kUsbCameraChannelCount] = {nullptr};
   QString ipcKeyBase_;
   QTimer* pollTimer_ = nullptr;
+  QByteArray outputBuffer_;
 
   quint32 lastFrameSize_[kUsbCameraChannelCount] = {0};
 };

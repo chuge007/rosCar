@@ -43,19 +43,23 @@ RobotSensorController::RobotSensorController(QObject* parent) : QObject(parent),
   imuWatchdogTimer_->setInterval(500);
   connect(imuWatchdogTimer_, &QTimer::timeout, this, &RobotSensorController::checkImuHealth);
   cameraTimer_ = new QTimer(this);
-  // Keep the acquisition pump close to the camera frame period. The driver
-  // returns the newest queued frame, so a slow conversion/UI pass cannot
-  // make the preview trail behind the sensor.
-  // Poll more frequently than the UI refresh period so a freshly-arrived
-  // profile is removed from the SDK queue with minimal added latency. The
-  // timer only needs coarse scheduling because the SDK queue supplies the
-  // actual 30 FPS cadence; precise OS timers at this rate add power/CPU cost.
+  // Frames are pulled when the SDK callback signals drainCameraFrames(). This
+  // slow timer only keeps the stall/inactive diagnostics running and recovers
+  // a frame if a wake-up is ever missed.
   cameraTimer_->setTimerType(Qt::CoarseTimer);
-  cameraTimer_->setInterval(5);
+  cameraTimer_->setInterval(200);
   connect(cameraTimer_, &QTimer::timeout, this, &RobotSensorController::captureCameraFrame);
 }
 
-RobotSensorController::~RobotSensorController() = default;
+RobotSensorController::~RobotSensorController() {
+  if (camera_) camera_->setFrameReadyHandler({});
+}
+
+void RobotSensorController::drainCameraFrames() {
+  const int pending = std::clamp(cameraFramesPending_.exchange(0), 1, 4);
+  if (!cameraTimer_->isActive()) return;
+  for (int index = 0; index < pending; ++index) captureCameraFrame();
+}
 
 void RobotSensorController::connectImu(const QString& portName, int baudRate, int divider) {
   disconnectImu();
@@ -238,6 +242,10 @@ void RobotSensorController::scanCamera() {
         AppLogger::error(QStringLiteral("CAMERA.SDK"),
             QStringLiteral("event=sdk_exception message=%1")
                 .arg(QString::fromStdString(message)));
+      });
+      camera_->setFrameReadyHandler([this] {
+        if (cameraFramesPending_.fetch_add(1) == 0)
+          QMetaObject::invokeMethod(this, [this] { drainCameraFrames(); }, Qt::QueuedConnection);
       });
       AppLogger::write(QStringLiteral("CAMERA.SDK"),
                        QStringLiteral("event=driver_initialize result=OK library=%1 sdk=%2 executable=%3 pid=%4")
@@ -510,10 +518,8 @@ void RobotSensorController::captureCameraFrame() {
     }
 
     // Keep this slot bounded and always consume the freshest SDK frame. The
-    // SDK callback thread fills this queue; waiting here at the same 5 ms
-    // cadence as the timer would keep the sensor thread at ~100% duty cycle
-    // whenever the 30 FPS stream has no frame ready. Poll non-blocking and let
-    // the next timer tick pick up a frame instead.
+    // SDK callback thread fills this queue and wakes drainCameraFrames(), so
+    // fetch non-blocking and never wait on the sensor thread.
     const auto frame = camera_->tryFetchFrame(std::chrono::milliseconds(0));
     if (!frame) {
       ++cameraTimeoutCount_;

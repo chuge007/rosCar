@@ -17,26 +17,44 @@ RobotProfileView::RobotProfileView(QWidget *parent) : QWidget(parent)
     setMinimumSize(260, 150);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setAttribute(Qt::WA_OpaquePaintEvent);
-    auto *freshnessTimer = new QTimer(this);
-    connect(freshnessTimer, &QTimer::timeout, this, [this] {
+    m_renderRetryTimer = new QTimer(this);
+    m_renderRetryTimer->setSingleShot(true);
+    connect(m_renderRetryTimer, &QTimer::timeout, this, [this] {
+        if (m_profileUpdatePending)
+            requestProfileUpdate();
+    });
+    m_staleTimer = new QTimer(this);
+    m_staleTimer->setSingleShot(true);
+    connect(m_staleTimer, &QTimer::timeout, this, [this] {
         if (!isVisible())
             return;
         const qint64 age = m_receivedAtEpochMs > 0
                                ? QDateTime::currentMSecsSinceEpoch() - m_receivedAtEpochMs
                                : 0;
         const bool stale = m_receivedAtEpochMs > 0 && age >= m_inputTimeoutMs;
-        if (!m_profileUpdatePending && stale == m_lastStaleState)
+        if (stale == m_lastStaleState)
             return;
         m_lastStaleState = stale;
         requestProfileUpdate();
     });
-    freshnessTimer->start(33);
 }
 
 void RobotProfileView::setInputTimeoutMs(int timeoutMs)
 {
     m_inputTimeoutMs = std::clamp(timeoutMs, 50, 5000);
+    scheduleStaleCheck();
     update();
+}
+
+void RobotProfileView::scheduleStaleCheck()
+{
+    if (m_receivedAtEpochMs <= 0) {
+        m_staleTimer->stop();
+        return;
+    }
+    const qint64 delay = m_receivedAtEpochMs + m_inputTimeoutMs
+                         - QDateTime::currentMSecsSinceEpoch() + 1;
+    m_staleTimer->start(static_cast<int>(std::clamp<qint64>(delay, 0, m_inputTimeoutMs + 1)));
 }
 
 void RobotProfileView::setPoints(const QVector<QVector3D> &points)
@@ -48,6 +66,7 @@ void RobotProfileView::setPoints(const QVector<QVector3D> &points)
     m_displayRangeInitialized = false;
     m_profileCacheValid = false;
     m_lastStaleState = false;
+    m_staleTimer->stop();
     requestProfileUpdate();
 }
 
@@ -68,6 +87,7 @@ void RobotProfileView::setProfileObservation(
     m_receivedAtEpochMs = receivedAtEpochMs;
     m_profileCacheValid = false;
     m_lastStaleState = false;
+    scheduleStaleCheck();
     ++m_receivedProfiles;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (m_lastReceiveDiagnosticMs < 0 || now - m_lastReceiveDiagnosticMs >= 1000) {
@@ -110,6 +130,8 @@ void RobotProfileView::clear()
     m_cachedValidIndices.clear();
     m_lastStaleState = false;
     m_renderThrottle = QElapsedTimer();
+    m_renderRetryTimer->stop();
+    m_staleTimer->stop();
     update();
 }
 
@@ -174,8 +196,11 @@ void RobotProfileView::requestProfileUpdate()
     m_profileUpdatePending = true;
     if (!isVisible())
         return;
-    if (m_renderThrottle.isValid() && m_renderThrottle.elapsed() < 33)
+    if (m_renderThrottle.isValid() && m_renderThrottle.elapsed() < 33) {
+        if (!m_renderRetryTimer->isActive())
+            m_renderRetryTimer->start(static_cast<int>(33 - m_renderThrottle.elapsed()) + 1);
         return;
+    }
     if (!m_profileCacheValid || m_cachedViewMode != m_viewMode)
         rebuildProfileCache();
     m_profileUpdatePending = false;

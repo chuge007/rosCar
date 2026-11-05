@@ -88,6 +88,8 @@ public:
     // display throttling. These methods are thread-safe.
     void setCScanPacketCollection(bool enabled);
     int takeCScanPackets(QQueue<RawPacketBuffer> &packets);
+    // Thread-safe. The next SDK packet emits packetsAvailable() once.
+    void armPacketWake() { m_packetWakeArmed.store(true, std::memory_order_release); }
 
 public slots:
     bool connectDevice(const QString &address = QStringLiteral("127.0.0.1"), int deviceId = 0);
@@ -104,6 +106,7 @@ signals:
     void statusChanged();
     void message(const QString &text, bool error);
     void frameRateChanged(double fps, quint64 received, quint64 dropped);
+    void packetsAvailable();
 
 private slots:
     void watchdog();
@@ -173,6 +176,7 @@ private:
     std::atomic<qint64> m_cScanQueueMaxBytesObserved{0};
     std::atomic<qint64> m_cScanMaxAgeMsObserved{0};
     std::atomic<quint64> m_frames{0};
+    std::atomic_bool m_packetWakeArmed{false};
     std::atomic<quint64> m_rxBytes{0};
     std::atomic<quint64> m_rxSequence{0};
     std::atomic<quint32> m_captureEpoch{0};

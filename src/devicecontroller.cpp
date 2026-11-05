@@ -143,6 +143,9 @@ void DeviceController::packetCallback(const char *data, int length, int deviceId
                 std::memory_order_relaxed);
             self->m_frames.fetch_add(1, std::memory_order_relaxed);
             self->m_rxBytes.fetch_add(quint64(length), std::memory_order_relaxed);
+            if (self->m_packetWakeArmed.load(std::memory_order_relaxed)
+                && self->m_packetWakeArmed.exchange(false, std::memory_order_acq_rel))
+                emit self->packetsAvailable();
             {
                 // Display and encoder scans use independent locks. A slow
                 // scan consumer can no longer delay the presentation mailbox.

@@ -13,6 +13,7 @@ class QPaintEvent;
 class QPainter;
 class QMouseEvent;
 class QShowEvent;
+class QTimer;
 
 class RobotProfileView final : public QWidget
 {
@@ -57,6 +58,7 @@ private:
     void paintProfile(QPainter &painter, const QRect &area);
     void rebuildProfileCache();
     void requestProfileUpdate();
+    void scheduleStaleCheck();
 
     QVector<QVector3D> m_points;
     QVector<QVector3D> m_rawPoints;
@@ -97,4 +99,6 @@ private:
     bool m_profileCacheValid = false;
     bool m_lastStaleState = false;
     QElapsedTimer m_renderThrottle;
+    QTimer *m_renderRetryTimer = nullptr;
+    QTimer *m_staleTimer = nullptr;
 };

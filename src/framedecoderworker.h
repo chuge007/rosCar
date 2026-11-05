@@ -82,6 +82,7 @@ public slots:
     void startPolling();
     void updateSettings(QVector<GroupScanSettings> groups, int displayGroupId);
     void setRecordingEnabled(bool enabled) { m_recordingEnabled = enabled; }
+    void wakeFromIdle();
 
 signals:
     void frameDecoded(DecodedFrame frame, int groupId, int deviceId);
@@ -103,6 +104,8 @@ private:
     };
 
     void processLatestPacket();
+    void updateIdleState();
+    int activeIntervalMs() const { return m_hasEncoderScans ? 5 : 33; }
     void processDisplayPacket();
     void processEncoderTriggeredPackets();
     void flushPendingGroupScanBatch(bool force);
@@ -132,4 +135,7 @@ private:
     qint64 m_scanPacketsProcessed = 0;
     qint64 m_scanBatchesEmitted = 0;
     QElapsedTimer m_telemetryClock;
+    QElapsedTimer m_activityClock;
+    quint64 m_lastSourceFrames = 0;
+    bool m_idle = false;
 };

@@ -7,7 +7,6 @@
 #include <QMediaPlayer>
 #include <QObject>
 #include <QSharedMemory>
-#include <QTimer>
 #include <QVideoFrame>
 #include <QVideoSink>
 #include <QAtomicInt>
@@ -41,7 +40,6 @@ struct CameraSlot {
   QAtomicInt frameProcessing{0};
   qint64 lastFrameTime = 0;
   int consecutiveDrops = 0;  // Track dropped frames for network streams
-  QTimer* bufferClearTimer = nullptr;  // Periodic buffer flush for network
 };
 
 class CameraServer : public QObject {

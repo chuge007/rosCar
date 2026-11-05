@@ -461,18 +461,25 @@ public:
     }
 
     void enqueueFrame(Frame frame) {
-        std::lock_guard<std::mutex> lock(mutex);
-        if (!connected || handle == nullptr) {
-            return;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (!connected || handle == nullptr) {
+                return;
+            }
+            image_queue.erase(std::remove_if(image_queue.begin(), image_queue.end(),
+                [&](const Frame& queued) { return queued.type == frame.type; }), image_queue.end());
+            constexpr std::size_t kMaxQueuedFrames = 4;
+            if (image_queue.size() >= kMaxQueuedFrames) {
+                image_queue.pop_front();
+            }
+            image_queue.push_back(std::move(frame));
+            image_condition.notify_one();
         }
-        image_queue.erase(std::remove_if(image_queue.begin(), image_queue.end(),
-            [&](const Frame& queued) { return queued.type == frame.type; }), image_queue.end());
-        constexpr std::size_t kMaxQueuedFrames = 4;
-        if (image_queue.size() >= kMaxQueuedFrames) {
-            image_queue.pop_front();
+        // Held while invoking so clearing the handler waits for an in-flight call.
+        std::lock_guard<std::mutex> ready_lock(frame_ready_mutex);
+        if (frame_ready_handler) {
+            frame_ready_handler();
         }
-        image_queue.push_back(std::move(frame));
-        image_condition.notify_one();
     }
 
     DriverOptions options;
@@ -488,6 +495,8 @@ public:
     std::uint64_t rejected_profile_count = 0;
     FrameDiagnostics last_rejected_profile;
     std::function<void(std::string)> exception_handler;
+    std::mutex frame_ready_mutex;
+    std::function<void()> frame_ready_handler;
     std::deque<Frame> image_queue;
     std::condition_variable image_condition;
 };
@@ -861,6 +870,11 @@ PointCloudFrame Driver::convertDepthToPointCloud(const Frame& frame) const {
 void Driver::setExceptionHandler(std::function<void(std::string)> handler) {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     impl_->exception_handler = std::move(handler);
+}
+
+void Driver::setFrameReadyHandler(std::function<void()> handler) {
+    std::lock_guard<std::mutex> lock(impl_->frame_ready_mutex);
+    impl_->frame_ready_handler = std::move(handler);
 }
 
 }  // namespace mv3dlp
