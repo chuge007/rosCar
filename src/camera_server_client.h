@@ -5,6 +5,7 @@
 #include <QLocalSocket>
 #include <QObject>
 #include <QProcess>
+#include <QQueue>
 #include <QSharedMemory>
 #include <QTimer>
 #include "robot/drive_settings.h"  // for kUsbCameraChannelCount
@@ -44,6 +45,7 @@ class CameraServerClient : public QObject {
 
  private:
   void sendCommand(const QString& command);
+  void flushPendingCommands();
   QImage readFrameFromSharedMemory(int slot);
 
   QProcess* serverProcess_ = nullptr;
@@ -52,6 +54,10 @@ class CameraServerClient : public QObject {
   QTimer* pollTimer_ = nullptr;
 
   quint32 lastFrameSize_[kUsbCameraChannelCount] = {0};
+  
+  // Server readiness state
+  bool serverReady_ = false;
+  QQueue<QString> pendingCommands_;
 };
 
 }  // namespace crawling

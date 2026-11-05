@@ -1,0 +1,50 @@
+修复双重触发问题
+==================
+
+## 问题诊断
+从日志发现每次点击触发了两次RELEASED事件：
+1. 第一次：pressDuration=1ms，执行TOGGLE_OFF
+2. 第二次：pressDuration=152ms，执行TOGGLE_ON
+
+**根因**：同时连接了两个release信号
+- QPushButton::released
+- JogButtonTouchFilter::jogReleased
+
+## 解决方案
+在releaseJog开头添加去重检查：
+1. 检查 m_jogPressTimer.isValid()
+2. 如果无效（已处理过），直接return
+3. 处理完毕后调用 m_jogPressTimer.invalidate()
+
+## 修改内容
+
+### releaseJog lambda 开头（第880-883行）
+`cpp
+// Prevent duplicate calls from both button and touchFilter
+if (!m_jogPressTimer.isValid()) {
+    return;  // Already processed
+}
+`
+
+### 短按路径末尾（第924行）
+`cpp
+m_jogPressTimer.invalidate();
+return;
+`
+
+### 长按路径末尾（第937行）
+`cpp
+m_jogPressTimer.invalidate();
+`
+
+## 工作流程
+1. **pressJog**: 启动计时器 (isValid=true)
+2. **第一个releaseJog**: 
+   - 通过isValid检查 ✓
+   - 处理事件（toggle或停止）
+   - invalidate() 让计时器失效
+3. **第二个releaseJog**:
+   - isValid检查失败 ✗
+   - 直接return，不重复处理
+
+现在每次点击只会处理一次！

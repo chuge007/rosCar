@@ -96,6 +96,8 @@ private:
     void refreshGateTree();
     int selectedGroupId() const;
     void scheduleAutoApply();
+    void updateLongitudinalAngleFromWedgeInput();
+    void updateWedgeAngleFromLongitudinalInput(double longitudinalAngle);
     void recomputeTofdPcs();
     bool switchPreset(int presetId);
 
@@ -113,6 +115,11 @@ private:
     QLabel *m_surfaceStatus = nullptr;
     QDoubleSpinBox *m_wheelDiameter = nullptr;
     QSpinBox *m_encoderResolution = nullptr;
+    QDoubleSpinBox *m_workpieceVelocityInput = nullptr;
+    QDoubleSpinBox *m_wedgeAngleInput = nullptr;
+    QDoubleSpinBox *m_wedgeVelocityInput = nullptr;
+    QDoubleSpinBox *m_longitudinalAngleInput = nullptr;
+    QLabel *m_wedgeAngleStatus = nullptr;
     QDoubleSpinBox *m_tofdDepthFraction = nullptr;
     QLabel *m_tofdAngleLabel = nullptr;
     QLabel *m_tofdDepthLabel = nullptr;

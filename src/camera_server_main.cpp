@@ -33,5 +33,14 @@ int main(int argc, char* argv[]) {
   qInfo() << "Camera server started with IPC key:" << ipcKey;
   qInfo() << "Ready";  // Signal to parent process
 
-  return app.exec();
+  // Output SERVER_READY marker for client to detect
+  qInfo() << "SERVER_READY";
+
+  int exitCode = app.exec();
+
+  // Ensure proper cleanup before exit
+  qInfo() << "Camera server shutting down...";
+  server.stop();
+
+  return exitCode;
 }

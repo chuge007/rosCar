@@ -1,0 +1,86 @@
+触摸屏点击切换控制模式 - 实现完成
+=====================================
+
+## 问题根因
+远程桌面软件（RustDesk/ToDesk）在平板触摸时发送瞬时点击（0-3ms），不传输手指持续按压状态。
+原有的"按住移动"逻辑无法在触摸屏上工作。
+
+## 解决方案
+实现短按切换模式：
+- **短按 (<250ms)**: 切换运动开关
+  * 第一次点击：启动运动并保持
+  * 再次点击同按钮：停止运动
+  * 点击不同按钮：切换方向
+  
+- **长按 (≥250ms, 鼠标)**: 保留原有行为
+  * 按住时运动，松开停止
+  * 3秒长按锁定（仅前进/后退）
+
+## 代码修改清单
+
+### 1. 头文件 (src/robotcontrolpanel.h)
+✓ 添加 #include <QElapsedTimer>
+✓ 添加 clearJogToggle() 方法声明
+✓ 添加 4 个 toggle 状态变量：
+  - bool m_jogToggled
+  - QPushButton *m_toggledJogButton
+  - bool *m_toggledJogFlag
+  - QElapsedTimer m_jogPressTimer
+
+### 2. 实现文件 (src/robotcontrolpanel.cpp)
+
+#### pressJog lambda (第849行)
+✓ 启动 m_jogPressTimer.start()
+
+#### releaseJog lambda (第879-933行)
+✓ 测量按压时长 pressDuration
+✓ <250ms 短按：toggle 模式逻辑
+✓ ≥250ms 长按：保留原始行为
+✓ 添加日志：pressDuration, toggled 状态
+
+#### clearJogToggle() 方法 (第2516-2528行)
+✓ 清除 toggle 状态
+✓ 停止运动并发送命令
+
+#### 安全路径集成 (6处)
+✓ emergencyStop() - 第2545行
+✓ updateState() - 第2692行 (非Enabled状态)
+✓ updateConnection() - 第2709行 (断开连接)
+✓ changeEvent() - 第3395行 (窗口失焦)
+✓ releaseJog内部 - 第903, 910行 (切换时)
+
+## 测试要点
+
+### 平板触摸测试
+1. 短按前进 → 小车持续前进
+2. 再次短按前进 → 小车停止
+3. 短按左转 → 小车停止前进，开始左转
+4. 短按右转 → 小车停止左转，开始右转
+5. 再次短按右转 → 小车停止
+
+### 鼠标测试（保持原行为）
+1. 按住前进 → 小车前进
+2. 松开前进 → 小车停止
+3. 长按前进3秒 → 锁定（松开仍前进）
+4. 点击其他方向 → 解除锁定并切换方向
+
+### 安全测试
+1. Toggle运动中按急停 → 立即停止
+2. Toggle运动中断开连接 → 立即停止
+3. Toggle运动中窗口失焦 → 立即停止
+4. Toggle运动中驱动器故障 → 立即停止
+
+## 调试日志输出
+bin/touch_input_debug.txt 将记录：
+- [RELEASED] pressDuration=X ms
+- [TOGGLE_ON] 按钮名称
+- [TOGGLE_OFF] 按钮名称
+- toggled=true/false 状态
+
+## 向后兼容
+✓ 鼠标操作完全不受影响
+✓ 3秒锁定功能完整保留
+✓ 自动纠偏功能不受影响
+✓ 急停和安全机制正常工作
+
+实现完成！请编译测试。

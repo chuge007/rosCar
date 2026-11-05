@@ -24,6 +24,7 @@ SOURCES += \
     src/main.cpp \
     src/mainwindow.cpp \
     src/devicecontroller.cpp \
+    src/ultrasoundconfigsanitizer.cpp \
     src/pulseloadguard.cpp \
     src/parameterpresetstore.cpp \
     src/framedecoderworker.cpp \
@@ -36,6 +37,7 @@ SOURCES += \
     src/usbbootstrap.cpp \
     src/remotecontrolserver.cpp \
     src/robotcontrolpanel.cpp \
+    src/jog_button_touch_filter.cpp \
     src/robot_app_logger.cpp \
     src/robot_sensor_controller.cpp \
     src/robot_usb_camera_controller.cpp \
@@ -73,6 +75,7 @@ SOURCES += $$ROBOT_SOURCE_ROOT/zdt_can_protocol.cpp \
 HEADERS += \
     src/mainwindow.h \
     src/devicecontroller.h \
+    src/ultrasoundconfigsanitizer.h \
     src/pulseloadguard.h \
     src/parameterpresetstore.h \
     src/framedecoderworker.h \
@@ -86,6 +89,7 @@ HEADERS += \
     src/usbbootstrap.h \
     src/remotecontrolserver.h \
     src/robotcontrolpanel.h \
+    src/jog_button_touch_filter.h \
     src/robot_app_logger.h \
     src/robot_sensor_controller.h \
     src/robot_usb_camera_controller.h \

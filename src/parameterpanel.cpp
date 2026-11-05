@@ -26,6 +26,55 @@
 #include <QStringList>
 #include <exception>
 
+namespace {
+
+constexpr double kAngleTolerance = 1.0e-9;
+
+bool longitudinalAngleFromWedge(double wedgeAngle, double wedgeVelocity,
+                                double workpieceVelocity, double *longitudinalAngle)
+{
+    if (!longitudinalAngle || !qIsFinite(wedgeAngle) || wedgeVelocity <= 0.0
+        || workpieceVelocity <= 0.0) {
+        return false;
+    }
+
+    const double ratio = qSin(qDegreesToRadians(qAbs(wedgeAngle)))
+                         * workpieceVelocity / wedgeVelocity;
+    if (!qIsFinite(ratio) || ratio > 1.0 + kAngleTolerance)
+        return false;
+
+    *longitudinalAngle = qRadiansToDegrees(qAsin(qBound(0.0, ratio, 1.0)));
+    return qIsFinite(*longitudinalAngle);
+}
+
+bool wedgeAngleFromLongitudinal(double longitudinalAngle, double wedgeVelocity,
+                                double workpieceVelocity, double *wedgeAngle)
+{
+    if (!wedgeAngle || !qIsFinite(longitudinalAngle) || wedgeVelocity <= 0.0
+        || workpieceVelocity <= 0.0) {
+        return false;
+    }
+
+    const double ratio = qSin(qDegreesToRadians(qAbs(longitudinalAngle)))
+                         * wedgeVelocity / workpieceVelocity;
+    if (!qIsFinite(ratio) || ratio > 1.0 + kAngleTolerance)
+        return false;
+
+    *wedgeAngle = qRadiansToDegrees(qAsin(qBound(0.0, ratio, 1.0)));
+    return qIsFinite(*wedgeAngle);
+}
+
+double longitudinalCriticalWedgeAngle(double wedgeVelocity, double workpieceVelocity)
+{
+    if (wedgeVelocity <= 0.0 || workpieceVelocity <= 0.0)
+        return 0.0;
+    if (wedgeVelocity >= workpieceVelocity)
+        return 90.0;
+    return qRadiansToDegrees(qAsin(wedgeVelocity / workpieceVelocity));
+}
+
+} // namespace
+
 ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
 {
     m_autoApplyTimer = new QTimer(this);
@@ -107,6 +156,7 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     addDouble(general, QStringLiteral("工件声速"), 100, 20000, 1,
               [this] { return Client::getInstance().getWorkpieceVelocity(selectedGroupId()); },
               [this](double v) { return Client::getInstance().setWorkpieceVelocity(v, selectedGroupId()); }, QStringLiteral(" m/s"));
+    m_workpieceVelocityInput = qobject_cast<QDoubleSpinBox *>(m_fields.back().editor);
     addInt(general, QStringLiteral("PA 电压"), 0, 1000,
            [] { return Client::getInstance().getPaVoltage(); },
            [](int v) { return Client::getInstance().setPaVoltage(v); }, QStringLiteral(" V"));
@@ -234,8 +284,55 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
 
     auto *wedge = new QFormLayout;
     addBool(wedge, QStringLiteral("启用楔块"), [this] { return Client::getInstance().getWedgeEnable(selectedGroupId()); }, [this](bool v) { return Client::getInstance().setWedgeEnable(v, selectedGroupId()); });
-    addDouble(wedge, QStringLiteral("楔块角度"), -90, 90, 3, [this] { return Client::getInstance().getWedgeAngle(selectedGroupId()); }, [this](double v) { return Client::getInstance().setWedgeAngle(v, selectedGroupId()); }, QStringLiteral("°"));
     addDouble(wedge, QStringLiteral("楔块声速"), 100, 20000, 1, [this] { return Client::getInstance().getWedgeVelocity(selectedGroupId()); }, [this](double v) { return Client::getInstance().setWedgeVelocity(v, selectedGroupId()); }, QStringLiteral(" m/s"));
+    m_wedgeVelocityInput = qobject_cast<QDoubleSpinBox *>(m_fields.back().editor);
+    addDouble(wedge, QStringLiteral("楔块内入射角（相对法线）"), -89.999, 89.999, 3,
+              [this] { return Client::getInstance().getWedgeAngle(selectedGroupId()); },
+              [this](double v) {
+                  // 声速字段排在角度字段之前下发；这里读取 SDK 的真实回读值，
+                  // 避免声速写入被拒绝时仍按界面中的未生效数值放行角度。
+                  const double wedgeVelocity =
+                      Client::getInstance().getWedgeVelocity(selectedGroupId());
+                  const double workpieceVelocity =
+                      Client::getInstance().getWorkpieceVelocity(selectedGroupId());
+                  double ignoredLongitudinalAngle = 0.0;
+                  if (!longitudinalAngleFromWedge(v, wedgeVelocity, workpieceVelocity,
+                                                  &ignoredLongitudinalAngle)) {
+                      emit message(QStringLiteral(
+                                       "楔块内入射角 %1° 超过当前声速组合的纵波临界角 %2°，已拒绝写入采集卡")
+                                       .arg(qAbs(v), 0, 'f', 3)
+                                       .arg(longitudinalCriticalWedgeAngle(wedgeVelocity,
+                                                                           workpieceVelocity),
+                                            0, 'f', 3),
+                                   true);
+                      return false;
+                  }
+                  return Client::getInstance().setWedgeAngle(v, selectedGroupId());
+              },
+              QStringLiteral("°"));
+    m_wedgeAngleInput = qobject_cast<QDoubleSpinBox *>(m_fields.back().editor);
+
+    m_longitudinalAngleInput = new QDoubleSpinBox;
+    m_longitudinalAngleInput->setRange(0.0, 89.999);
+    m_longitudinalAngleInput->setDecimals(3);
+    m_longitudinalAngleInput->setSingleStep(1.0);
+    m_longitudinalAngleInput->setSuffix(QStringLiteral("°"));
+    m_longitudinalAngleInput->setKeyboardTracking(false);
+    m_longitudinalAngleInput->setToolTip(QStringLiteral(
+        "输入楔块标称的钢中纵波折射角；软件会按楔块声速和工件声速反算楔块内入射角。"));
+    wedge->addRow(QStringLiteral("纵波楔块标称角（钢内）"), m_longitudinalAngleInput);
+    m_wedgeAngleStatus = new QLabel;
+    m_wedgeAngleStatus->setWordWrap(true);
+    wedge->addRow(m_wedgeAngleStatus);
+
+    connect(m_longitudinalAngleInput, &QDoubleSpinBox::valueChanged,
+            this, &ParameterPanel::updateWedgeAngleFromLongitudinalInput);
+    connect(m_wedgeAngleInput, &QDoubleSpinBox::valueChanged,
+            this, &ParameterPanel::updateLongitudinalAngleFromWedgeInput);
+    connect(m_wedgeVelocityInput, &QDoubleSpinBox::valueChanged,
+            this, &ParameterPanel::updateLongitudinalAngleFromWedgeInput);
+    connect(m_workpieceVelocityInput, &QDoubleSpinBox::valueChanged,
+            this, &ParameterPanel::updateLongitudinalAngleFromWedgeInput);
     addDouble(wedge, "X", -10000, 10000, 3, [this] { return Client::getInstance().getWedgeX(selectedGroupId()); }, [this](double v) { return Client::getInstance().setWedgeX(v, selectedGroupId()); }, QStringLiteral(" mm"));
     addDouble(wedge, "Z", -10000, 10000, 3, [this] { return Client::getInstance().getWedgeZ(selectedGroupId()); }, [this](double v) { return Client::getInstance().setWedgeZ(v, selectedGroupId()); }, QStringLiteral(" mm"));
     addDouble(wedge, QStringLiteral("屋顶角"), -90, 90, 3, [this] { return Client::getInstance().getWedgeRoofAngle(selectedGroupId()); }, [this](double v) { return Client::getInstance().setWedgeRoofAngle(v, selectedGroupId()); }, QStringLiteral("°"));
@@ -690,6 +787,7 @@ void ParameterPanel::recomputeTofdPcs()
 {
     if (!m_tofdAngleLabel || !m_tofdDepthLabel || !m_tofdPcsLabel)
         return;
+    updateLongitudinalAngleFromWedgeInput();
     double thickness = 0.0;
     double wedgeAngle = 0.0;
     double wedgeVelocity = 0.0;
@@ -708,22 +806,85 @@ void ParameterPanel::recomputeTofdPcs()
     const double fraction = m_tofdDepthFraction ? m_tofdDepthFraction->value()
                                                 : (2.0 / 3.0);
 
-    // 斯涅尔定律：楔块入射角 → 钢内折射角。sinθ_钢 = sinθ_楔 × c_钢 / c_楔。
-    const double ratio = qSin(qDegreesToRadians(wedgeAngle))
-                         * workpieceVelocity / qMax(1.0, wedgeVelocity);
-    if (ratio > 1.0) {
+    // 斯涅尔定律：楔块入射角 → 钢内折射角。角度取绝对值，PCS 是距离。
+    double longitudinalAngle = 0.0;
+    if (!longitudinalAngleFromWedge(wedgeAngle, wedgeVelocity, workpieceVelocity,
+                                    &longitudinalAngle)) {
         m_tofdAngleLabel->setText(QStringLiteral("全反射（无折射角）"));
         m_tofdDepthLabel->setText(QStringLiteral("--"));
         m_tofdPcsLabel->setText(QStringLiteral("--"));
         return;
     }
-    const double thetaSteel = qAsin(ratio);
+    const double thetaSteel = qDegreesToRadians(longitudinalAngle);
     const double depth = fraction * thickness;
     const double pcs = 2.0 * depth * qTan(thetaSteel);
 
-    m_tofdAngleLabel->setText(QStringLiteral("%1°").arg(qRadiansToDegrees(thetaSteel), 0, 'f', 1));
+    m_tofdAngleLabel->setText(QStringLiteral("%1°").arg(longitudinalAngle, 0, 'f', 1));
     m_tofdDepthLabel->setText(QStringLiteral("%1 mm").arg(depth, 0, 'f', 1));
     m_tofdPcsLabel->setText(QStringLiteral("%1 mm").arg(pcs, 0, 'f', 1));
+}
+
+void ParameterPanel::updateLongitudinalAngleFromWedgeInput()
+{
+    if (!m_wedgeAngleInput || !m_wedgeVelocityInput || !m_workpieceVelocityInput
+        || !m_longitudinalAngleInput || !m_wedgeAngleStatus) {
+        return;
+    }
+
+    const double wedgeAngle = m_wedgeAngleInput->value();
+    const double wedgeVelocity = m_wedgeVelocityInput->value();
+    const double workpieceVelocity = m_workpieceVelocityInput->value();
+    const double criticalAngle = longitudinalCriticalWedgeAngle(wedgeVelocity,
+                                                                 workpieceVelocity);
+    double longitudinalAngle = 0.0;
+    if (!longitudinalAngleFromWedge(wedgeAngle, wedgeVelocity, workpieceVelocity,
+                                    &longitudinalAngle)) {
+        m_wedgeAngleStatus->setText(QStringLiteral(
+            "当前入射角超过纵波临界角 %1°，不能形成钢中折射纵波，也不会写入采集卡。")
+                                        .arg(criticalAngle, 0, 'f', 3));
+        m_wedgeAngleStatus->setStyleSheet(QStringLiteral("color:#b42318;"));
+        return;
+    }
+
+    {
+        const QSignalBlocker blocker(m_longitudinalAngleInput);
+        m_longitudinalAngleInput->setValue(longitudinalAngle);
+    }
+    m_wedgeAngleStatus->setText(QStringLiteral(
+        "当前声速下纵波临界入射角为 %1°；PCS 使用钢内折射角 %2°。")
+                                    .arg(criticalAngle, 0, 'f', 3)
+                                    .arg(longitudinalAngle, 0, 'f', 3));
+    m_wedgeAngleStatus->setStyleSheet(QStringLiteral("color:#52606d;"));
+}
+
+void ParameterPanel::updateWedgeAngleFromLongitudinalInput(double longitudinalAngle)
+{
+    if (!m_wedgeAngleInput || !m_wedgeVelocityInput || !m_workpieceVelocityInput)
+        return;
+
+    double wedgeAngle = 0.0;
+    if (!wedgeAngleFromLongitudinal(longitudinalAngle,
+                                    m_wedgeVelocityInput->value(),
+                                    m_workpieceVelocityInput->value(),
+                                    &wedgeAngle)) {
+        if (m_wedgeAngleStatus) {
+            m_wedgeAngleStatus->setText(QStringLiteral(
+                "当前楔块声速和工件声速无法形成 %1° 钢中纵波。")
+                                            .arg(longitudinalAngle, 0, 'f', 3));
+            m_wedgeAngleStatus->setStyleSheet(QStringLiteral("color:#b42318;"));
+        }
+        return;
+    }
+
+    // 保留现有声束方向；标称角输入只改变角度大小。
+    if (m_wedgeAngleInput->value() < 0.0)
+        wedgeAngle = -wedgeAngle;
+    {
+        const QSignalBlocker blocker(m_wedgeAngleInput);
+        m_wedgeAngleInput->setValue(wedgeAngle);
+    }
+    updateLongitudinalAngleFromWedgeInput();
+    scheduleAutoApply();
 }
 
 void ParameterPanel::apply()

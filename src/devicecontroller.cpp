@@ -3,6 +3,7 @@
 #include "client.h"
 #include "parameterpresetstore.h"
 #include "pulseloadguard.h"
+#include "ultrasoundconfigsanitizer.h"
 #include "usbbootstrap.h"
 #include <QApplication>
 #include <QCoreApplication>
@@ -564,6 +565,37 @@ bool DeviceController::synchronizeConfiguredGroups()
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         emit message(QStringLiteral("工作组配置 JSON 无效：%1").arg(parseError.errorString()), true);
         return false;
+    }
+
+    QStringList configurationRepairs;
+    QString validationError;
+    if (!UltrasoundConfigSanitizer::normalizeHardwareDocument(
+            &document, &configurationRepairs, &validationError)) {
+        emit message(QStringLiteral("超声配置校验失败：%1").arg(validationError), true);
+        return false;
+    }
+    if (!configurationRepairs.isEmpty()) {
+        QString backupPath;
+        QString repairError;
+        if (!UltrasoundConfigSanitizer::backupBeforeRepair(
+                path, &backupPath, &repairError)) {
+            emit message(QStringLiteral("超声配置需要修复，但备份失败：%1")
+                             .arg(repairError), true);
+            return false;
+        }
+        QSaveFile repairedConfig(path);
+        const QByteArray repairedBytes = document.toJson(QJsonDocument::Compact);
+        if (!repairedConfig.open(QIODevice::WriteOnly)
+            || repairedConfig.write(repairedBytes) != repairedBytes.size()
+            || !repairedConfig.commit()) {
+            emit message(QStringLiteral("无法写入自动修复后的超声配置：%1")
+                             .arg(repairedConfig.errorString()), true);
+            return false;
+        }
+        emit message(QStringLiteral("已自动修复旧超声配置并备份到 %1：%2")
+                         .arg(backupPath,
+                              configurationRepairs.join(QStringLiteral("；"))),
+                     false);
     }
 
     QSet<int> desired;

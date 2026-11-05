@@ -7,6 +7,7 @@
 #include <QDebug>
 #include <QImage>
 #include <QMediaDevices>
+#include <QThread>
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -40,27 +41,64 @@ bool CameraServer::start() {
 
 void CameraServer::stop() {
   for (int i = 0; i < kUsbCameraChannelCount; ++i) {
-    cleanupSlot(slots_[i]);
+    cleanupSlot(slots_[i], true);  // Release shared memory on shutdown
   }
 }
 
 bool CameraServer::setupSharedMemory(int slot) {
   CameraSlot& s = slots_[slot];
   if (s.sharedMemory) {
+    if (s.sharedMemory->isAttached()) {
+      s.sharedMemory->detach();
+    }
     delete s.sharedMemory;
+    s.sharedMemory = nullptr;
+  }
+
+  // First, try to clean up any stale shared memory from previous runs
+  {
+    QSharedMemory cleanup(s.shmKey);
+    if (cleanup.attach()) {
+      qInfo() << "Found existing shared memory" << s.shmKey << "- removing";
+      cleanup.detach();
+    }
   }
 
   s.sharedMemory = new QSharedMemory(s.shmKey, this);
 
-  // Try to attach first (in case of previous unclean shutdown)
-  if (s.sharedMemory->attach()) {
-    s.sharedMemory->detach();
-  }
-
+  // Try to create new shared memory
   if (!s.sharedMemory->create(kSharedMemorySize)) {
-    qWarning() << "Failed to create shared memory" << s.shmKey
-               << ":" << s.sharedMemory->errorString();
-    return false;
+    // If creation failed, the segment might still exist from a crashed process
+    if (s.sharedMemory->error() == QSharedMemory::AlreadyExists) {
+      qWarning() << "Shared memory" << s.shmKey << "already exists, forcing cleanup";
+
+      // Try aggressive cleanup: attach and detach multiple times
+      delete s.sharedMemory;
+      s.sharedMemory = nullptr;
+
+      for (int attempt = 0; attempt < 3; ++attempt) {
+        QSharedMemory temp(s.shmKey);
+        if (temp.attach()) {
+          temp.detach();
+          QThread::msleep(100);  // Wait a bit for OS to clean up
+        } else {
+          break;  // Already gone
+        }
+      }
+
+      // Now try to create again
+      s.sharedMemory = new QSharedMemory(s.shmKey, this);
+      if (!s.sharedMemory->create(kSharedMemorySize)) {
+        qCritical() << "Failed to create shared memory" << s.shmKey
+                    << "after aggressive cleanup:" << s.sharedMemory->errorString();
+        qCritical() << "Please manually delete the shared memory segment or reboot";
+        return false;
+      }
+    } else {
+      qCritical() << "Failed to create shared memory" << s.shmKey
+                  << ":" << s.sharedMemory->errorString();
+      return false;
+    }
   }
 
   qInfo() << "Created shared memory" << s.shmKey << "size" << kSharedMemorySize;
@@ -102,6 +140,9 @@ void CameraServer::cleanupSlot(CameraSlot& slot, bool releaseSharedMemory) {
     slot.bufferClearTimer = nullptr;
   }
   if (releaseSharedMemory && slot.sharedMemory) {
+    if (slot.sharedMemory->isAttached()) {
+      slot.sharedMemory->detach();
+    }
     delete slot.sharedMemory;
     slot.sharedMemory = nullptr;
   }

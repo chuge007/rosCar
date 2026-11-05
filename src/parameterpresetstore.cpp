@@ -2,7 +2,9 @@
 
 #include "client.h"
 #include "pulseloadguard.h"
+#include "ultrasoundconfigsanitizer.h"
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -70,7 +72,23 @@ QJsonObject makePreset(const QString &name, int frameRate, const QJsonObject &pa
 
 bool readPresets(QJsonDocument *document, QString *error)
 {
-    return readJson(presetsPath(), document, error);
+    const QString path = presetsPath();
+    if (!readJson(path, document, error))
+        return false;
+
+    QStringList repairs;
+    if (!UltrasoundConfigSanitizer::normalizePresetDocument(document, &repairs, error))
+        return false;
+    if (repairs.isEmpty())
+        return true;
+
+    QString backupPath;
+    if (!UltrasoundConfigSanitizer::backupBeforeRepair(path, &backupPath, error)
+        || !writeJson(path, *document, error))
+        return false;
+    qWarning().noquote() << QStringLiteral("参数预设已自动修复并备份到 %1：%2")
+                                .arg(backupPath, repairs.join(QStringLiteral("；")));
+    return true;
 }
 
 bool writePresets(QJsonDocument document, QString *error)
@@ -92,6 +110,12 @@ bool buildHardwareDocument(const QJsonObject &preset, QJsonDocument *hardware,
             *error = QStringLiteral("参数预设为空，不能下发到硬件");
         return false;
     }
+    QJsonObject parameters = preset.value(QStringLiteral("parameters")).toObject();
+    QStringList repairs;
+    if (!UltrasoundConfigSanitizer::normalizeGroup(
+            &parameters, QStringLiteral("当前参数预设"), &repairs, error))
+        return false;
+
     QJsonObject root = hardware->object();
     QJsonObject global = root.value(QStringLiteral("global")).toObject();
     global.insert(QStringLiteral("frame_rate"),
@@ -100,11 +124,21 @@ bool buildHardwareDocument(const QJsonObject &preset, QJsonDocument *hardware,
     root.insert(QStringLiteral("global"), global);
     QJsonObject groups;
     groups.insert(QString::number(ParameterPresetStore::HardwareGroupId),
-                  preset.value(QStringLiteral("parameters")).toObject());
+                  parameters);
     root.insert(QStringLiteral("groups"), groups);
     root.insert(QStringLiteral("currentGroup"), ParameterPresetStore::HardwareGroupId);
     hardware->setObject(root);
+    if (!UltrasoundConfigSanitizer::normalizeHardwareDocument(hardware, &repairs, error))
+        return false;
     PulseLoadGuard::makeConfigurationSafe(hardware, limitMessage);
+    if (limitMessage && !repairs.isEmpty()) {
+        const QString repairMessage = QStringLiteral("已自动修复超声配置：%1")
+                                          .arg(repairs.join(QStringLiteral("；")));
+        if (limitMessage->isEmpty())
+            *limitMessage = repairMessage;
+        else
+            *limitMessage += QStringLiteral("；") + repairMessage;
+    }
     return true;
 }
 
@@ -178,6 +212,19 @@ bool ParameterPresetStore::prepare(QString *message, QString *error)
     QJsonDocument hardware;
     if (!readJson(configPath(), &hardware, error))
         return false;
+    QStringList hardwareRepairs;
+    if (!UltrasoundConfigSanitizer::normalizeHardwareDocument(
+            &hardware, &hardwareRepairs, error))
+        return false;
+    if (!hardwareRepairs.isEmpty()) {
+        QString backupPath;
+        if (!UltrasoundConfigSanitizer::backupBeforeRepair(
+                configPath(), &backupPath, error))
+            return false;
+        qWarning().noquote() << QStringLiteral("默认超声配置将在修复后写回，原文件已备份到 %1：%2")
+                                    .arg(backupPath,
+                                         hardwareRepairs.join(QStringLiteral("；")));
+    }
 
     QJsonDocument presetDocument;
     const bool alreadyExists = QFile::exists(presetsPath());
@@ -233,6 +280,8 @@ bool ParameterPresetStore::prepare(QString *message, QString *error)
                        .arg(presetEntries.size());
         if (!limitMessage.isEmpty())
             *message += QStringLiteral("；") + limitMessage;
+        if (!hardwareRepairs.isEmpty())
+            *message += QStringLiteral("；已修复旧配置中的参数类型");
     }
     return true;
 }
@@ -318,6 +367,10 @@ bool ParameterPresetStore::captureCurrentHardware(int presetId, QString *error)
             *error = QStringLiteral("SDK 快照中没有硬件工作组 0");
         return false;
     }
+    QStringList snapshotRepairs;
+    if (!UltrasoundConfigSanitizer::normalizeGroup(
+            &group, QStringLiteral("SDK 快照工作组 0"), &snapshotRepairs, error))
+        return false;
     const int frameRate = snapshotRoot.value(QStringLiteral("global")).toObject()
                               .value(QStringLiteral("frame_rate")).toInt(1);
     QJsonObject updatedPreset =
@@ -457,6 +510,14 @@ QList<int> ParameterPresetStore::importConfiguration(const QString &path, QStrin
     QList<int> added;
     if (!readJson(path, &imported, error) || !readPresets(&document, error))
         return added;
+    QStringList importRepairs;
+    if (!UltrasoundConfigSanitizer::normalizeHardwareDocument(
+            &imported, &importRepairs, error))
+        return added;
+    if (!importRepairs.isEmpty()) {
+        qWarning().noquote() << QStringLiteral("导入配置已在内存中自动修复：%1")
+                                    .arg(importRepairs.join(QStringLiteral("；")));
+    }
     const QJsonObject importedRoot = imported.object();
     const QJsonObject importedGroups = importedRoot.value(QStringLiteral("groups")).toObject();
     if (importedGroups.isEmpty()) {

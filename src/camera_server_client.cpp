@@ -15,7 +15,8 @@ constexpr int kPollIntervalMs = 33;  // ~30fps polling
 
 CameraServerClient::CameraServerClient(QObject* parent)
     : QObject(parent),
-      ipcKeyBase_("PA1664Camera") {
+      ipcKeyBase_("PA1664Camera"),
+      serverReady_(false) {
   pollTimer_ = new QTimer(this);
   connect(pollTimer_, &QTimer::timeout, this, &CameraServerClient::pollSharedMemory);
 }
@@ -29,6 +30,10 @@ bool CameraServerClient::start() {
     qWarning() << "Camera server already running";
     return true;
   }
+
+  // Reset state
+  serverReady_ = false;
+  pendingCommands_.clear();
 
   // Setup shared memory for each slot
   for (int i = 0; i < kUsbCameraChannelCount; ++i) {
@@ -78,6 +83,9 @@ bool CameraServerClient::start() {
 void CameraServerClient::stop() {
   pollTimer_->stop();
 
+  serverReady_ = false;
+  pendingCommands_.clear();
+
   if (serverProcess_) {
     serverProcess_->terminate();
     if (!serverProcess_->waitForFinished(3000)) {
@@ -119,19 +127,33 @@ void CameraServerClient::onServerStarted() {
 void CameraServerClient::onServerFinished(int exitCode, QProcess::ExitStatus status) {
   qWarning() << "Camera server exited with code" << exitCode
              << "status" << (status == QProcess::NormalExit ? "normal" : "crash");
+  serverReady_ = false;
   emit serverStatusChanged(false);
 }
 
 void CameraServerClient::onServerError(QProcess::ProcessError error) {
   qCritical() << "Camera server error:" << error << serverProcess_->errorString();
+  serverReady_ = false;
   emit serverStatusChanged(false);
 }
 
 void CameraServerClient::onServerOutput() {
   if (!serverProcess_)
     return;
+  
   const QByteArray output = serverProcess_->readAllStandardOutput();
-  qInfo().noquote() << "[CameraServer]" << QString::fromUtf8(output).trimmed();
+  const QString outputStr = QString::fromUtf8(output).trimmed();
+  
+  // Check for server ready signal
+  if (outputStr.contains("SERVER_READY")) {
+    if (!serverReady_) {
+      serverReady_ = true;
+      qInfo() << "Camera server is ready, flushing" << pendingCommands_.size() << "pending commands";
+      flushPendingCommands();
+    }
+  }
+  
+  qInfo().noquote() << "[CameraServer]" << outputStr;
 }
 
 void CameraServerClient::pollSharedMemory() {
@@ -166,11 +188,30 @@ void CameraServerClient::pollSharedMemory() {
 
 void CameraServerClient::sendCommand(const QString& command) {
   if (!serverProcess_ || serverProcess_->state() != QProcess::Running) {
-    qWarning() << "Cannot send command, server not running";
+    qWarning() << "Cannot send command, server not running:" << command;
     return;
   }
-  // For now, use stdout/stdin pipe (could upgrade to QLocalSocket later)
+  
+  // Queue commands until server is ready
+  if (!serverReady_) {
+    qInfo() << "Server not ready, queueing command:" << command;
+    pendingCommands_.enqueue(command);
+    return;
+  }
+  
+  // Send immediately if server is ready
   serverProcess_->write((command + "\n").toUtf8());
+}
+
+void CameraServerClient::flushPendingCommands() {
+  if (!serverProcess_ || serverProcess_->state() != QProcess::Running || !serverReady_)
+    return;
+  
+  while (!pendingCommands_.isEmpty()) {
+    const QString command = pendingCommands_.dequeue();
+    qInfo() << "Sending queued command:" << command;
+    serverProcess_->write((command + "\n").toUtf8());
+  }
 }
 
 void CameraServerClient::connectUsbCamera(int slot, int deviceIndex, int fps,

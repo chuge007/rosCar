@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **pa1664-workbench** (41464 symbols, 52143 relationships, 261 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **pa1664-workbench** (41801 symbols, 52529 relationships, 259 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -42,3 +42,11 @@ This project is indexed by GitNexus as **pa1664-workbench** (41464 symbols, 5214
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Ultrasound-Only Change Policy
+
+- When a task is scoped to ultrasound/PA-1664 acquisition, imaging, parameters, scanning, or the ultrasound remote-control interface, read and follow `docs/ULTRASOUND_SCOPE.md`.
+- Treat vehicle motion, laser/profile correction, cameras, IMU, clamp motors, and probe adjustment as out of scope unless the user explicitly includes them.
+- Shared integration files such as `src/mainwindow.*` and `PA1664Workbench.pro` may receive only minimal, ultrasound-specific wiring. Do not refactor or alter non-ultrasound behavior in the same hunk.
+- If a requested ultrasound change requires crossing the documented boundary, explain the reason and affected files before expanding scope.
+- At completion, report whether any shared or non-ultrasound files were touched. Run `detect-changes` when source symbols change; do not build by default for this Qt project.

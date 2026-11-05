@@ -42,7 +42,8 @@ QString axisName(int axis) {
 
 ClampMotorController::ClampMotorController(QObject* parent) : QObject(parent) {
   pollTimer_ = new QTimer(this);
-  pollTimer_->setInterval(100);
+  pollTimer_->setInterval(150);
+  pollTimer_->setTimerType(Qt::CoarseTimer);
   connect(pollTimer_, &QTimer::timeout, this, &ClampMotorController::pollPositions);
 }
 

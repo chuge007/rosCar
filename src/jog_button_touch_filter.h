@@ -2,85 +2,64 @@
 
 #include <QObject>
 #include <QEvent>
+#include <QElapsedTimer>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QTouchEvent>
+
+class QTimer;
 
 /**
  * @brief 触摸事件过滤器 - 专门用于方向控制按钮
  *
  * 解决Windows触摸屏上QPushButton的pressed/released信号几乎同时触发的问题。
- * 该过滤器直接捕获TouchBegin和TouchEnd事件,确保"按住"操作能正常工作。
+ * 该过滤器监听按钮自己的pressed/released信号，做去重和最小持续时间保证。
  *
- * 兼容性:
- * - 鼠标: 正常工作(不拦截鼠标事件,保持原有pressed/released信号)
- * - 触摸屏: 捕获Touch事件,手动触发pressed/released信号
+ * 工作原理:
+ * - 不拦截任何事件，让QPushButton的UI状态正常工作
+ * - 连接按钮的pressed/released信号
+ * - 在pressed时发出jogPressed信号
+ * - 在released时检查持续时间，如果不足150ms则延迟发出jogReleased信号
+ * - 去重：连续多次pressed只发出一次jogPressed
  */
 class JogButtonTouchFilter : public QObject
 {
     Q_OBJECT
 public:
-    explicit JogButtonTouchFilter(QPushButton *button, QObject *parent = nullptr)
-        : QObject(parent)
-        , m_button(button)
-        , m_touchActive(false)
-    {
-        if (m_button) {
-            m_button->setAttribute(Qt::WA_AcceptTouchEvents, true);
-        }
-    }
+    explicit JogButtonTouchFilter(QPushButton *button, QObject *parent = nullptr,
+                                  int minimumTouchMs = 150, int maxRapidPressMs = 300);
+    
+    // 可配置的参数
+    void setMinimumTouchDuration(int ms);
+    void setMaxRapidPressDuration(int ms);
+    int minimumTouchDuration() const { return m_minimumTouchMs; }
+    
+    // 状态查询
+    bool isActive() const { return m_gestureActive; }
+    qint64 currentPressDuration() const;
+
+signals:
+    void jogPressed();
+    void jogReleased();
+    void longPressDetected(qint64 duration);  // 长按检测（可选）
 
 protected:
-    bool eventFilter(QObject *watched, QEvent *event) override
-    {
-        if (watched != m_button)
-            return QObject::eventFilter(watched, event);
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
-        switch (event->type()) {
-        case QEvent::TouchBegin: {
-            // 触摸开始 - 模拟按下
-            m_touchActive = true;
-            // 手动触发pressed信号
-            QMetaObject::invokeMethod(m_button, "pressed", Qt::DirectConnection);
-            event->accept();
-            return true;  // 阻止事件继续传播,避免合成鼠标事件干扰
-        }
-        case QEvent::TouchEnd:
-        case QEvent::TouchCancel: {
-            // 触摸结束/取消 - 模拟释放
-            if (m_touchActive) {
-                m_touchActive = false;
-                // 手动触发released信号
-                QMetaObject::invokeMethod(m_button, "released", Qt::DirectConnection);
-                event->accept();
-                return true;  // 阻止事件继续传播
-            }
-            break;
-        }
-        case QEvent::TouchUpdate: {
-            // 触摸移动 - 如果移出按钮范围,视为取消
-            auto *touchEvent = static_cast<QTouchEvent*>(event);
-            if (m_touchActive && !touchEvent->touchPoints().isEmpty()) {
-                const QTouchEvent::TouchPoint &point = touchEvent->touchPoints().first();
-                const QRect buttonRect = m_button->rect();
-                const QPoint localPos = m_button->mapFromGlobal(point.globalPosition().toPoint());
-
-                if (!buttonRect.contains(localPos)) {
-                    // 触摸点移出按钮 - 触发释放
-                    m_touchActive = false;
-                    QMetaObject::invokeMethod(m_button, "released", Qt::DirectConnection);
-                }
-            }
-            event->accept();
-            return true;
-        }
-        default:
-            break;
-        }
-
-        return QObject::eventFilter(watched, event);
-    }
+private slots:
+    void onButtonPressed();
+    void onButtonReleased();
+    void finishGesture();
 
 private:
     QPushButton *m_button;
-    bool m_touchActive;
+    bool m_gestureActive;
+    bool m_rapidPressGuard;  // 防止快速连续点击
+    QElapsedTimer m_pressTimer;
+    QTimer *m_releaseTimer;
+    QTimer *m_rapidPressTimer;  // 防抖定时器
+    qint64 m_lastReleaseTime;  // 上次释放时间戳
+    
+    int m_minimumTouchMs;
+    int m_maxRapidPressMs;
 };

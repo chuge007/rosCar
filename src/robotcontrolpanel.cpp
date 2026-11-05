@@ -843,10 +843,10 @@ void RobotControlPanel::buildUi()
         button->setFocusPolicy(Qt::NoFocus);
         button->setToolTip(QStringLiteral("按住3秒可锁定该方向"));
 
-        // 安装触摸事件过滤器,解决Windows触摸屏按钮无法按住的问题
         auto *touchFilter = new JogButtonTouchFilter(button, this);
         button->installEventFilter(touchFilter);
-        connect(button, &QPushButton::pressed, this, [this, button, flag] {
+        const auto pressJog = [this, button, flag] {
+            m_jogPressTimer.start();
             // 写入触摸输入日志文件
             if (m_touchInputLog.device()) {
                 m_touchInputLog << "[PRESSED] " << button->text()
@@ -875,14 +875,23 @@ void RobotControlPanel::buildUi()
                                 << "\n";
                 m_touchInputLog.flush();
             }
-        });
-        connect(button, &QPushButton::released, this, [this, button, flag] {
+        };
+        const auto releaseJog = [this, button, flag] {
+            // Prevent duplicate calls from both button and touchFilter
+            if (!m_jogPressTimer.isValid()) {
+                return;  // Already processed
+            }
+            const qint64 pressDuration = m_jogPressTimer.isValid() 
+                ? m_jogPressTimer.elapsed() : 1000;
+            
             // 写入触摸输入日志文件
             if (m_touchInputLog.device()) {
                 m_touchInputLog << "[RELEASED] " << button->text()
+                                << " | pressDuration=" << pressDuration
                                 << " | m_pressedJogButton=" << (m_pressedJogButton ? m_pressedJogButton->text() : "null")
                                 << " | flag_addr=" << (void*)flag
                                 << " | latched=" << m_jogLatched
+                                << " | toggled=" << m_jogToggled
                                 << " | m_forward=" << m_forward
                                 << " | m_reverse=" << m_reverse
                                 << " | m_left=" << m_left
@@ -890,37 +899,52 @@ void RobotControlPanel::buildUi()
                                 << "\n";
                 m_touchInputLog.flush();
             }
+            
+            // Short click (<250ms) = toggle mode
+            if (pressDuration < 250) {
+                if (m_toggledJogButton == button && *flag) {
+                    // Same button clicked again - stop
+                    clearJogToggle();
+                    if (m_touchInputLog.device()) {
+                        m_touchInputLog << "[TOGGLE_OFF] " << button->text() << "\n";
+                        m_touchInputLog.flush();
+                    }
+                } else {
+                    // New direction - stop old, start new
+                    clearJogToggle();
+                    m_jogToggled = true;
+                    m_toggledJogButton = button;
+                    m_toggledJogFlag = flag;
+                    if (m_touchInputLog.device()) {
+                        m_touchInputLog << "[TOGGLE_ON] " << button->text() << "\n";
+                        m_touchInputLog.flush();
+                    }
+                }
+                m_jogHoldTimer->stop();
+                m_pressedJogButton = nullptr;
+                m_pressedJogFlag = nullptr;
+                m_jogPressTimer.invalidate();
+                return;
+            }
+            
+            // Long press - original behavior
             if (m_pressedJogButton == button) {
                 m_jogHoldTimer->stop();
                 m_pressedJogButton = nullptr;
                 m_pressedJogFlag = nullptr;
-                if (!m_jogLatched)
+                if (!m_jogLatched && !m_jogToggled)
                     setMotion(*flag, false);
-                if (m_touchInputLog.device()) {
-                    m_touchInputLog << "[AFTER_RELEASED_PATH1] " << button->text()
-                                    << " | flag_value=" << *flag
-                                    << " | m_forward=" << m_forward
-                                    << " | m_reverse=" << m_reverse
-                                    << " | m_left=" << m_left
-                                    << " | m_right=" << m_right
-                                    << "\n";
-                    m_touchInputLog.flush();
-                }
-                return;
-            }
-            if (!m_jogLatched)
+            } else if (!m_jogLatched && !m_jogToggled) {
                 setMotion(*flag, false);
-            if (m_touchInputLog.device()) {
-                m_touchInputLog << "[AFTER_RELEASED_PATH2] " << button->text()
-                                << " | flag_value=" << *flag
-                                << " | m_forward=" << m_forward
-                                << " | m_reverse=" << m_reverse
-                                << " | m_left=" << m_left
-                                << " | m_right=" << m_right
-                                << "\n";
-                m_touchInputLog.flush();
             }
-        });
+            m_jogPressTimer.invalidate();
+        };
+        connect(button, &QPushButton::pressed, this, pressJog);
+        connect(button, &QPushButton::released, this, releaseJog);
+        connect(touchFilter, &JogButtonTouchFilter::jogPressed,
+                this, pressJog, Qt::DirectConnection);
+        connect(touchFilter, &JogButtonTouchFilter::jogReleased,
+                this, releaseJog, Qt::DirectConnection);
     };
     bindJog(forward, &m_forward);
     bindJog(reverse, &m_reverse);
@@ -2304,8 +2328,9 @@ void RobotControlPanel::connectConfiguredUsbCamera()
         QMetaObject::invokeMethod(m_usbCameraController, "scanDevices", Qt::QueuedConnection);
     }
 
-    // Delay connection slightly to allow scan to complete
-    QTimer::singleShot(500, this, [this]() {
+    // Delay connection 2.5 seconds to allow network cameras to fully initialize
+    // This prevents the first connection attempt from failing on cold start
+    QTimer::singleShot(2500, this, [this]() {
         for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
             connectConfiguredUsbCameraSlot(slot);
         }
@@ -2495,6 +2520,19 @@ void RobotControlPanel::clearJogLatch()
     }
 }
 
+void RobotControlPanel::clearJogToggle()
+{
+    if (!m_jogToggled)
+        return;
+    m_jogToggled = false;
+    bool *toggledFlag = m_toggledJogFlag;
+    m_toggledJogButton = nullptr;
+    m_toggledJogFlag = nullptr;
+    if (toggledFlag && *toggledFlag) {
+        *toggledFlag = false;
+        sendMotionCommand();
+    }
+}
 void RobotControlPanel::requestEnable(bool enabled)
 {
     if (m_controller)
@@ -2511,6 +2549,7 @@ void RobotControlPanel::emergencyStop()
             .arg(m_autoCorrectionStartPending ? 1 : 0));
     stopAutoCorrection();
     clearJogLatch();
+    clearJogToggle();
     m_forward = m_reverse = m_left = m_right = false;
     for (QSlider *slider : findChildren<QSlider *>(QStringLiteral("clampMotorSpeed"))) {
         const QSignalBlocker blocker(slider);
@@ -2656,8 +2695,8 @@ void RobotControlPanel::updateState(crawling::DriveState state, const QString &r
         if (m_correctionStatus)
             m_correctionStatus->setText(QStringLiteral("未启动"));
     }
-    if (state != crawling::DriveState::Enabled && m_jogLatched)
-        clearJogLatch();
+    if (state != crawling::DriveState::Enabled && (m_jogLatched || m_jogToggled))
+        clearJogLatch(), clearJogToggle();
     const bool canEnable = m_connected && state != crawling::DriveState::Enabled &&
                            state != crawling::DriveState::Arming;
     m_enableButton->setEnabled(canEnable);
@@ -2673,8 +2712,8 @@ void RobotControlPanel::updateState(crawling::DriveState state, const QString &r
 void RobotControlPanel::updateConnection(bool connected, const QString &message)
 {
     m_connected = connected;
-    if (!connected && m_jogLatched)
-        clearJogLatch();
+    if (!connected && (m_jogLatched || m_jogToggled))
+        clearJogLatch(), clearJogToggle();
     if (!connected && m_autoCorrectionStartPending && !m_autoCorrectionActive) {
         m_autoCorrectionStartPending = false;
         setAutoCorrectionPaused(false);
@@ -3360,6 +3399,7 @@ void RobotControlPanel::changeEvent(QEvent *event)
         stopAutoCorrection();
     }
     clearJogLatch();
+    clearJogToggle();
     const bool wasJogging = m_forward || m_reverse || m_left || m_right;
     m_forward = m_reverse = m_left = m_right = false;
     if (wasJogging)
