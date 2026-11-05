@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **PA1664WorkbenchTmp2** (41582 symbols, 52342 relationships, 265 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **rosCar** (41904 symbols, 53043 relationships, 280 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -25,10 +25,10 @@ This project is indexed by GitNexus as **PA1664WorkbenchTmp2** (41582 symbols, 5
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/PA1664WorkbenchTmp2/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/PA1664WorkbenchTmp2/clusters` | All functional areas |
-| `gitnexus://repo/PA1664WorkbenchTmp2/processes` | All execution flows |
-| `gitnexus://repo/PA1664WorkbenchTmp2/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/rosCar/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/rosCar/clusters` | All functional areas |
+| `gitnexus://repo/rosCar/processes` | All execution flows |
+| `gitnexus://repo/rosCar/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
