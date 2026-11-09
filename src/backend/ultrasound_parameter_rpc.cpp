@@ -110,6 +110,28 @@ bool UltrasoundParameterRpc::read(Client& client, const QString& method,
       *value = QJsonValue(static_cast<int>(client.getFrameRate()));
       return true;
     }
+    // The integrated build reads these device-level methods directly from the
+    // SDK. The separated console must not hard-code a single work group or
+    // derive the beam count from first/last/step, so expose them as read-only
+    // RPCs using the existing getMany/snapshot channel.
+    if (method == QStringLiteral("getGroupsNo")) {
+      if (!checkArgs(args, 1, error)) return false;
+      QJsonArray groups;
+      const auto ids = client.getGroupsNo(args.at(0).toBool());
+      for (int groupId : ids) groups.append(groupId);
+      *value = QJsonValue(groups);
+      return true;
+    }
+    if (method == QStringLiteral("getBeamCounts")) {
+      if (!checkArgs(args, 1, error)) return false;
+      *value = QJsonValue(client.getBeamCounts(args.at(0).toInt()));
+      return true;
+    }
+    if (method == QStringLiteral("getCurrentGroup")) {
+      if (!checkArgs(args, 0, error)) return false;
+      *value = QJsonValue(client.getCurrentGroup());
+      return true;
+    }
     if (method == QStringLiteral("getGain")) {
       if (!checkArgs(args, 1, error)) return false;
       *value = QJsonValue(client.getGain(args.at(0).toInt()));
@@ -1111,7 +1133,12 @@ QStringList UltrasoundParameterRpc::getterNames() {
       QStringLiteral("getWedgeWidth"),
       QStringLiteral("getWedgeX"),
       QStringLiteral("getWedgeZ"),
-      QStringLiteral("getWorkpieceVelocity")
+      QStringLiteral("getWorkpieceVelocity"),
+      // Device-level read-only state (previously missing in the separated
+      // console: it fell back to a hard-coded group 0).
+      QStringLiteral("getGroupsNo"),
+      QStringLiteral("getBeamCounts"),
+      QStringLiteral("getCurrentGroup")
   };
 }
 
@@ -1131,6 +1158,9 @@ QJsonArray UltrasoundParameterRpc::defaultArguments(const QString& method) {
   if (method == QStringLiteral("getFocalPosition")) return QJsonArray{0};
   if (method == QStringLiteral("getFocusMode")) return QJsonArray{0};
   if (method == QStringLiteral("getFrameRate")) return QJsonArray{};
+  if (method == QStringLiteral("getGroupsNo")) return QJsonArray{false};
+  if (method == QStringLiteral("getBeamCounts")) return QJsonArray{0};
+  if (method == QStringLiteral("getCurrentGroup")) return QJsonArray{};
   if (method == QStringLiteral("getGain")) return QJsonArray{0};
   if (method == QStringLiteral("getGateAEnable")) return QJsonArray{0};
   if (method == QStringLiteral("getGateAEnd")) return QJsonArray{0};

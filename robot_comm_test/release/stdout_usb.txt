@@ -1,0 +1,111 @@
+
+========================================
+   PA1664 Robot Communication Test
+   Binary Protocol Version
+========================================
+
+Target: 192.168.1.20:43100
+Settings: D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmpSeparate\robot_comm_test\..\startup_deploy\robot_host\app\config\drive_settings.ini
+Hold: 20s
+
+[1] TCP Connection Test
+-----------------------------------
+[ OK ] TCP Connected (7ms)
+  Local: 192.168.1.100:50534
+  Remote: 192.168.1.20:43100
+
+[2] PA1664 Hello Handshake
+-----------------------------------
+  Waiting for HelloAck...
+
+[ OK ] Received HelloAck (77ms)
+  SessionId: 24
+  Host: DESKTOP-3AQ3FDU  Version: 
+
+
+[1/8] robot.connect (涓嬪彂搴曠洏/澶栬閰嶇疆)
+[ OK ] robot.connect (涓嬪彂搴曠洏/澶栬閰嶇疆)  (requestId=1, 61 ms)
+       {"data":{"queued":true},"ok":true}
+       [log] event=connect_start module=DRIVE.MOTOR mode=CAN left_port=COM6 left_baud=115200 right_port=COM6 right_baud=115200 can_port=COM8 can_adapter_baud=115200 can_bitrate=1000000 left_id=1 left_sign=1 right_id=2 right_sign=-1 wheel_radius_m=0.074000 motor_to_wheel_ratio=1.0000
+       [log] event=connect_complete result=OK module=DRIVE.MOTOR mode=CAN left_port= right_port= can_port=COM8 can_bitrate=1000000
+       [log] event=wheel_stop result=OK module=DRIVE.MOTOR reason=connect command=0x81
+       [log] event=motor_communication_profile cyclic_hz=10 interval_ms=100 feedback_timeout_ms=800 mode=CAN_A2_9C
+       [log] event=wheel_command_limit configured_mps=0.1600 effective_mps=0.1600 motor_limit_dps=32767
+       [robot.connectionChanged] {"connected":true,"message":"Servo CAN wheel motor bus connected"}
+       [robot.connectionChanged] {"connected":true,"message":"Servo CAN wheel motor bus connected"}
+       [robot.stateChanged] {"reason":"Servo CAN motor bus connected; drive output disabled","state":1,"stateKey":"idle"}
+       [log] event=state_changed state=就绪 reason=Servo CAN motor bus connected; drive output disabled
+
+[2/8] robot.laser.scan
+[ OK ] robot.laser.scan  (requestId=2, 5 ms)
+       {"data":{"queued":true},"ok":true}
+       [robot.laser.devices] ["DB2666828 | 192.168.1.25 | MV-TD240-2D"]
+       [log] 线激光扫描到 1 个设备
+
+[3/8] robot.laser.connect DB2666828
+       [robot.laser.connecting] {"serialNumber":"DB2666828"}
+[ OK ] robot.laser.connect DB2666828  (requestId=3, 6 ms)
+       {"data":{"queued":true},"ok":true}
+       [robot.laser.devices] ["DB2666828 | 192.168.1.25 | MV-TD240-2D"]
+       [log] 线激光扫描到 1 个设备
+       [robot.laser.connection] {"connected":true,"message":"线激光相机已连接：DB2666828"}
+       [log] 线激光相机已连接：DB2666828
+
+[4/8] robot.camera.scan
+[ OK ] robot.camera.scan  (requestId=4, 2 ms)
+       {"data":{"queued":true},"ok":true}
+       [robot.camera.devices] []
+       [log] USB 摄像头扫描到 0 个设备
+
+[5/8] robot.camera.connect slot=0
+[ OK ] robot.camera.connect slot=0  (requestId=5, 4 ms)
+       {"data":{"queued":true,"slot":0},"ok":true}
+       [robot.camera.connection] {"connected":false,"message":"USB 摄像头 1 打开失败：设备编号 0 不存在，请先重新扫描","slot":0}
+       [log] USB 摄像头 1 打开失败：设备编号 0 不存在，请先重新扫描
+       [log] USB 摄像头 1 打开失败：设备编号 0 不存在，请先重新扫描
+
+[6/8] robot.camera.connect slot=1
+[ OK ] robot.camera.connect slot=1  (requestId=6, 3 ms)
+       {"data":{"queued":true,"slot":1},"ok":true}
+       [robot.camera.connection] {"connected":false,"message":"USB 摄像头 2 打开失败：设备编号 1 不存在，请先重新扫描","slot":1}
+       [log] USB 摄像头 2 打开失败：设备编号 1 不存在，请先重新扫描
+       [log] USB 摄像头 2 打开失败：设备编号 1 不存在，请先重新扫描
+
+[7/8] robot.snapshot
+[ OK ] robot.snapshot  (requestId=7, 17 ms)
+       drive=1  state=idle  left(valid=0,temp=0)  right(valid=1,temp=41)
+
+[8/8] robot.peripherals.snapshot
+[ OK ] robot.peripherals.snapshot  (requestId=8, 16 ms)
+       drive=1  laser=1  imu=0  clamp=0  usb=[false,false]
+
+===== ä¿æä¼è¯ 20 ç§ï¼æé´æ¯ 10 ç§æ¥è¯¢ä¸æ¬¡å¤è®¾å¿«ç§ =====
+[ OK ] peripherals.poll  (requestId=9, 21 ms)
+       drive=1  laser=1  imu=0  clamp=0  usb=[false,false]
+
+激光帧率 ≈ 9.4 fps（20 秒内 188 帧，最近点云 3200 点）
+
+========================================
+Test Summary
+========================================
+
+TCP Connection                 [ OK ] Pass
+PA1664 Hello Handshake         [ OK ] Pass
+Responses received             [ OK ] Pass
+
+澶栬杩炴帴鍒ゅ畾
+-----------------------------------
+搴曠洏鐢垫満                 [ OK ] 宸茶繛鎺?  state=idle left_feedback=MISSING right_feedback=OK
+绾挎縺鍏夌浉鏈?               [ OK ] 宸茶繛鎺?  线激光相机已连接：DB2666828
+鐩告満 1                  [FAIL] 鏈繛鎺?  USB 摄像头 1 打开失败：设备编号 0 不存在，请先重新扫描
+鐩告満 2                  [FAIL] 鏈繛鎺?  USB 摄像头 2 打开失败：设备编号 1 不存在，请先重新扫描
+IMU                    [FAIL] 鏈繛鎺?  -
+澶圭埅鐢垫満                 [FAIL] 鏈繛鎺?  -
+
+Responses: 9  Laser frames: 250
+Connection time: 7ms
+
+Log: robot_comm_test.log
+
+
+Connection closed

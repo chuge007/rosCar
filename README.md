@@ -141,7 +141,8 @@ cd startup_deploy
 
 ### 配置文件
 
-**小车端** (obot_host\config\host.psd1):
+**小车端** (
+obot_host\config\host.psd1):
 `powershell
 @{
     TcpCommandPort = 43100
@@ -186,6 +187,8 @@ cd startup_deploy
 - **快速参考**: startup_deploy\README.md
 - **完整指南**: startup_deploy\使用说明.md
 - **架构设计**: docs\REMOTE_CONTROL_ARCHITECTURE.md
+- **远程调试与部署（SSH 直连小车端、看日志、换 EXE）**: docs\远程调试与部署指南.md
+- **数据传输减压优化方案与实测报告**: docs\数据传输减压优化方案.md
 
 ---
 
@@ -242,7 +245,8 @@ powershell -ExecutionPolicy Bypass -File .\build-all.ps1
 
 ### 3. 日志位置
 
-- 小车端: obot_host\app\logs\
+- 小车端: 
+obot_host\app\logs\
 - 控制端: operator_workbench\app\logs\
 
 ---
@@ -253,7 +257,8 @@ powershell -ExecutionPolicy Bypass -File .\build-all.ps1
 1. 进入 startup_deploy 目录
 2. 双击 【完整构建】Full-Build.cmd
 3. 等待编译完成（5-10 分钟）
-4. 复制 obot_host 到小车电脑
+4. 复制 
+obot_host 到小车电脑
 5. 复制 operator_workbench 到操作电脑
 6. 配置 IP 地址
 7. 测试运行

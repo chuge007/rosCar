@@ -33,7 +33,7 @@ bool constantTimeEquals(const QByteArray& left, const QByteArray& right) {
 
 bool validKind(quint8 rawKind) {
   return rawKind >= static_cast<quint8>(MediaStreamKind::Heartbeat) &&
-         rawKind <= static_cast<quint8>(MediaStreamKind::ImuSample);
+         rawKind <= static_cast<quint8>(MediaStreamKind::LaserProfileObservation);
 }
 
 }  // namespace
@@ -48,7 +48,7 @@ QByteArray MediaCodec::encode(const MediaFragmentPacket& packet,
     return {};
   }
   const int maximumPayload =
-      kMaxRealtimeDatagramBytes - kMediaHeaderBytes - kMediaAuthTagBytes;
+      kMediaDatagramBytes - kMediaHeaderBytes - kMediaAuthTagBytes;
   if (packet.payload.size() > maximumPayload ||
       packet.fragmentCount == 0 ||
       packet.fragmentIndex >= packet.fragmentCount ||
@@ -86,7 +86,7 @@ QByteArray MediaCodec::encode(const MediaFragmentPacket& packet,
   }
   const QByteArray tag = authenticationTag(body, sessionKey);
   body.append(tag);
-  if (body.size() > kMaxRealtimeDatagramBytes) {
+  if (body.size() > kMediaDatagramBytes) {
     setError(error, DecodeResult::InvalidLength,
              QStringLiteral("媒体数据报超过 MTU 上限"));
     return {};
@@ -103,7 +103,7 @@ DecodeResult MediaCodec::peekSessionId(const QByteArray& datagram,
     setError(error, DecodeResult::Incomplete, QStringLiteral("媒体分片不完整"));
     return DecodeResult::Incomplete;
   }
-  if (datagram.size() > kMaxRealtimeDatagramBytes) {
+  if (datagram.size() > kMediaDatagramBytes) {
     setError(error, DecodeResult::InvalidLength,
              QStringLiteral("媒体数据报过大"));
     return DecodeResult::InvalidLength;
@@ -200,7 +200,7 @@ DecodeResult MediaCodec::decode(const QByteArray& datagram,
       fragmentCount > static_cast<quint32>(kMaxMediaFragments) ||
       totalBytes > static_cast<quint32>(kMaxMediaMessageBytes) ||
       payloadBytes > static_cast<quint32>(
-                         kMaxRealtimeDatagramBytes - kMediaHeaderBytes -
+                         kMediaDatagramBytes - kMediaHeaderBytes -
                          kMediaAuthTagBytes)) {
     setError(error, DecodeResult::InvalidLength,
              QStringLiteral("媒体分片长度字段无效"));

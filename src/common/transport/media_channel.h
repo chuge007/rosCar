@@ -13,6 +13,26 @@ class QTimer;
 
 namespace pa1664::remote {
 
+// Media counters. The server used to drop every message silently when the
+// session had no validated peer address (the operator heartbeat had not been
+// seen yet), which looked exactly like "cameras frozen" while the host log
+// reported healthy RTSP streams.
+struct MediaServerStats {
+  quint64 messagesSent = 0;
+  quint64 fragmentsSent = 0;
+  quint64 bytesSent = 0;
+  quint64 droppedNoPeer = 0;
+  quint64 droppedOversize = 0;
+  quint64 sendFailures = 0;
+};
+
+struct MediaClientStats {
+  quint64 datagrams = 0;
+  quint64 bytesReceived = 0;
+  quint64 messagesCompleted = 0;
+  quint64 assemblyTimeouts = 0;
+};
+
 // Operator-side latest-value media receiver.  Slow or missing fragments are
 // discarded as soon as a newer message for the same stream arrives.
 class MediaClient final : public QObject {
@@ -22,6 +42,7 @@ class MediaClient final : public QObject {
   ~MediaClient() override;
 
   bool isActive() const { return active_; }
+  MediaClientStats stats() const { return stats_; }
 
  public slots:
   void start(const QString& host, quint16 port, quint64 sessionId,
@@ -58,6 +79,7 @@ class MediaClient final : public QObject {
   quint64 nextMessageId_ = 1;
   QHash<quint16, Assembly> assemblies_;
   bool active_ = false;
+  mutable MediaClientStats stats_;
 };
 
 class MediaServer final : public QObject {
@@ -75,6 +97,7 @@ class MediaServer final : public QObject {
   void registerSession(quint64 sessionId, const QByteArray& sessionKey);
   void removeSession(quint64 sessionId);
   bool hasPeer(quint64 sessionId) const;
+  MediaServerStats stats() const { return serverStats_; }
   void sendMessage(quint64 sessionId, quint16 streamId, MediaStreamKind kind,
                    const QByteArray& payload);
 
@@ -99,6 +122,10 @@ class MediaServer final : public QObject {
 
   QUdpSocket* socket_ = nullptr;
   QHash<quint64, Session> sessions_;
+  mutable MediaServerStats serverStats_;
+  // A burst of ~70 fragments per JPEG frame used to overflow the tiny default
+  // UDP send buffer; a single failed write then discarded the rest of the frame.
+  qint64 lastRejectLogMs_ = 0;
 };
 
 }  // namespace pa1664::remote

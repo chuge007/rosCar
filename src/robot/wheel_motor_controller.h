@@ -10,7 +10,9 @@
 #include <QString>
 #include <QtGlobal>
 
+#include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 namespace crawling {
@@ -96,6 +98,30 @@ class WheelMotorController final {
   bool reset();
   bool pollFeedback(WheelMotorFeedback* feedback, bool requestStatus = true);
 
+  // Cumulative CAN counters since the last initialize(). They let a caller
+  // distinguish "the motor stopped answering" (rx_left_id frozen while tx
+  // keeps growing) from "the adapter or parser dropped frames" (tx_failed or
+  // bel growing, or the receive buffer backing up).
+  struct CanLinkDiagnostics {
+    bool canMode = false;
+    std::int64_t rxTotal = 0;
+    std::int64_t rxLeftId = 0;
+    std::int64_t rxRightId = 0;
+    std::int64_t rxOther = 0;
+    std::int64_t bel = 0;
+    std::int64_t tx = 0;
+    std::int64_t txFailed = 0;
+    int receiveBufferBytes = 0;
+  };
+  CanLinkDiagnostics canLinkDiagnostics() const;
+  // Raw payload of the newest 0x9C speed-feedback frame per side, as hex.
+  // Needed when a drive answers but reports a zero/invalid speed field: the
+  // byte pattern shows which pair actually carries the speed.
+  QString lastSpeedFrameHex(bool leftMotor) const;
+  // Mirrors every can_rx_stats window line so a remote operator console can
+  // show the same numbers the host writes to its own log file.
+  void setDiagnosticSink(std::function<void(const QString&)> sink);
+
   static bool resolvePort(const QString& specification, QString* serialPort,
                           QString* errorMessage = nullptr);
 
@@ -104,6 +130,7 @@ class WheelMotorController final {
                    const QByteArray& data = {});
   bool sendCanFrame(const CanFrame& frame);
   bool pollCanFeedback(bool requestStatus, WheelMotorFeedback* feedback);
+  void probeCanBusIds();
   bool holdCurrentPosition(bool leftMotor, std::uint8_t motorId,
                            std::int64_t* holdAngleHundredthDegree);
   bool sendSpeed(bool leftMotor, std::uint8_t motorId, double wheelMps,
@@ -147,6 +174,37 @@ class WheelMotorController final {
   qint64 lastPositionQueryMs_ = -1;
   int nextFeedbackSide_ = 0;
   int nextPositionSide_ = 0;
+  // CAN diagnostics: per-ID RX counters distinguish a motor that stopped
+  // answering from frames lost by the adapter or the SLCAN parser.
+  std::int64_t canDiagLastLogMs_ = -1;
+  std::int64_t canDiagTotal_ = 0;
+  std::int64_t canDiagLeft_ = 0;
+  std::int64_t canDiagRight_ = 0;
+  std::int64_t canDiagOther_ = 0;
+  std::int64_t canDiagBel_ = 0;
+  std::int64_t canDiagTx_ = 0;
+  std::int64_t canDiagTxFailed_ = 0;
+  // Cumulative mirrors of the windowed counters above, reported to callers
+  // that surface the link state on the operator console.
+  std::int64_t canLinkRxTotal_ = 0;
+  std::int64_t canLinkRxLeft_ = 0;
+  std::int64_t canLinkRxRight_ = 0;
+  std::int64_t canLinkRxOther_ = 0;
+  std::int64_t canLinkBel_ = 0;
+  std::int64_t canLinkTx_ = 0;
+  std::int64_t canLinkTxFailed_ = 0;
+  std::function<void(const QString&)> diagnosticSink_;
+  // Consecutive polls in which a side produced no reply; used to grant a
+  // slower motor a longer answer window instead of starving it.
+  int leftMissCount_ = 0;
+  int rightMissCount_ = 0;
+  std::int64_t canStaleLogMs_ = -1;
+  std::optional<ServoStatus> leftStatus_;
+  std::optional<ServoStatus> rightStatus_;
+  std::array<std::uint8_t, 8> leftSpeedFrame_{};
+  std::array<std::uint8_t, 8> rightSpeedFrame_{};
+  bool leftSpeedFrameValid_ = false;
+  bool rightSpeedFrameValid_ = false;
 };
 
 }  // namespace crawling

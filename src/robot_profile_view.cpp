@@ -17,6 +17,12 @@ RobotProfileView::RobotProfileView(QWidget *parent) : QWidget(parent)
     setMinimumSize(260, 150);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setAttribute(Qt::WA_OpaquePaintEvent);
+    m_renderRetryTimer = new QTimer(this);
+    m_renderRetryTimer->setSingleShot(true);
+    connect(m_renderRetryTimer, &QTimer::timeout, this, [this] {
+        if (m_profileUpdatePending)
+            requestProfileUpdate();
+    });
     auto *freshnessTimer = new QTimer(this);
     connect(freshnessTimer, &QTimer::timeout, this, [this] {
         if (!isVisible())
@@ -44,7 +50,11 @@ void RobotProfileView::setPoints(const QVector<QVector3D> &points)
     m_points = points;
     m_rawPoints = points;
     m_hasDetection = false;
-    m_receivedAtEpochMs = 0;
+    // Remote mode feeds raw point clouds through this path only; stamp the
+    // arrival time so the trace counts as live. Leaving it at 0 made the view
+    // report age ~= epoch and show "数据过期" even while frames kept flowing.
+    m_receivedAtEpochMs = QDateTime::currentMSecsSinceEpoch();
+    ++m_receivedProfiles;
     m_displayRangeInitialized = false;
     m_profileCacheValid = false;
     m_lastStaleState = false;
@@ -174,8 +184,15 @@ void RobotProfileView::requestProfileUpdate()
     m_profileUpdatePending = true;
     if (!isVisible())
         return;
-    if (m_renderThrottle.isValid() && m_renderThrottle.elapsed() < 33)
+    if (m_renderThrottle.isValid() && m_renderThrottle.elapsed() < 33) {
+        // A throttled request used to be dropped entirely, leaving the view
+        // stale until the next frame arrived. Queue one retry like the
+        // integrated build does.
+        if (m_renderRetryTimer && !m_renderRetryTimer->isActive())
+            m_renderRetryTimer->start(
+                static_cast<int>(33 - m_renderThrottle.elapsed()) + 1);
         return;
+    }
     if (!m_profileCacheValid || m_cachedViewMode != m_viewMode)
         rebuildProfileCache();
     m_profileUpdatePending = false;

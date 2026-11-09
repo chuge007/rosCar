@@ -13,6 +13,7 @@ class QPaintEvent;
 class QPainter;
 class QMouseEvent;
 class QShowEvent;
+class QTimer;
 
 class RobotProfileView final : public QWidget
 {
@@ -97,4 +98,5 @@ private:
     bool m_profileCacheValid = false;
     bool m_lastStaleState = false;
     QElapsedTimer m_renderThrottle;
+    QTimer *m_renderRetryTimer = nullptr;
 };

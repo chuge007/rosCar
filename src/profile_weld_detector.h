@@ -170,57 +170,30 @@ class ProfileWeldDetector final {
       std::nth_element(values.begin(), middle, values.end());
       return *middle;
     };
-    // SDK rows are normally monotonic in X, but one malformed/out-of-order
-    // sample must not truncate the whole usable scan. Split at large backwards
-    // jumps and keep the longest monotonic run; small duplicates remain
-    // non-increasing and are ignored as before.
-    std::vector<std::vector<int>> scanRuns(1);
-    const auto runSpan = [&points](const std::vector<int>& run) {
-      if (run.size() < 2) return 0.0;
-      return double(points[run.back()].x() - points[run.front()].x());
-    };
-    for (int i = 0; i < n; ++i) {
-      const auto& p = points[i];
-      if (!std::isfinite(p.x()) || !std::isfinite(p.z()) || p.z() <= 0) continue;
-      std::vector<int>& run = scanRuns.back();
-      if (!run.empty()) {
-        const double previousX = points[run.back()].x();
-        const double span = std::max(0.0, runSpan(run));
-        const double resetThreshold = std::max(100.0, span * 0.25);
-        if (p.x() <= previousX) {
-          if (previousX - p.x() <= resetThreshold) continue;
-          scanRuns.emplace_back();
-        }
-      }
-      scanRuns.back().push_back(i);
-    }
-    const auto bestRun = std::max_element(
-        scanRuns.begin(), scanRuns.end(),
-        [&runSpan](const std::vector<int>& lhs, const std::vector<int>& rhs) {
-          if (lhs.size() != rhs.size()) return lhs.size() < rhs.size();
-          return runSpan(lhs) < runSpan(rhs);
-        });
-    std::vector<int> valid = *bestRun;
+    // Keep the first monotonic scan until a large X back-jump. The integrated
+    // build behaves this way; splitting into runs and keeping the longest one
+    // discarded a whole half of a two-segment SDK row, which showed up as a
+    // flat baseline on one side of the X/Z profile view.
+    std::vector<int> valid;
     std::vector<double> differences;
     double scanMinimumX = 0.0;
     double scanMaximumX = 0.0;
-    if (!valid.empty()) {
-      scanMinimumX = scanMaximumX = points[valid.front()].x();
-      for (std::size_t position = 0; position < valid.size(); ++position) {
-        const int index = valid[position];
-        scanMinimumX = std::min(scanMinimumX, double(points[index].x()));
-        scanMaximumX = std::max(scanMaximumX, double(points[index].x()));
-        if (position > 0 && index == valid[position - 1] + 1) {
-          differences.push_back(points[index].z() - points[valid[position - 1]].z());
-        }
+    for (int i = 0; i < n; ++i) {
+      const auto& p = points[i];
+      if (!std::isfinite(p.x()) || !std::isfinite(p.z()) || p.z() <= 0) continue;
+      if (!valid.empty() && p.x() <= points[valid.back()].x()) {
+        const double resetThreshold = std::max(
+            100.0, (scanMaximumX - scanMinimumX) * 0.25);
+        if (points[valid.back()].x() - p.x() > resetThreshold) break;
+        continue;
       }
+      if (valid.empty()) scanMinimumX = scanMaximumX = p.x();
+      scanMinimumX = std::min(scanMinimumX, double(p.x()));
+      scanMaximumX = std::max(scanMaximumX, double(p.x()));
+      if (!valid.empty() && i == valid.back() + 1)
+        differences.push_back(p.z() - points[valid.back()].z());
+      valid.push_back(i);
     }
-    if (trace && trace->enabled)
-      trace->append(QStringLiteral(
-          "event=scan_runs count=%1 selected_samples=%2 selected_span=%3")
-                        .arg(scanRuns.size())
-                        .arg(valid.size())
-                        .arg(scanMaximumX - scanMinimumX, 0, 'g', 10));
     const double observedHalfSpanX =
         std::max(std::abs(scanMinimumX), std::abs(scanMaximumX));
     result.profileAxisHalfSpanX =

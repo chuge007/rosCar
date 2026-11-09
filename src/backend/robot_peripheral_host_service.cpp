@@ -9,6 +9,7 @@
 #include "pcan_can_adapter.h"
 #include "services/robot_json_codec.h"
 #include "services/workbench_data_codec.h"
+#include "robot_app_logger.h"
 
 #include <QDateTime>
 #include <QDebug>
@@ -28,9 +29,15 @@
 namespace pa1664::remote {
 namespace {
 
-constexpr int kLaserImageIntervalMs = 33;
+// The laser grayscale preview stream (0x0201, JPEG at full frame resolution)
+// was removed: the operator panel never rendered it (setLaserProfileImage()
+// stored the frame without any reader), so every byte and every JPEG encode
+// was pure waste on the 100 Mbit link. The contour view consumes the point
+// cloud stream (0x0202) instead.
 constexpr int kLaserPointIntervalMs = 50;
-constexpr int kUsbImageIntervalMs = 66;
+// The operator panel repaints camera previews on its 100 ms UI clock, so a
+// 66 ms push interval wasted a third of the JPEG encodes and link bytes.
+constexpr int kUsbImageIntervalMs = 100;
 constexpr int kImuIntervalMs = 50;
 constexpr int kCorrectionStatusIntervalMs = 100;
 constexpr int kLaserEventIntervalMs = 100;
@@ -111,23 +118,16 @@ void RobotPeripheralMediaEncoder::setActive(bool active) {
   active_ = active;
   if (!active_) {
     if (timer_) timer_->stop();
-    laserImage_ = QImage();
     laserPoints_.clear();
     for (QImage& image : usbImages_) image = QImage();
     imuSample_ = crawling::ImuSample();
-    laserImagePending_ = false;
+    profileObservationPayload_.clear();
     laserPointsPending_ = false;
     imuPending_ = false;
+    profileObservationPending_ = false;
     for (bool& pending : usbImagePending_) pending = false;
     return;
   }
-  schedule();
-}
-
-void RobotPeripheralMediaEncoder::submitLaserImage(const QImage& image) {
-  if (!active_ || image.isNull()) return;
-  laserImage_ = image;
-  laserImagePending_ = true;
   schedule();
 }
 
@@ -150,6 +150,19 @@ void RobotPeripheralMediaEncoder::submitUsbImage(int slot,
   schedule();
 }
 
+void RobotPeripheralMediaEncoder::submitProfileObservation(
+    const QVector<QVector3D>& points,
+    const crawling::LaserGapDetection& detection, quint32 frameNumber,
+    qint64 receivedAtEpochMs) {
+  if (!active_) return;
+  QByteArray payload = encodeProfileObservation(points, detection, frameNumber,
+                                                receivedAtEpochMs);
+  if (payload.isEmpty()) return;
+  profileObservationPayload_ = std::move(payload);
+  profileObservationPending_ = true;
+  schedule();
+}
+
 void RobotPeripheralMediaEncoder::submitImu(
     const crawling::ImuSample& sample) {
   if (!active_) return;
@@ -161,15 +174,17 @@ void RobotPeripheralMediaEncoder::submitImu(
 void RobotPeripheralMediaEncoder::shutdown() {
   active_ = false;
   if (timer_) timer_->stop();
-  laserImagePending_ = false;
   laserPointsPending_ = false;
   imuPending_ = false;
+  profileObservationPending_ = false;
+  profileObservationPayload_.clear();
   for (bool& pending : usbImagePending_) pending = false;
 }
 
 void RobotPeripheralMediaEncoder::schedule() {
   if (!active_ || !timer_) return;
-  const bool pending = laserImagePending_ || laserPointsPending_ || imuPending_ ||
+  const bool pending = laserPointsPending_ || imuPending_ ||
+                       profileObservationPending_ ||
                        usbImagePending_[0] || usbImagePending_[1];
   if (pending && !timer_->isActive()) timer_->start();
 }
@@ -189,28 +204,29 @@ void RobotPeripheralMediaEncoder::encodePending() {
   }
 
   const qint64 now = QDateTime::currentMSecsSinceEpoch();
-  if (laserImagePending_ &&
-      intervalElapsed(&lastLaserImageMs_, kLaserImageIntervalMs, now)) {
-    laserImagePending_ = false;
-    const QByteArray payload =
-        encodeImagePayload(laserImage_, 78);
-    laserImage_ = QImage();
-    if (!payload.isEmpty() && payload.size() <= kMaxMediaMessageBytes) {
-      emit mediaReady(kMediaStreamLaserImage, MediaStreamKind::LaserImage,
-                      payload);
-    }
-  }
-
   if (laserPointsPending_ &&
       intervalElapsed(&lastLaserPointsMs_, kLaserPointIntervalMs, now)) {
     laserPointsPending_ = false;
-    const QByteArray payload = encodePointCloud(laserPoints_);
+    const QByteArray payload = encodeQuantizedPointCloud(laserPoints_);
     laserPoints_ = QVector<QVector3D>();
     if (!payload.isEmpty() && payload.size() <= kMaxMediaMessageBytes) {
       emit mediaReady(kMediaStreamLaserPointCloud,
                       MediaStreamKind::LaserPointCloud, payload);
     } else if (!payload.isEmpty()) {
       emit logMessage(QStringLiteral("激光点云帧超过媒体通道上限，已丢弃"));
+    }
+  }
+
+  if (profileObservationPending_ &&
+      intervalElapsed(&lastProfileObservationMs_, kLaserPointIntervalMs, now)) {
+    profileObservationPending_ = false;
+    const QByteArray payload = profileObservationPayload_;
+    profileObservationPayload_.clear();
+    if (!payload.isEmpty() && payload.size() <= kMaxMediaMessageBytes) {
+      emit mediaReady(kMediaStreamProfileObservation,
+                      MediaStreamKind::LaserProfileObservation, payload);
+    } else if (!payload.isEmpty()) {
+      emit logMessage(QStringLiteral("焊道观测帧超过媒体通道上限，已丢弃"));
     }
   }
 
@@ -236,7 +252,8 @@ void RobotPeripheralMediaEncoder::encodePending() {
     }
   }
 
-  const bool pending = laserImagePending_ || laserPointsPending_ || imuPending_ ||
+  const bool pending = laserPointsPending_ || imuPending_ ||
+                       profileObservationPending_ ||
                        usbImagePending_[0] || usbImagePending_[1];
   if (!pending && timer_) timer_->stop();
 }
@@ -252,6 +269,10 @@ RobotPeripheralHostService::RobotPeripheralHostService(
       "crawling::LaserCorrectionSettings");
   qRegisterMetaType<crawling::LaserCorrectionStatus>(
       "crawling::LaserCorrectionStatus");
+  // profileObservationReady is delivered across the correction thread with a
+  // queued connection; the detection payload must be a registered metatype.
+  qRegisterMetaType<crawling::LaserGapDetection>(
+      "crawling::LaserGapDetection");
   qRegisterMetaType<QVector<QVector3D>>("QVector<QVector3D>");
   QSettings persistent(crawling::DriveSettings::persistentFilePath(),
                        QSettings::IniFormat);
@@ -363,12 +384,10 @@ void RobotPeripheralHostService::startSensorThreads() {
     connect(sensorThread_, &QThread::finished, sensor_,
             &QObject::deleteLater);
 
-    const auto submitImage = [this](const QImage& image) {
-      if (ownerSessionId_ == 0 || !mediaReceptionActive_ || !encoder_) return;
-      QMetaObject::invokeMethod(
-          encoder_, [encoder = encoder_, image] { encoder->submitLaserImage(image); },
-          Qt::QueuedConnection);
-    };
+    // The grayscale camera image is no longer uploaded: the operator never
+    // rendered it. It still feeds the host-local correction pipeline directly
+    // inside RobotSensorController; only the frame telemetry event below is
+    // published to the operator.
     const auto submitPoints = [this](const QVector<QVector3D>& points) {
       if (ownerSessionId_ == 0 || !mediaReceptionActive_ || !encoder_) return;
       QMetaObject::invokeMethod(
@@ -454,8 +473,7 @@ void RobotPeripheralHostService::startSensorThreads() {
               lastLaserPointCount_ = static_cast<int>(points);
             }, Qt::QueuedConnection);
     connect(sensor_, &crawling::RobotSensorController::cameraImageFrameChanged,
-            this, [submitImage, publishLaserFrameEvent](const QImage& image) {
-              submitImage(image);
+            this, [publishLaserFrameEvent](const QImage&) {
               publishLaserFrameEvent(QStringLiteral("camera"));
             }, Qt::QueuedConnection);
     connect(sensor_, &crawling::RobotSensorController::pointCloudProfileChanged,
@@ -467,17 +485,30 @@ void RobotPeripheralHostService::startSensorThreads() {
             }, Qt::QueuedConnection);
     connect(sensor_,
             &crawling::RobotSensorController::correctionCameraFrameReady, this,
-            [submitImage, publishLaserFrameEvent](
-                const QImage& image, quint32, qint64) {
-              submitImage(image);
+            [publishLaserFrameEvent](const QImage&, quint32, qint64) {
               publishLaserFrameEvent(QStringLiteral("correctionCamera"));
             }, Qt::QueuedConnection);
+    // The complete single-row SDK profile goes to the correction controller
+    // (which produces the weld detection), not into the decimated preview
+    // mailbox. In the integrated build the panel wired this signal directly
+    // to LaserCorrectionController::submitProfileFrame; the separated host had
+    // lost that link, so no detection result ever reached the operator view.
     connect(sensor_,
             &crawling::RobotSensorController::correctionProfileFrameReady, this,
-            [this, submitPoints, publishLaserFrameEvent](
-                const QVector<QVector3D>& points, quint32, qint64) {
+            [this, publishLaserFrameEvent](
+                const QVector<QVector3D>& points, quint32 frameNumber,
+                qint64 receivedAtEpochMs) {
               lastLaserPointCount_ = points.size();
-              submitPoints(points);
+              if (correction_) {
+                QMetaObject::invokeMethod(
+                    correction_,
+                    [controller = correction_, points, frameNumber,
+                     receivedAtEpochMs] {
+                      controller->submitProfileFrame(points, frameNumber,
+                                                     receivedAtEpochMs);
+                    },
+                    Qt::QueuedConnection);
+              }
               publishLaserFrameEvent(QStringLiteral("correctionProfile"));
             }, Qt::QueuedConnection);
     connect(sensor_, &crawling::RobotSensorController::correctionProfilePrepared,
@@ -540,21 +571,59 @@ void RobotPeripheralHostService::startSensorThreads() {
                   QJsonObject{{QStringLiteral("slot"), slot},
                               {QStringLiteral("connected"), connected},
                               {QStringLiteral("message"), message}});
-              appendLog(message);
+              // The controller already emits logMessage() for the same text;
+              // appending here duplicated every camera line in the host log.
             }, Qt::QueuedConnection);
     connect(camera_, &crawling::RobotUsbCameraController::frameChanged, this,
             [this](int slot, const QImage& image) {
-              if (slot < 0 || slot >= crawling::kUsbCameraChannelCount ||
-                  ownerSessionId_ == 0 || !mediaReceptionActive_ || !encoder_) {
+              if (slot < 0 || slot >= crawling::kUsbCameraChannelCount) return;
+              const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+              ++cameraFramesIn_[slot];
+              // Exactly one acknowledgement per delivered frame. The capture
+              // thread holds its frame until frameConsumed() releases it; that
+              // call clears frameProcessing and NetworkStreamReader::busy_.
+              // Without it the reader's strict backpressure stays latched at 1,
+              // grab() keeps feeding the watchdog but no frameReady is ever
+              // emitted again -- a healthy camera looks permanently frozen.
+              const auto acknowledgeFrame = [this, slot] {
+                ++cameraFramesAcked_[slot];
+                if (camera_) {
+                  QMetaObject::invokeMethod(camera_, "frameConsumed",
+                                            Qt::QueuedConnection,
+                                            Q_ARG(int, slot));
+                }
+              };
+              if (ownerSessionId_ == 0 || !mediaReceptionActive_ || !encoder_) {
+                // No workbench media subscription; still acknowledge so the
+                // capture thread never stalls and the watchdog does not
+                // reconnect a healthy camera every few seconds.
+                ++cameraFramesDropped_[slot];
+                acknowledgeFrame();
+                maybeLogCameraPipeline(nowMs);
                 return;
               }
               ++cameraFrameSequence_[slot];
+              if (image.isNull()) {
+                // Empty preview: nothing to encode, but the frame must be
+                // acknowledged or the reader stays latched forever.
+                ++cameraFramesDropped_[slot];
+                acknowledgeFrame();
+                maybeLogCameraPipeline(nowMs);
+                return;
+              }
+              ++cameraFramesSubmitted_[slot];
               QMetaObject::invokeMethod(
                   encoder_,
                   [encoder = encoder_, slot, image] {
                     encoder->submitUsbImage(slot, image);
                   },
                   Qt::QueuedConnection);
+              // The encoder is mailbox-style: it keeps its own QImage copy and
+              // may drop a stale frame if a newer one arrives. Acknowledging
+              // right after submission is therefore safe and keeps the strict
+              // one-frame-in-flight backpressure flowing.
+              acknowledgeFrame();
+              maybeLogCameraPipeline(nowMs);
             }, Qt::QueuedConnection);
     connect(camera_, &crawling::RobotUsbCameraController::logMessage, this,
             [this](const QString& message) { appendLog(message); },
@@ -643,6 +712,25 @@ void RobotPeripheralHostService::startSensorThreads() {
                 return;
               }
               emit driveCorrectionCommand(linearMps, angularRadps);
+            }, Qt::QueuedConnection);
+    // Forward the full observation (points + gap detection + SDK frame no. +
+    // receive timestamp) as its own media stream. The operator view needs the
+    // detection to show the weld candidate and a non-zero SDK frame counter.
+    connect(correction_,
+            &crawling::LaserCorrectionController::profileObservationReady,
+            this, [this](const QVector<QVector3D>& points,
+                         const crawling::LaserGapDetection& detection,
+                         quint32 frameNumber, qint64 receivedAtEpochMs) {
+              if (ownerSessionId_ == 0 || !mediaReceptionActive_ || !encoder_)
+                return;
+              QMetaObject::invokeMethod(
+                  encoder_,
+                  [encoder = encoder_, points, detection, frameNumber,
+                   receivedAtEpochMs] {
+                    encoder->submitProfileObservation(
+                        points, detection, frameNumber, receivedAtEpochMs);
+                  },
+                  Qt::QueuedConnection);
             }, Qt::QueuedConnection);
     connect(correction_, &crawling::LaserCorrectionController::statusChanged,
             this, [this](const crawling::LaserCorrectionStatus& status) {
@@ -1012,8 +1100,11 @@ void RobotPeripheralHostService::handleImuRequest(
     const int baudRate = data.value(QStringLiteral("baudRate")).toInt(115200);
     const int divider =
         data.value(QStringLiteral("outputDivider")).toInt(10);
+    // DriveSettings clamps the persisted divider to 1..200, so the request
+    // validation must accept the same range; rejecting >100 made every
+    // configuration using a 101..200 divider fail with invalid_argument.
     if (port.isEmpty() || baudRate < 1200 || baudRate > 4000000 ||
-        divider < 1 || divider > 100) {
+        divider < 1 || divider > 200) {
       respond(sessionId, requestId, false, {},
               QStringLiteral("invalid_argument"),
               QStringLiteral("IMU 串口、波特率或输出分频参数无效"));
@@ -1609,12 +1700,9 @@ void RobotPeripheralHostService::publishCorrectionStatus() {
   if (now - lastCorrectionStatusMs_ < kCorrectionStatusIntervalMs) return;
   lastCorrectionStatusMs_ = now;
   if (ownerSessionId_ == 0) return;
-  if (mediaReceptionActive_) {
-    const QByteArray payload =
-        QJsonDocument(status).toJson(QJsonDocument::Compact);
-    emit mediaReady(kMediaStreamCorrectionStatus,
-                    MediaStreamKind::CorrectionStatus, payload);
-  }
+  // Single channel: the reliable TCP event keeps ordering guarantees for
+  // stop / pause transitions. The duplicate UDP media stream (0x0401) carried
+  // the identical JSON and only added 10 Hz of link load.
   emit eventReady(ownerSessionId_,
                   QStringLiteral("robot.autoCorrection.status"),
                   QJsonObject{{QStringLiteral("status"), status}});
@@ -1626,13 +1714,41 @@ QString RobotPeripheralHostService::clampStatusText() const {
                          : QStringLiteral("未连接");
 }
 
+void RobotPeripheralHostService::maybeLogCameraPipeline(qint64 nowMs) {
+  if (nowMs - lastCameraPipelineLogMs_ < 2000) return;
+  const qint64 windowMs = nowMs - lastCameraPipelineLogMs_;
+  lastCameraPipelineLogMs_ = nowMs;
+  QString detail;
+  for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
+    if (!detail.isEmpty()) detail += QLatin1Char(' ');
+    detail += QStringLiteral("slot%1 in=%2 submit=%3 ack=%4 drop=%5")
+                  .arg(slot)
+                  .arg(cameraFramesIn_[slot])
+                  .arg(cameraFramesSubmitted_[slot])
+                  .arg(cameraFramesAcked_[slot])
+                  .arg(cameraFramesDropped_[slot]);
+    cameraFramesIn_[slot] = 0;
+    cameraFramesSubmitted_[slot] = 0;
+    cameraFramesAcked_[slot] = 0;
+    cameraFramesDropped_[slot] = 0;
+  }
+  crawling::AppLogger::write(
+      QStringLiteral("CAMERA.PIPELINE"),
+      QStringLiteral("event=camera_pipeline window_ms=%1 %2 "
+                     "media_active=%3 owner=%4")
+          .arg(windowMs)
+          .arg(detail)
+          .arg(mediaReceptionActive_ ? 1 : 0)
+          .arg(ownerSessionId_));
+}
+
 void RobotPeripheralHostService::appendLog(const QString& message) {
+  // Single channel only: logMessage() is forwarded by HostApplication as the
+  // "robot.peripheral.log" event. The duplicate "robot.log" event used to make
+  // every peripheral line appear twice on the operator console (once plain,
+  // once with the [外设] prefix).
   if (message.isEmpty()) return;
   emit logMessage(ownerSessionId_, message);
-  if (ownerSessionId_ != 0) {
-    emit eventReady(ownerSessionId_, QStringLiteral("robot.log"),
-                    QJsonObject{{QStringLiteral("message"), message}});
-  }
 }
 
 }  // namespace pa1664::remote

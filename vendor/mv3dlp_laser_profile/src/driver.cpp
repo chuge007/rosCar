@@ -108,6 +108,25 @@ void decodeProfileCoordinates(Frame& frame, const std::uint8_t* data,
                               std::uint32_t data_bytes) {
     frame.type = FrameType::point_cloud;
     constexpr std::size_t coordinate_bytes = sizeof(Coordinate) * 3u;
+    // Some devices declare more line points than they actually transmit
+    // (observed: nLinePntNum=3200 while the wire carries 2048 xyz_s16
+    // points). Trust the payload length when it is a whole multiple of one
+    // point and resync the declared geometry, instead of rejecting every
+    // profile frame.
+    if (data != nullptr && data_bytes >= coordinate_bytes &&
+        data_bytes % coordinate_bytes == 0u) {
+        const std::uint64_t actual_points = data_bytes / coordinate_bytes;
+        const std::uint64_t declared_points =
+            std::uint64_t(frame.width) * frame.height;
+        if (actual_points != declared_points) {
+            const std::uint32_t height =
+                frame.height > 0u && actual_points % frame.height == 0u
+                    ? frame.height
+                    : 1u;
+            frame.height = height;
+            frame.width = static_cast<std::uint32_t>(actual_points / height);
+        }
+    }
     if (!validateGeometryPayload(frame, data, data_bytes, coordinate_bytes)) return;
     const std::size_t point_count = std::size_t(frame.width) * frame.height;
     frame.data.resize(point_count * sizeof(float) * 3u);

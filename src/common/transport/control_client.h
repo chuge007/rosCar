@@ -72,6 +72,12 @@ class ControlClient final : public QObject {
   int writeFrame(ControlMessageType type, const QJsonObject& payload,
                  quint64 requestId = 0);
   static QJsonObject objectFromPayload(const QByteArray& payload, bool* ok);
+  // Operator-side link diagnostics. Every state change, timeout and periodic
+  // status lands in logs/robot_console.log (LINK.CONTROL); per-request detail
+  // goes to logs/comm/comm_control.log so the console stays readable.
+  void logLink(const QString& message);
+  void logRequest(const QString& message);
+  QString linkSnapshot() const;
 
   QTcpSocket* socket_ = nullptr;
   QTimer* reconnectTimer_ = nullptr;
@@ -102,6 +108,16 @@ class ControlClient final : public QObject {
   int reconnectDelayMs_ = 500;
   bool stopRequested_ = true;
   bool suppressReconnect_ = false;
+  // Link health counters surfaced in the self-diagnostic log.
+  qint64 lastPingSentMs_ = 0;
+  qint64 lastPongMs_ = 0;
+  int lastRttMs_ = -1;
+  int missedPongs_ = 0;
+  int connectAttempts_ = 0;
+  qint64 lastStatusLogMs_ = 0;
+  quint64 diagTxFrames_ = 0;
+  quint64 diagRxFrames_ = 0;
+  quint64 diagTimeouts_ = 0;
 };
 
 }  // namespace pa1664::remote

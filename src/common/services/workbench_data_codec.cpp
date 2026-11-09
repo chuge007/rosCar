@@ -6,6 +6,9 @@
 #include <QIODevice>
 #include <QtEndian>
 
+#include <algorithm>
+#include <cmath>
+
 namespace pa1664::remote {
 namespace {
 
@@ -318,6 +321,63 @@ QByteArray encodePointCloud(const QVector<QVector3D>& points) {
   return stream.status() == QDataStream::Ok ? qCompress(body, 4) : QByteArray();
 }
 
+QByteArray encodeQuantizedPointCloud(const QVector<QVector3D>& points) {
+  if (points.isEmpty()) return {};
+  double minX = 0.0;
+  double minY = 0.0;
+  double minZ = 0.0;
+  double maxX = 0.0;
+  double maxY = 0.0;
+  double maxZ = 0.0;
+  bool initialized = false;
+  for (const QVector3D& point : points) {
+    const double x = point.x();
+    const double y = point.y();
+    const double z = point.z();
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+      // Invalid slots must keep their exact NaN/inf semantics on the contour
+      // view; quantisation cannot represent them, so this frame stays float.
+      return encodePointCloud(points);
+    }
+    if (!initialized) {
+      minX = maxX = x;
+      minY = maxY = y;
+      minZ = maxZ = z;
+      initialized = true;
+      continue;
+    }
+    minX = std::min(minX, x);
+    maxX = std::max(maxX, x);
+    minY = std::min(minY, y);
+    maxY = std::max(maxY, y);
+    minZ = std::min(minZ, z);
+    maxZ = std::max(maxZ, z);
+  }
+  if (!initialized) return {};
+  const double maxRange =
+      std::max({maxX - minX, maxY - minY, maxZ - minZ});
+  constexpr double kQuantumLimit = 32767.0;
+  const double scale = maxRange > 0.0 ? maxRange / kQuantumLimit : 1.0;
+  QByteArray body;
+  QDataStream stream(&body, QIODevice::WriteOnly);
+  configureStream(stream);
+  stream << kDataMagic << kDataVersion << static_cast<quint8>(5)
+         << static_cast<quint32>(points.size())
+         << static_cast<float>(minX) << static_cast<float>(minY)
+         << static_cast<float>(minZ) << static_cast<float>(scale);
+  for (const QVector3D& point : points) {
+    const auto quantize = [scale](double value, double origin) {
+      const double raw = std::round((value - origin) / scale);
+      return static_cast<qint16>(
+          std::clamp(raw, -kQuantumLimit, kQuantumLimit));
+    };
+    stream << quantize(point.x(), minX) << quantize(point.y(), minY)
+           << quantize(point.z(), minZ);
+  }
+  if (stream.status() != QDataStream::Ok) return {};
+  return qCompress(body, 4);
+}
+
 bool decodePointCloud(const QByteArray& payload, QVector<QVector3D>* points,
                       QString* error) {
   if (error) error->clear();
@@ -334,9 +394,145 @@ bool decodePointCloud(const QByteArray& payload, QVector<QVector3D>* points,
   quint8 type = 0;
   quint32 count = 0;
   stream >> magic >> version >> type >> count;
-  if (magic != kDataMagic || version != kDataVersion || type != 4 ||
-      count > kMaximumPointCloudPoints) {
+  if (magic != kDataMagic || version != kDataVersion ||
+      (type != 4 && type != 5) || count > kMaximumPointCloudPoints) {
     setError(error, QStringLiteral("点云帧头无效"));
+    return false;
+  }
+  QVector<QVector3D> decoded;
+  decoded.resize(static_cast<int>(count));
+  if (type == 5) {
+    float originX = 0.0f;
+    float originY = 0.0f;
+    float originZ = 0.0f;
+    float scale = 0.0f;
+    stream >> originX >> originY >> originZ >> scale;
+    if (!std::isfinite(scale) || scale <= 0.0f) {
+      setError(error, QStringLiteral("量化点云比例无效"));
+      return false;
+    }
+    for (QVector3D& point : decoded) {
+      qint16 rawX = 0;
+      qint16 rawY = 0;
+      qint16 rawZ = 0;
+      stream >> rawX >> rawY >> rawZ;
+      point = QVector3D(originX + rawX * scale, originY + rawY * scale,
+                        originZ + rawZ * scale);
+    }
+  } else {
+    for (QVector3D& point : decoded) {
+      float x = 0.0f;
+      float y = 0.0f;
+      float z = 0.0f;
+      stream >> x >> y >> z;
+      point = QVector3D(x, y, z);
+    }
+  }
+  if (stream.status() != QDataStream::Ok) {
+    setError(error, QStringLiteral("点云数据不完整"));
+    return false;
+  }
+  *points = std::move(decoded);
+  return true;
+}
+
+namespace {
+// Number of LaserGapDetection fields serialized below (in declaration order).
+// A newer/older host may send more or fewer; missing fields keep their struct
+// defaults so the operator view still renders the points and frame number.
+constexpr quint32 kProfileObservationFieldCount = 52;
+}  // namespace
+
+QByteArray encodeProfileObservation(
+    const QVector<QVector3D>& points,
+    const crawling::LaserGapDetection& detection, quint32 frameNumber,
+    qint64 receivedAtEpochMs) {
+  QByteArray body;
+  QDataStream stream(&body, QIODevice::WriteOnly);
+  configureStream(stream);
+  stream << kDataMagic << kDataVersion << static_cast<quint8>(6)
+         << static_cast<quint32>(points.size());
+  for (const QVector3D& point : points)
+    stream << point.x() << point.y() << point.z();
+  stream << frameNumber << receivedAtEpochMs << kProfileObservationFieldCount;
+  const auto write = [&stream](const auto& value) { stream << value; };
+  write(detection.valid);
+  write(static_cast<qint32>(detection.profileDetectionMode));
+  write(detection.profileDetectionReason);
+  write(detection.horizontal);
+  write(detection.baselineSupported);
+  write(detection.baselineOffsetPx);
+  write(detection.baselineSlope);
+  write(detection.baselineHalfWidthPx);
+  write(detection.normalizedCenter);
+  write(detection.absoluteCenterRatio);
+  write(detection.confidence);
+  write(static_cast<qint32>(detection.gapStartPx));
+  write(static_cast<qint32>(detection.gapEndPx));
+  write(static_cast<qint32>(detection.lineStartPx));
+  write(static_cast<qint32>(detection.lineEndPx));
+  write(static_cast<qint32>(detection.supportingSamples));
+  write(detection.continuityRejected);
+  write(detection.edgeBreakFallback);
+  write(detection.contourSupported);
+  write(detection.contourFallback);
+  write(detection.opencvContour);
+  write(detection.profileContour);
+  write(detection.profileAxisHalfSpanX);
+  write(detection.profileCenterX);
+  write(detection.profileGapStartRatio);
+  write(detection.profileGapEndRatio);
+  write(detection.profileLineStartRatio);
+  write(detection.profileLineEndRatio);
+  write(detection.profileNoise);
+  write(detection.profileBaselineSlope);
+  write(detection.profileBaselineOffset);
+  write(detection.templateEvaluated);
+  write(detection.templateMatched);
+  write(detection.templateRejected);
+  write(detection.templateName);
+  write(detection.templateSimilarity);
+  write(detection.templateWidthScale);
+  write(static_cast<qint32>(detection.templateEnabledCount));
+  write(static_cast<qint32>(detection.templateWindowCount));
+  write(static_cast<qint32>(detection.templateComparisonCount));
+  write(static_cast<qint32>(detection.templatePriorRejectedCount));
+  write(static_cast<qint32>(detection.templateSignalRejectedCount));
+  write(static_cast<qint32>(detection.templateCoverageRejectedCount));
+  write(detection.templateMinimumSimilarity);
+  write(detection.templateRunnerUpSimilarity);
+  write(detection.contourAgreesWithGap);
+  write(detection.contourConflict);
+  write(detection.contourDominant);
+  write(detection.contourConfidence);
+  write(static_cast<qint32>(detection.contourStartPx));
+  write(static_cast<qint32>(detection.contourEndPx));
+  write(detection.widthRejected);
+  return stream.status() == QDataStream::Ok ? qCompress(body, 4) : QByteArray();
+}
+
+bool decodeProfileObservation(const QByteArray& payload,
+                              QVector<QVector3D>* points,
+                              crawling::LaserGapDetection* detection,
+                              quint32* frameNumber, qint64* receivedAtEpochMs,
+                              QString* error) {
+  if (error) error->clear();
+  if (!points || !detection || !frameNumber || !receivedAtEpochMs) return false;
+  const QByteArray body = qUncompress(payload);
+  if (body.isEmpty() || body.size() > kMaxMediaMessageBytes) {
+    setError(error, QStringLiteral("焊道观测载荷无效"));
+    return false;
+  }
+  QDataStream stream(body);
+  configureStream(stream);
+  quint32 magic = 0;
+  quint16 version = 0;
+  quint8 type = 0;
+  quint32 count = 0;
+  stream >> magic >> version >> type >> count;
+  if (magic != kDataMagic || version != kDataVersion || type != 6 ||
+      count > kMaximumPointCloudPoints) {
+    setError(error, QStringLiteral("焊道观测帧头无效"));
     return false;
   }
   QVector<QVector3D> decoded;
@@ -348,11 +544,86 @@ bool decodePointCloud(const QByteArray& payload, QVector<QVector3D>* points,
     stream >> x >> y >> z;
     point = QVector3D(x, y, z);
   }
+  quint32 frame = 0;
+  qint64 received = 0;
+  quint32 fieldCount = 0;
+  stream >> frame >> received >> fieldCount;
   if (stream.status() != QDataStream::Ok) {
-    setError(error, QStringLiteral("点云数据不完整"));
+    setError(error, QStringLiteral("焊道观测数据不完整"));
     return false;
   }
+  crawling::LaserGapDetection decodedDetection;
+  const quint32 fields = std::min(fieldCount, kProfileObservationFieldCount);
+  quint32 index = 0;
+  const auto read = [&](auto* value) {
+    // Resetting reused locals is essential: a truncated payload must leave the
+    // remaining fields at their defaults rather than copying the last value.
+    *value = {};
+    if (index++ >= fields || stream.status() != QDataStream::Ok) return;
+    stream >> *value;
+  };
+  bool value = false;
+  qint32 integer = 0;
+  double real = 0.0;
+  QString text;
+  read(&value); decodedDetection.valid = value;
+  read(&integer);
+  decodedDetection.profileDetectionMode =
+      static_cast<crawling::ProfileDetectionMode>(integer);
+  read(&text); decodedDetection.profileDetectionReason = text;
+  read(&value); decodedDetection.horizontal = value;
+  read(&value); decodedDetection.baselineSupported = value;
+  read(&real); decodedDetection.baselineOffsetPx = real;
+  read(&real); decodedDetection.baselineSlope = real;
+  read(&real); decodedDetection.baselineHalfWidthPx = real;
+  read(&real); decodedDetection.normalizedCenter = real;
+  read(&real); decodedDetection.absoluteCenterRatio = real;
+  read(&real); decodedDetection.confidence = real;
+  read(&integer); decodedDetection.gapStartPx = integer;
+  read(&integer); decodedDetection.gapEndPx = integer;
+  read(&integer); decodedDetection.lineStartPx = integer;
+  read(&integer); decodedDetection.lineEndPx = integer;
+  read(&integer); decodedDetection.supportingSamples = integer;
+  read(&value); decodedDetection.continuityRejected = value;
+  read(&value); decodedDetection.edgeBreakFallback = value;
+  read(&value); decodedDetection.contourSupported = value;
+  read(&value); decodedDetection.contourFallback = value;
+  read(&value); decodedDetection.opencvContour = value;
+  read(&value); decodedDetection.profileContour = value;
+  read(&real); decodedDetection.profileAxisHalfSpanX = real;
+  read(&real); decodedDetection.profileCenterX = real;
+  read(&real); decodedDetection.profileGapStartRatio = real;
+  read(&real); decodedDetection.profileGapEndRatio = real;
+  read(&real); decodedDetection.profileLineStartRatio = real;
+  read(&real); decodedDetection.profileLineEndRatio = real;
+  read(&real); decodedDetection.profileNoise = real;
+  read(&real); decodedDetection.profileBaselineSlope = real;
+  read(&real); decodedDetection.profileBaselineOffset = real;
+  read(&value); decodedDetection.templateEvaluated = value;
+  read(&value); decodedDetection.templateMatched = value;
+  read(&value); decodedDetection.templateRejected = value;
+  read(&text); decodedDetection.templateName = text;
+  read(&real); decodedDetection.templateSimilarity = real;
+  read(&real); decodedDetection.templateWidthScale = real;
+  read(&integer); decodedDetection.templateEnabledCount = integer;
+  read(&integer); decodedDetection.templateWindowCount = integer;
+  read(&integer); decodedDetection.templateComparisonCount = integer;
+  read(&integer); decodedDetection.templatePriorRejectedCount = integer;
+  read(&integer); decodedDetection.templateSignalRejectedCount = integer;
+  read(&integer); decodedDetection.templateCoverageRejectedCount = integer;
+  read(&real); decodedDetection.templateMinimumSimilarity = real;
+  read(&real); decodedDetection.templateRunnerUpSimilarity = real;
+  read(&value); decodedDetection.contourAgreesWithGap = value;
+  read(&value); decodedDetection.contourConflict = value;
+  read(&value); decodedDetection.contourDominant = value;
+  read(&real); decodedDetection.contourConfidence = real;
+  read(&integer); decodedDetection.contourStartPx = integer;
+  read(&integer); decodedDetection.contourEndPx = integer;
+  read(&value); decodedDetection.widthRejected = value;
   *points = std::move(decoded);
+  *detection = decodedDetection;
+  *frameNumber = frame;
+  *receivedAtEpochMs = received;
   return true;
 }
 

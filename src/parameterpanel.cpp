@@ -916,6 +916,11 @@ void ParameterPanel::apply()
         bool ok = false;
         try {
             ok = field.setter(value);
+            // In remote mode setters are batched asynchronously, so an
+            // immediate local getter would read the stale cache. The host
+            // performs the same TX/RX write-then-readback check inside
+            // ultrasound.parameters.apply (readbackMethod) and returns the
+            // verified value, so the consistency guarantee is preserved.
             if (ok && !pa1664::remote::UltrasoundParameterService::instance().isRemote() && (field.name == QStringLiteral("激励通道（TX）")
                        || field.name == QStringLiteral("接收通道（RX）"))) {
                 const int readBack = field.getter().toInt();

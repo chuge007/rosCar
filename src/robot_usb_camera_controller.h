@@ -64,19 +64,29 @@ class RobotUsbCameraController final : public QObject {
     bool flipHorizontal = false;
     bool flipVertical = false;
     bool networkWanted = false;
+    bool networkOpening = false;
     QAtomicInt frameProcessing{0};
     QAtomicInt targetWidth{260};
     QAtomicInt targetHeight{160};
+    // 2 s window counters for CAMERA.CONTROLLER: proves that frameReady
+    // arrives, frameChanged is emitted, frameConsumed releases it, and that
+    // stale-generation frames are dropped without latching the reader.
+    quint64 frameReadyCount = 0;
+    quint64 frameChangedCount = 0;
+    quint64 frameConsumedCount = 0;
+    quint64 staleGenerationCount = 0;
   };
+  void maybeLogControllerStats(qint64 nowMs);
   void teardownSlot(UsbSlot& slot);
   void stopNetworkReader(UsbSlot& slot);
   void startNetworkStream(int slot);
-  void scheduleNetworkReconnect(int slot);
+  void scheduleNetworkReconnect(int slot, const QString& trigger);
   void checkNetworkWatchdog(int slot);
   void applyFrame(UsbSlot& slot, int slotIndex, const QVideoFrame& frame);
 
   CameraProcessMode mode_;
   QElapsedTimer clock_;
+  qint64 lastControllerLogMs_ = -100000;
   UsbSlot slots_[kUsbCameraChannelCount];
 
   // In-process mode components

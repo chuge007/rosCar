@@ -112,6 +112,11 @@ void SynchronizedDriveController::connectAdapter(const DriveSettings& settings) 
       settings_.wheelCommunicationMode == WheelCommunicationMode::Can
           ? 32767.0
           : WheelMotorConfig::kMaximumSynchronizedMotorSpeedDps;
+  // Forward the motor bus statistics to whoever watches this controller, so
+  // the operator console reports the same CAN counters as the host log file.
+  wheelMotors_.setDiagnosticSink([this](const QString& message) {
+    emit logMessage(message);
+  });
   QString motorError;
   if (!wheelMotors_.initialize(motorConfig, &motorError)) {
     enterFault(motorError);
@@ -466,15 +471,25 @@ void SynchronizedDriveController::controlTick() {
       const qint64 rightAgeMs = rightFeedback_.valid
                                     ? now - rightFeedback_.receivedAtMs
                                     : -1;
+      const auto canStats = wheelMotors_.canLinkDiagnostics();
       enterFault(QStringLiteral(
                      "Wheel motor feedback timeout: "
                      "left_valid=%1 left_age_ms=%2 "
-                     "right_valid=%3 right_age_ms=%4 timeout_ms=%5")
+                     "right_valid=%3 right_age_ms=%4 timeout_ms=%5 "
+                     "can_rx_total=%6 can_rx_left=%7 can_rx_right=%8 "
+                     "can_rx_other=%9 can_tx=%10 can_tx_failed=%11 can_bel=%12")
                      .arg(leftFeedback_.valid ? 1 : 0)
                      .arg(leftAgeMs)
                      .arg(rightFeedback_.valid ? 1 : 0)
                      .arg(rightAgeMs)
-                     .arg(settings_.feedbackTimeoutMs));
+                     .arg(settings_.feedbackTimeoutMs)
+                     .arg(canStats.rxTotal)
+                     .arg(canStats.rxLeftId)
+                     .arg(canStats.rxRightId)
+                     .arg(canStats.rxOther)
+                     .arg(canStats.tx)
+                     .arg(canStats.txFailed)
+                     .arg(canStats.bel));
       return;
     }
     const double linearDelta = targetLinear - appliedLinearMps_;

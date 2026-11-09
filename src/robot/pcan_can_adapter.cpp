@@ -128,6 +128,12 @@ class PcanApi {
     QString details;
     for (const auto& path : paths) {
       library_.setFileName(path);
+      // Keep the DLL mapped for the whole process lifetime. Unloading it while
+      // an open channel (or a concurrent port scan) still calls into it crashes
+      // the process with faulting module "PCANBasic.dll_unloaded" (0xC0000005),
+      // observed on the robot host when a workbench session triggered a scan
+      // and a clamp connect at the same time.
+      library_.setLoadHints(QLibrary::PreventUnloadHint);
       if (!library_.load()) { details = library_.errorString(); continue; }
       const auto init = reinterpret_cast<Initialize>(library_.resolve("CAN_Initialize"));
       uninitialize = reinterpret_cast<Uninitialize>(library_.resolve("CAN_Uninitialize"));
@@ -160,11 +166,23 @@ class PcanApi {
 #endif
 } // namespace
 
+#ifdef Q_OS_WIN
+namespace {
+// Process-lifetime shared PCAN entry points. Port scans and open channels must
+// never tear the DLL mapping down under a live caller; the instance is leaked
+// on purpose so the last QLibrary reference can never drop to zero.
+PcanApi& sharedPcanApi() {
+  static PcanApi& api = *new PcanApi;
+  return api;
+}
+}  // namespace
+#endif
+
 struct PcanCanAdapter::Private {
   bool running = false;
   QString fault;
 #ifdef Q_OS_WIN
-  PcanApi api;
+  PcanApi& api = sharedPcanApi();
   quint16 channel = 0;
   bool initialized = false;
   QTimer pollTimer;
@@ -240,7 +258,7 @@ QVector<PcanCanAdapter::Port> PcanCanAdapter::availablePorts(QString* error) {
   setError(error, {});
   QVector<Port> ports;
 #ifdef Q_OS_WIN
-  PcanApi api;
+  PcanApi& api = sharedPcanApi();
   if (!api.load(error)) return ports;
   quint32 count = 0;
   quint32 status = api.getValue(0, kAttachedCount, &count, sizeof(count));

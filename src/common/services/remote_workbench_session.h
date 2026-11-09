@@ -1,6 +1,7 @@
 #pragma once
 
 #include "protocol/protocol_types.h"
+#include "transport/media_channel.h"
 
 #include <QByteArray>
 #include <QHash>
@@ -11,6 +12,7 @@
 #include <QStringList>
 
 class QThread;
+class QTimer;
 
 namespace pa1664::remote {
 
@@ -50,6 +52,9 @@ class RemoteWorkbenchSession final : public QObject {
   bool mediaReady() const;
   bool bulkReady() const;
   bool hasCapability(const QString& capability) const;
+  // Raw UDP receive counters for the media channel. Used for link-budget
+  // diagnostics (datagram loss shows up as assembly timeouts).
+  MediaClientStats mediaStats() const;
 
  public slots:
   void start(const QString& host, quint16 controlPort = kDefaultControlPort);
@@ -91,6 +96,7 @@ class RemoteWorkbenchSession final : public QObject {
   void onRequestTimedOut(quint64 requestId, const QString& operation);
   void setState(WorkbenchConnectionState state, const QString& detail);
   void stopRealtimeAsync();
+  void checkReconnectWatchdog();
 
   ControlClient* control_ = nullptr;
   RealtimeClient* realtime_ = nullptr;
@@ -103,10 +109,15 @@ class RemoteWorkbenchSession final : public QObject {
   QString host_;
   QString statusText_;
   QStringList capabilities_;
+  quint16 controlPort_ = kDefaultControlPort;
   quint16 realtimePort_ = kDefaultRealtimePort;
   quint16 mediaPort_ = kDefaultMediaPort;
   quint16 bulkPort_ = kDefaultBulkPort;
   bool started_ = false;
+  // Safety net: if the control client stops making progress (its internal
+  // reconnect timer stalled, a half-open socket, etc.), restart it from here.
+  QTimer* reconnectWatchdog_ = nullptr;
+  qint64 lastControlProgressMs_ = 0;
 };
 
 }  // namespace pa1664::remote

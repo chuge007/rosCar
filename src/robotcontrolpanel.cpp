@@ -529,6 +529,33 @@ RobotControlPanel::RobotControlPanel(
     connect(m_commandTimer, &QTimer::timeout, this, &RobotControlPanel::sendMotionCommand);
     m_commandTimer->start();
 
+    m_mediaDrainTimer = new QTimer(this);
+    m_mediaDrainTimer->setInterval(30);
+    connect(m_mediaDrainTimer, &QTimer::timeout, this,
+            &RobotControlPanel::drainPendingMedia);
+    m_mediaDrainTimer->start();
+
+    // A media frame that arrives while the preview tab is hidden is cached but
+    // never painted: displayUsbCameraImage() returns on !isVisible(). Re-apply
+    // the cached frame on a 100 ms clock so switching back to the tab (or the
+    // tab becoming visible) always shows the current picture immediately.
+    m_cameraRepaintTimer = new QTimer(this);
+    m_cameraRepaintTimer->setInterval(100);
+    connect(m_cameraRepaintTimer, &QTimer::timeout, this, [this] {
+        for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
+            QLabel* view = m_usbViews[slot];
+            if (!view || !view->isVisible() || m_usbImages[slot].isNull())
+                continue;
+            view->setText(QString());
+            QPixmap pix = QPixmap::fromImage(m_usbImages[slot]);
+            pix.setDevicePixelRatio(view->devicePixelRatioF());
+            view->setPixmap(pix);
+            view->update();
+            ++m_mediaRepaints[slot];
+        }
+    });
+    m_cameraRepaintTimer->start();
+
     QTimer::singleShot(0, this, [this] {
         if (m_remoteSession) return;
         if (m_autoConnectCheck && m_autoConnectCheck->isChecked()) {
@@ -715,6 +742,17 @@ void RobotControlPanel::onRemoteResponseReceived(
     const QString &operation, quint64, bool ok, const QJsonObject &data,
     const QString &errorCode, const QString &errorText)
 {
+    // Config request/ack evidence: the operator must be able to see that the
+    // host accepted a chassis or ultrasound parameter change, not only failures.
+    // Log only the two commit points so the 8 ms parameter batching cannot
+    // flood the panel.
+    if (ok && (operation == QStringLiteral("robot.connect") ||
+               operation == QStringLiteral("ultrasound.parameters.commit"))) {
+        appendLog(QStringLiteral("配置回执 %1：已接受，返回字段=%2")
+                      .arg(operation)
+                      .arg(data.isEmpty() ? QStringLiteral("(none)")
+                                          : data.keys().join(QLatin1Char(','))));
+    }
     if (!ok) {
         appendLog(QStringLiteral("远程操作 %1 失败 [%2]：%3")
                       .arg(operation, errorCode, errorText));
@@ -1132,6 +1170,13 @@ void RobotControlPanel::onRemoteEventReceived(const QString &eventName,
         appendLog(data.value(QStringLiteral("message")).toString());
         return;
     }
+    if (eventName == QStringLiteral("robot.peripheral.log")) {
+        // Clamp/IMU/camera diagnostics relayed from the host; without this the
+        // operator never sees which clamp motor stopped answering.
+        appendLog(QStringLiteral("[外设] %1")
+                      .arg(data.value(QStringLiteral("message")).toString()));
+        return;
+    }
     if (eventName == QStringLiteral("robot.motionStopped") ||
         eventName == QStringLiteral("robot.safetyStop")) {
         appendLog(QStringLiteral("远程安全停车：%1")
@@ -1173,32 +1218,120 @@ void RobotControlPanel::onRemoteMediaReceived(
 {
     if (payload.isEmpty())
         return;
+    ++m_mediaRxCount;
+    m_mediaRxBytes += static_cast<quint64>(payload.size());
+    m_mediaRxStreamBytes[streamId] += static_cast<quint64>(payload.size());
     switch (kind) {
-    case pa1664::remote::MediaStreamKind::LaserImage: {
-        QImage image;
-        if (pa1664::remote::decodeImagePayload(payload, &image))
-            setLaserProfileImage(image);
-        return;
+    case pa1664::remote::MediaStreamKind::LaserImage:
+        ++m_mediaRxLaserImage;
+        break;
+    case pa1664::remote::MediaStreamKind::LaserProfileObservation:
+        ++m_mediaRxLaserPoints;
+        break;
+    case pa1664::remote::MediaStreamKind::LaserPointCloud:
+        ++m_mediaRxLaserPoints;
+        break;
+    case pa1664::remote::MediaStreamKind::UsbCameraImage:
+        if (streamId >= pa1664::remote::kMediaStreamUsbCameraBase &&
+            streamId < pa1664::remote::kMediaStreamUsbCameraBase +
+                           crawling::kUsbCameraChannelCount) {
+            ++m_mediaRxUsb[streamId - pa1664::remote::kMediaStreamUsbCameraBase];
+        }
+        break;
+    case pa1664::remote::MediaStreamKind::ImuSample:
+        ++m_mediaRxImu;
+        break;
+    default:
+        break;
     }
-    case pa1664::remote::MediaStreamKind::LaserPointCloud: {
-        QVector<QVector3D> points;
-        if (pa1664::remote::decodePointCloud(payload, &points))
-            setLaserProfilePoints(points);
-        return;
+    const qint64 mediaNowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_mediaRxLastLogMs == 0) {
+        m_mediaRxLastLogMs = mediaNowMs;
+    } else if (mediaNowMs - m_mediaRxLastLogMs >= 5000) {
+        // Per-stream breakdown mirrors the host MEDIA.TX log so the two sides
+        // can be diffed directly; datagram loss appears as assembly timeouts.
+        QList<quint16> streamIds = m_mediaRxStreamBytes.keys();
+        std::sort(streamIds.begin(), streamIds.end());
+        QStringList streams;
+        streams.reserve(streamIds.size());
+        for (quint16 streamId : streamIds) {
+            streams << QStringLiteral("0x%1:%2")
+                           .arg(streamId, 4, 16, QLatin1Char('0'))
+                           .arg(m_mediaRxStreamBytes.value(streamId));
+        }
+        const pa1664::remote::MediaClientStats mediaStats =
+            m_remoteSession ? m_remoteSession->mediaStats()
+                            : pa1664::remote::MediaClientStats{};
+        appendLog(QStringLiteral("媒体接收(5s) 包=%1 字节=%2 激光图=%3 点云=%4 "
+                                 "相机1=%5 相机2=%6 IMU=%7 组装超时=%8 "
+                                 "数据报=%9 完成=%10 解码OK=%11/%12 解码失败=%13/%14 "
+                                 "视图隐藏=%15/%16 setPixmap=%17/%18 "
+                                 "焊道观测=%19 观测解码失败=%20 重绘=%21/%22 流=%23")
+                      .arg(m_mediaRxCount)
+                      .arg(m_mediaRxBytes)
+                      .arg(m_mediaRxLaserImage)
+                      .arg(m_mediaRxLaserPoints)
+                      .arg(m_mediaRxUsb[0])
+                      .arg(m_mediaRxUsb[1])
+                      .arg(m_mediaRxImu)
+                      .arg(mediaStats.assemblyTimeouts)
+                      .arg(mediaStats.datagrams)
+                      .arg(mediaStats.messagesCompleted)
+                      .arg(m_mediaDecodeOk[0])
+                      .arg(m_mediaDecodeOk[1])
+                      .arg(m_mediaDecodeFailed[0])
+                      .arg(m_mediaDecodeFailed[1])
+                      .arg(m_mediaViewHidden[0])
+                      .arg(m_mediaViewHidden[1])
+                      .arg(m_mediaPixmapSet[0])
+                      .arg(m_mediaPixmapSet[1])
+                      .arg(m_mediaProfileObservations)
+                      .arg(m_mediaProfileDecodeFailed)
+                      .arg(m_mediaRepaints[0])
+                      .arg(m_mediaRepaints[1])
+                      .arg(streams.join(QLatin1Char(','))));
+        m_mediaRxCount = 0;
+        m_mediaRxBytes = 0;
+        m_mediaRxLaserImage = 0;
+        m_mediaRxLaserPoints = 0;
+        m_mediaRxUsb[0] = 0;
+        m_mediaRxUsb[1] = 0;
+        m_mediaRxImu = 0;
+        m_mediaDecodeOk[0] = 0;
+        m_mediaDecodeOk[1] = 0;
+        m_mediaDecodeFailed[0] = 0;
+        m_mediaDecodeFailed[1] = 0;
+        m_mediaViewHidden[0] = 0;
+        m_mediaViewHidden[1] = 0;
+        m_mediaPixmapSet[0] = 0;
+        m_mediaPixmapSet[1] = 0;
+        m_mediaProfileObservations = 0;
+        m_mediaProfileDecodeFailed = 0;
+        m_mediaRepaints[0] = 0;
+        m_mediaRepaints[1] = 0;
+        m_mediaRxStreamBytes.clear();
+        m_mediaRxLastLogMs = mediaNowMs;
     }
-    case pa1664::remote::MediaStreamKind::UsbCameraImage: {
+    switch (kind) {
+    case pa1664::remote::MediaStreamKind::LaserImage:
+        // No host publishes this stream any more; kept for mixed-version
+        // compatibility and routed through the decode drain like the others.
+        queueHeavyMediaPayload(streamId, kind, payload);
+        return;
+    case pa1664::remote::MediaStreamKind::LaserProfileObservation:
+        queueHeavyMediaPayload(streamId, kind, payload);
+        return;
+    case pa1664::remote::MediaStreamKind::LaserPointCloud:
+        queueHeavyMediaPayload(streamId, kind, payload);
+        return;
+    case pa1664::remote::MediaStreamKind::UsbCameraImage:
         if (streamId < pa1664::remote::kMediaStreamUsbCameraBase ||
             streamId >= pa1664::remote::kMediaStreamUsbCameraBase +
                            crawling::kUsbCameraChannelCount) {
             return;
         }
-        QImage image;
-        if (pa1664::remote::decodeImagePayload(payload, &image)) {
-            setUsbCameraImage(
-                streamId - pa1664::remote::kMediaStreamUsbCameraBase, image);
-        }
+        queueHeavyMediaPayload(streamId, kind, payload);
         return;
-    }
     case pa1664::remote::MediaStreamKind::ImuSample: {
         crawling::ImuSample sample;
         if (pa1664::remote::decodeImuSample(payload, &sample))
@@ -1216,6 +1349,93 @@ void RobotControlPanel::onRemoteMediaReceived(
     }
     default:
         return;
+    }
+}
+
+void RobotControlPanel::queueHeavyMediaPayload(
+    quint16 streamId, pa1664::remote::MediaStreamKind kind, const QByteArray &payload)
+{
+    // Latest-value mailbox: a newer frame for the same stream replaces the
+    // queued one, so JPEG/qUncompress work is bounded to the drain cadence
+    // (30 ms) and a burst can never backlog the UI thread with stale decodes.
+    m_pendingMediaKinds[streamId] = kind;
+    m_pendingMediaPayloads[streamId] = payload;
+    if (m_mediaDrainTimer && !m_mediaDrainTimer->isActive())
+        m_mediaDrainTimer->start();
+}
+
+void RobotControlPanel::drainPendingMedia()
+{
+    if (m_pendingMediaPayloads.isEmpty())
+        return;
+    const QHash<quint16, QByteArray> payloads = m_pendingMediaPayloads;
+    const QHash<quint16, pa1664::remote::MediaStreamKind> kinds = m_pendingMediaKinds;
+    m_pendingMediaPayloads.clear();
+    m_pendingMediaKinds.clear();
+    for (auto it = payloads.constBegin(); it != payloads.constEnd(); ++it) {
+        const quint16 streamId = it.key();
+        const QByteArray &payload = it.value();
+        switch (kinds.value(streamId)) {
+        case pa1664::remote::MediaStreamKind::LaserImage: {
+            QImage image;
+            if (pa1664::remote::decodeImagePayload(payload, &image))
+                setLaserProfileImage(image);
+            break;
+        }
+        case pa1664::remote::MediaStreamKind::LaserProfileObservation: {
+            QVector<QVector3D> points;
+            crawling::LaserGapDetection detection;
+            quint32 frameNumber = 0;
+            qint64 receivedAtEpochMs = 0;
+            if (pa1664::remote::decodeProfileObservation(
+                    payload, &points, &detection, &frameNumber,
+                    &receivedAtEpochMs)) {
+                if (m_laserView) {
+                    // The host and console clocks are not synchronised (they
+                    // differed by ~8.5 s in the field). Freshness must be
+                    // measured against local arrival, otherwise the view gets
+                    // a negative age and the status text never settles.
+                    m_laserView->setProfileObservation(
+                        points, detection, frameNumber,
+                        QDateTime::currentMSecsSinceEpoch());
+                }
+                ++m_mediaProfileObservations;
+            } else {
+                ++m_mediaProfileDecodeFailed;
+            }
+            break;
+        }
+        case pa1664::remote::MediaStreamKind::LaserPointCloud: {
+            QVector<QVector3D> points;
+            if (pa1664::remote::decodePointCloud(payload, &points))
+                setLaserProfilePoints(points);
+            break;
+        }
+        case pa1664::remote::MediaStreamKind::UsbCameraImage: {
+            if (streamId < pa1664::remote::kMediaStreamUsbCameraBase ||
+                streamId >= pa1664::remote::kMediaStreamUsbCameraBase +
+                               crawling::kUsbCameraChannelCount) {
+                break;
+            }
+            const int slot =
+                static_cast<int>(streamId - pa1664::remote::kMediaStreamUsbCameraBase);
+            QImage image;
+            if (pa1664::remote::decodeImagePayload(payload, &image) &&
+                !image.isNull()) {
+                ++m_mediaDecodeOk[slot];
+                setUsbCameraImage(slot, image);
+            } else {
+                if (m_mediaDecodeFailed[slot] == 0)
+                    appendLog(QStringLiteral("相机%1 图像解码失败：payload=%2 字节")
+                                  .arg(slot + 1)
+                                  .arg(payload.size()));
+                ++m_mediaDecodeFailed[slot];
+            }
+            break;
+        }
+        default:
+            break;
+        }
     }
 }
 
@@ -1243,6 +1463,11 @@ RobotControlPanel::~RobotControlPanel()
         m_clampController->disconnectDevice();
     if (m_commandTimer)
         m_commandTimer->stop();
+    if (m_mediaDrainTimer) {
+        m_mediaDrainTimer->stop();
+        m_pendingMediaPayloads.clear();
+        m_pendingMediaKinds.clear();
+    }
     // Drain the producer before deleting the receiver of the direct mailbox call.
     if (m_sensorController && m_correctionController)
         disconnect(m_sensorController,
@@ -2244,15 +2469,31 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     rightColumn->addWidget(logGroup);
 
     connect(save, &QPushButton::clicked, this, [this, configurationLocks] {
-        const QString error = settingsFromUi().validationError();
+        const crawling::DriveSettings edited = settingsFromUi();
+        const bool remoteMode = m_remoteSession && m_remoteLinkReady;
+        const QString error = remoteMode ? edited.nonPortValidationError()
+                                         : edited.validationError();
         if (!error.isEmpty()) {
             appendLog(error);
             QMessageBox::warning(this, QStringLiteral("配置无效"), error);
             return;
         }
         saveSettings();
-        if (m_connected)
+        if (m_remoteSession && m_remoteLinkReady &&
+            m_remoteSession->hasCapability(QString::fromLatin1(
+                pa1664::remote::kCapabilityRobotControlV1))) {
+            // Remote mode: "保存并应用" used to write only the operator-side
+            // ini, so watchdog changes never reached the host unless the drive
+            // happened to reconnect. robot.connect carries the settings and the
+            // host applies them to its controller.
+            m_remoteSession->request(
+                QStringLiteral("robot.connect"),
+                QJsonObject{{QStringLiteral("settings"),
+                             pa1664::remote::driveSettingsToJson(m_settings)}});
+            appendLog(QStringLiteral("已把底盘参数下发到小车主机"));
+        } else if (m_connected) {
             connectConfiguredDevices();
+        }
         for (QCheckBox *lock : configurationLocks)
             lock->setChecked(true);
     });
@@ -2779,7 +3020,12 @@ void RobotControlPanel::showProfileTemplateDialog()
 void RobotControlPanel::saveSettings()
 {
     const crawling::DriveSettings current = settingsFromUi();
-    const QString error = current.validationError();
+    // In remote mode the serial ports belong to the robot host. Rejecting the
+    // whole save because this PC has no COM8 made the imported host
+    // configuration (clamp axes, camera sources) revert on every restart.
+    const bool remoteMode = m_remoteSession && m_remoteLinkReady;
+    const QString error = remoteMode ? current.nonPortValidationError()
+                                     : current.validationError();
     if (!error.isEmpty()) {
         appendLog(error);
         return;
@@ -2960,6 +3206,12 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
             .toInt());
     m_clampSettings->setSettings(settings.clampMotors);
     for (int axis = 0; axis < 3; ++axis) m_clampSettings->setSyncEnabled(axis, settings.clampMotorSyncEnabled[axis]);
+    // The jog sliders must follow the host layout as well; otherwise the panel
+    // keeps addressing axes the host does not have (Y vs Z) and every command
+    // comes back as invalid_argument.
+    if (m_clampControls)
+        m_clampControls->setRemoteSettings(settings.clampMotors,
+                                           settings.clampMotorSyncEnabled);
     m_wheelRadius->setValue(settings.wheelRadiusM * kMillimetersPerMeter);
     m_trackWidth->setValue(settings.trackWidthM * kMillimetersPerMeter);
     m_ratio->setValue(settings.motorOutputToWheelRatio);
@@ -4143,6 +4395,10 @@ void RobotControlPanel::appendLog(const QString &message)
     if (message.isEmpty())
         return;
     const QString line = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz  ")) + message;
+    // Mirror the operator-facing log into the on-disk console log. Without this
+    // remote-mode diagnosis (drive faults, settings pushes, session changes) was
+    // invisible to anyone outside the GUI.
+    crawling::AppLogger::write(QStringLiteral("PANEL"), message);
     m_logLines.append(line);
     while (m_logLines.size() > 400)
         m_logLines.removeFirst();
@@ -4207,14 +4463,21 @@ void RobotControlPanel::displayUsbCameraImage(int slot, const QImage &image)
     if (slot < 0 || slot >= crawling::kUsbCameraChannelCount || image.isNull() || !m_usbViews[slot])
         return;
     m_usbImages[slot] = image;
+    // Do not gate on isVisible(): the previews live inside a scroll area /
+    // stacked tab, and a frame arriving while the widget is hidden used to be
+    // dropped for good (no repaint timer existed), which looked exactly like a
+    // frozen camera. Setting a pixmap on a hidden QLabel is harmless and means
+    // the newest frame is already there when the tab becomes visible.
     if (!m_usbViews[slot]->isVisible())
-        return;
+        ++m_mediaViewHidden[slot];
     m_usbViews[slot]->setText(QString());
     const qreal dpr = m_usbViews[slot]->devicePixelRatioF();
     // Image is already scaled in worker thread, just convert to pixmap.
     QPixmap pix = QPixmap::fromImage(image);
     pix.setDevicePixelRatio(dpr);
     m_usbViews[slot]->setPixmap(pix);
+    ++m_mediaPixmapSet[slot];
+    m_usbViews[slot]->update();
 }
 
 void RobotControlPanel::setUsbCameraImage(int slot, const QImage &image)

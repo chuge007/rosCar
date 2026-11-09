@@ -1,0 +1,137 @@
+
+========================================
+   PA1664 Robot Communication Test
+   Binary Protocol Version
+========================================
+
+Target: 192.168.1.20:43100
+Settings: D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmpSeparate\robot_comm_test\..\startup_deploy\robot_host\app\config\drive_settings.ini
+Hold: 45s
+
+[1] TCP Connection Test
+-----------------------------------
+[ OK ] TCP Connected (9ms)
+  Local: 192.168.1.100:56163
+  Remote: 192.168.1.20:43100
+
+[2] PA1664 Hello Handshake
+-----------------------------------
+  Waiting for HelloAck...
+
+[ OK ] Received HelloAck (76ms)
+  SessionId: 25
+  Host: DESKTOP-3AQ3FDU  Version: 
+
+
+[1/8] robot.connect (apply drive_settings.ini)
+[ OK ] robot.connect (apply drive_settings.ini)  (requestId=1, 47 ms)
+       {"data":{"queued":true},"ok":true}
+       [log] event=connect_start module=DRIVE.MOTOR mode=CAN left_port=COM6 left_baud=115200 right_port=COM6 right_baud=115200 can_port=COM8 can_adapter_baud=115200 can_bitrate=1000000 left_id=1 left_sign=1 right_id=2 right_sign=-1 wheel_radius_m=0.074000 motor_to_wheel_ratio=1.0000
+       [log] event=connect_complete result=OK module=DRIVE.MOTOR mode=CAN left_port= right_port= can_port=COM8 can_bitrate=1000000
+       [log] event=wheel_stop result=OK module=DRIVE.MOTOR reason=connect command=0x81
+       [log] event=motor_communication_profile cyclic_hz=10 interval_ms=100 feedback_timeout_ms=800 mode=CAN_A2_9C
+       [log] event=wheel_command_limit configured_mps=0.1600 effective_mps=0.1600 motor_limit_dps=32767
+       [robot.connectionChanged] {"connected":true,"message":"Servo CAN wheel motor bus connected"}
+       [robot.connectionChanged] {"connected":true,"message":"Servo CAN wheel motor bus connected"}
+       [robot.stateChanged] {"reason":"Servo CAN motor bus connected; drive output disabled","state":1,"stateKey":"idle"}
+       [log] event=state_changed state=就绪 reason=Servo CAN motor bus connected; drive output disabled
+
+[2/8] robot.laser.scan
+[ OK ] robot.laser.scan  (requestId=2, 3 ms)
+       {"data":{"queued":true},"ok":true}
+       [robot.laser.devices] ["DB2666828 | 192.168.1.25 | MV-TD240-2D"]
+       [log] 线激光扫描到 1 个设备
+
+[3/8] robot.laser.connect DB2666828
+       [robot.laser.connecting] {"serialNumber":"DB2666828"}
+[ OK ] robot.laser.connect DB2666828  (requestId=3, 5 ms)
+       {"data":{"queued":true},"ok":true}
+       [robot.laser.devices] ["DB2666828 | 192.168.1.25 | MV-TD240-2D"]
+       [log] 线激光扫描到 1 个设备
+       [robot.laser.connection] {"connected":true,"message":"线激光相机已连接：DB2666828"}
+       [log] 线激光相机已连接：DB2666828
+
+[4/8] robot.camera.scan
+[ OK ] robot.camera.scan  (requestId=4, 3 ms)
+       {"data":{"queued":true},"ok":true}
+       [robot.camera.devices] []
+       [log] USB 摄像头扫描到 0 个设备
+
+[5/8] robot.camera.connect slot=0
+[ OK ] robot.camera.connect slot=0  (requestId=5, 10 ms)
+       {"data":{"queued":true,"slot":0},"ok":true}
+       [log] 正在连接USB 摄像头 1：rtsp://192.168.1.104:554/user=admin&password=&channel=1&stream=0.sdp?real_stream
+
+[6/8] robot.camera.connect slot=1
+[ OK ] robot.camera.connect slot=1  (requestId=6, 3 ms)
+       {"data":{"queued":true,"slot":1},"ok":true}
+       [log] 正在连接USB 摄像头 2：rtsp://192.168.1.103:554/user=admin&password=&channel=1&stream=0.sdp?real_stream
+
+[7/8] robot.snapshot
+[ OK ] robot.snapshot  (requestId=7, 28 ms)
+       drive=1  state=idle  left(valid=0,temp=0)  right(valid=1,temp=41)
+
+[8/8] robot.peripherals.snapshot
+[ OK ] robot.peripherals.snapshot  (requestId=8, 22 ms)
+       drive=1  laser=1  imu=0  clamp=0  usb=[false,false]
+
+===== holding the session for 45s (peripheral snapshot every 10s) =====
+       [robot.camera.connection] {"connected":false,"message":"USB 摄像头 1 连接中断，1 秒后第 1 次重连","slot":0}
+       [log] USB 摄像头 1 连接中断，1 秒后第 1 次重连
+       [log] USB 摄像头 1 连接中断，1 秒后第 1 次重连
+       [robot.camera.connection] {"connected":false,"message":"USB 摄像头 2 连接中断，1 秒后第 1 次重连","slot":1}
+       [log] USB 摄像头 2 连接中断，1 秒后第 1 次重连
+       [log] USB 摄像头 2 连接中断，1 秒后第 1 次重连
+[ OK ] peripherals.poll  (requestId=9, 23 ms)
+       drive=1  laser=1  imu=0  clamp=0  usb=[false,false]
+       [robot.camera.connection] {"connected":false,"message":"USB 摄像头 1 连接中断，2 秒后第 2 次重连","slot":0}
+       [log] USB 摄像头 1 连接中断，2 秒后第 2 次重连
+       [log] USB 摄像头 1 连接中断，2 秒后第 2 次重连
+       [robot.camera.connection] {"connected":false,"message":"USB 摄像头 2 连接中断，2 秒后第 2 次重连","slot":1}
+       [log] USB 摄像头 2 连接中断，2 秒后第 2 次重连
+       [log] USB 摄像头 2 连接中断，2 秒后第 2 次重连
+[ OK ] peripherals.poll  (requestId=10, 19 ms)
+       drive=1  laser=1  imu=0  clamp=0  usb=[false,false]
+       [robot.camera.connection] {"connected":false,"message":"USB 摄像头 1 连接中断，4 秒后第 3 次重连","slot":0}
+       [log] USB 摄像头 1 连接中断，4 秒后第 3 次重连
+       [log] USB 摄像头 1 连接中断，4 秒后第 3 次重连
+       [robot.camera.connection] {"connected":false,"message":"USB 摄像头 2 连接中断，4 秒后第 3 次重连","slot":1}
+       [log] USB 摄像头 2 连接中断，4 秒后第 3 次重连
+       [log] USB 摄像头 2 连接中断，4 秒后第 3 次重连
+[ OK ] peripherals.poll  (requestId=11, 14 ms)
+       drive=1  laser=1  imu=0  clamp=0  usb=[false,false]
+       [robot.camera.connection] {"connected":false,"message":"USB 摄像头 1 连接中断，8 秒后第 4 次重连","slot":0}
+       [log] USB 摄像头 1 连接中断，8 秒后第 4 次重连
+       [log] USB 摄像头 1 连接中断，8 秒后第 4 次重连
+       [robot.camera.connection] {"connected":false,"message":"USB 摄像头 2 连接中断，8 秒后第 4 次重连","slot":1}
+       [log] USB 摄像头 2 连接中断，8 秒后第 4 次重连
+       [log] USB 摄像头 2 连接中断，8 秒后第 4 次重连
+[ OK ] peripherals.poll  (requestId=12, 20 ms)
+       drive=1  laser=1  imu=0  clamp=0  usb=[false,false]
+
+laser frame rate ~ 9.4 fps (45s, 424 frames, 3200 points/frame)
+
+========================================
+Test Summary
+========================================
+
+TCP Connection                 [ OK ] Pass
+PA1664 Hello Handshake         [ OK ] Pass
+Responses received             [ OK ] Pass
+
+Peripheral verdict
+-----------------------------------
+drive motors           [ OK ] connected  state=idle left_feedback=MISSING right_feedback=OK
+line laser             [ OK ] connected  线激光相机已连接：DB2666828
+camera 1               [FAIL] not connected  USB 摄像头 1 连接中断，8 秒后第 4 次重连
+camera 2               [FAIL] not connected  USB 摄像头 2 连接中断，8 秒后第 4 次重连
+IMU                    [FAIL] not connected  -
+clamp motors           [FAIL] not connected  -
+
+Responses: 12  Laser frames: 485
+Connection time: 9ms
+
+Logs: robot_comm_test.log, robot_comm_test_full.log
+
+
+Connection closed

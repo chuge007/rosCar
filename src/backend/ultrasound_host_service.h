@@ -52,6 +52,13 @@ class UltrasoundHostService final : public QObject {
   void sendEvent(const QString& name, const QJsonObject& data = {});
   void sendStatusEvent();
   bool acceptOwner(quint64 sessionId, quint64 requestId);
+  // The SDK's Client::getInstance() constructs eintik::ScopedFramework on this
+  // worker thread; when that throws (GlobalConfig/device state) the exception
+  // used to escape the Qt event loop, hit std::terminate and abort the whole
+  // robot host ~5s after an operator connected and asked for a parameter
+  // snapshot. dispatchRequest stays exception-safe and reports an error instead.
+  void dispatchRequest(quint64 sessionId, quint64 requestId,
+                       const QString& operation, const QJsonObject& data);
   void handleParameterSnapshot(quint64 sessionId, quint64 requestId);
   void handleParameterGetMany(quint64 sessionId, quint64 requestId,
                               const QJsonObject& data);

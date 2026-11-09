@@ -9,6 +9,7 @@
 #include "services/remote_workbench_session.h"
 
 #include <QElapsedTimer>
+#include <QHash>
 #include <QJsonObject>
 #include <QImage>
 #include <QList>
@@ -120,6 +121,10 @@ private slots:
     void onRemoteMediaReceived(
         quint16 streamId, pa1664::remote::MediaStreamKind kind,
         quint64 messageId, quint64 timestampUs, const QByteArray &payload);
+    void queueHeavyMediaPayload(
+        quint16 streamId, pa1664::remote::MediaStreamKind kind,
+        const QByteArray &payload);
+    void drainPendingMedia();
 
 signals:
     // 车体状态快照（12 项，顺序固定）：运行状态/状态说明/适配器/目标运动/实际运动/
@@ -129,6 +134,34 @@ signals:
     void autoCorrectionTrackingStarted();
 
 private:
+    // Operator-side media accounting: shows whether frames actually arrive at
+    // the console, independent of what the host believes it sent.
+    quint64 m_mediaRxCount = 0;
+    quint64 m_mediaRxBytes = 0;
+    quint64 m_mediaRxLaserImage = 0;
+    quint64 m_mediaRxLaserPoints = 0;
+    quint64 m_mediaRxUsb[2] = {0, 0};
+    quint64 m_mediaRxImu = 0;
+    qint64 m_mediaRxLastLogMs = 0;
+    // Receiving a media message is not the same as showing a picture: these
+    // counters follow the payload through decodeImagePayload(), the visibility
+    // gate and setPixmap(), so a frozen preview can be attributed to a stage.
+    quint64 m_mediaDecodeOk[2] = {0, 0};
+    quint64 m_mediaDecodeFailed[2] = {0, 0};
+    quint64 m_mediaViewHidden[2] = {0, 0};
+    quint64 m_mediaPixmapSet[2] = {0, 0};
+    quint64 m_mediaProfileObservations = 0;
+    quint64 m_mediaProfileDecodeFailed = 0;
+    quint64 m_mediaRepaints[2] = {0, 0};
+    // Per-stream application payload bytes received in the current 5 s window.
+    QHash<quint16, quint64> m_mediaRxStreamBytes;
+    // Latest-value mailbox for heavy media payloads (point clouds, camera
+    // JPEGs): decoding runs on a fixed 30 ms drain tick so bursts cannot
+    // backlog the UI thread; a newer frame replaces the queued older one.
+    QHash<quint16, QByteArray> m_pendingMediaPayloads;
+    QHash<quint16, pa1664::remote::MediaStreamKind> m_pendingMediaKinds;
+    QTimer *m_mediaDrainTimer = nullptr;
+    QTimer *m_cameraRepaintTimer = nullptr;
     void buildUi();
     void loadSettings();
     bool saveClampSettings();

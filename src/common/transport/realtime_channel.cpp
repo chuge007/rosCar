@@ -1,5 +1,7 @@
 #include "realtime_channel.h"
 
+#include "robot_app_logger.h"
+
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -63,9 +65,33 @@ RealtimeClient::RealtimeClient(QObject* parent)
       --emergencyRepeats_;
     }
     if (motionActive_) sendMotion(now);
-    if (lastHeartbeatMs_ < 0 ||
-        now - lastHeartbeatMs_ >= kHeartbeatIntervalMs) {
+    // The server refreshes the session keepalive from MotionSetpoint packets
+    // (see RealtimeServer::processDatagrams), which arrive every 50 ms while
+    // driving, so the 250 ms heartbeat is fully redundant then.
+    if (!motionActive_ &&
+        (lastHeartbeatMs_ < 0 ||
+         now - lastHeartbeatMs_ >= kHeartbeatIntervalMs)) {
       sendHeartbeat(now);
+    }
+    if (lastDiagMs_ < 0 || now - lastDiagMs_ >= 5000) {
+      lastDiagMs_ = now;
+      crawling::AppLogger::write(
+          QStringLiteral("LINK.REALTIME"),
+          QStringLiteral("event=realtime_status active=%1 peer=%2:%3 "
+                         "tx=%4 tx_failed=%5 rx_telemetry=%6 "
+                         "telemetry_age_ms=%7 motion_active=%8 "
+                         "linear_mps=%9 angular_radps=%10 lease_ms=%11")
+              .arg(active_ ? 1 : 0)
+              .arg(peerAddress_.toString())
+              .arg(peerPort_)
+              .arg(diagTx_)
+              .arg(diagTxFailed_)
+              .arg(diagRxTelemetry_)
+              .arg(lastTelemetryMs_ >= 0 ? nowMs() - lastTelemetryMs_ : -1)
+              .arg(motionActive_ ? 1 : 0)
+              .arg(linearMilliMps_ / 1000.0, 0, 'f', 3)
+              .arg(angularMilliRadps_ / 1000.0, 0, 'f', 3)
+              .arg(motionLeaseMs_));
     }
   });
   connect(socket_, &QUdpSocket::readyRead, this,
@@ -100,7 +126,19 @@ void RealtimeClient::start(const QString& host, quint16 port,
   active_ = true;
   clock_.restart();
   lastHeartbeatMs_ = -1;
+  lastTelemetryMs_ = -1;
+  lastDiagMs_ = -1;
+  diagTx_ = 0;
+  diagRxTelemetry_ = 0;
+  diagTxFailed_ = 0;
   sendTimer_->start();
+  crawling::AppLogger::write(
+      QStringLiteral("LINK.REALTIME"),
+      QStringLiteral("event=realtime_start peer=%1:%2 local_port=%3 session=%4")
+          .arg(peerAddress_.toString())
+          .arg(peerPort_)
+          .arg(socket_->localPort())
+          .arg(sessionId_));
   sendHeartbeat(clock_.elapsed());
 }
 
@@ -186,8 +224,20 @@ void RealtimeClient::sendPacket(RealtimePacketType type,
     emit errorOccurred(error.detail);
     return;
   }
+  ++diagTx_;
   const qint64 sent = socket_->writeDatagram(bytes, peerAddress_, peerPort_);
   if (sent != bytes.size()) {
+    ++diagTxFailed_;
+    crawling::AppLogger::write(
+        QStringLiteral("LINK.REALTIME"),
+        QStringLiteral("event=send_failed type=%1 bytes=%2 sent=%3 error=\"%4\" "
+                       "tx_failed=%5 telemetry_age_ms=%6")
+            .arg(int(type))
+            .arg(bytes.size())
+            .arg(sent)
+            .arg(socket_->errorString())
+            .arg(diagTxFailed_)
+            .arg(lastTelemetryMs_ >= 0 ? nowMs() - lastTelemetryMs_ : -1));
     emit errorOccurred(QStringLiteral("实时通道发送失败：%1")
                            .arg(socket_->errorString()));
   }
@@ -212,6 +262,8 @@ void RealtimeClient::processDatagrams() {
     if (packet.sequence == 0 || packet.sequence <= lastInboundSequence_) continue;
     lastInboundSequence_ = packet.sequence;
     if (packet.type == RealtimePacketType::Telemetry) {
+      ++diagRxTelemetry_;
+      lastTelemetryMs_ = nowMs();
       bool ok = false;
       const QJsonObject telemetry = parseJsonObject(packet.payload, &ok);
       if (ok) emit telemetryReceived(telemetry);

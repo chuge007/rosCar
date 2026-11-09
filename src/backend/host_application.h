@@ -2,6 +2,7 @@
 
 #include "protocol/protocol_types.h"
 
+#include <QHash>
 #include <QHostAddress>
 #include <QJsonObject>
 #include <QObject>
@@ -54,6 +55,12 @@ class HostApplication final : public QObject {
   void onUltrasoundScanBatch(const QByteArray& payload);
   void drainBulkQueue();
   void enqueueBulk(BulkStreamKind kind, const QByteArray& payload);
+  // Transmission accounting. Every media payload that actually leaves the host
+  // is attributed to its stream id so the link budget can be measured per
+  // stream instead of only as one aggregate byte count.
+  void noteMediaTx(quint16 streamId, qint64 bytes);
+  void maybeLogMediaTx();
+  void maybeLogBulkTx();
   void sendSessionEvent(quint64 sessionId, const QString& name,
                         const QJsonObject& data = {});
 
@@ -78,6 +85,23 @@ class HostApplication final : public QObject {
   };
   QQueue<PendingBulk> pendingBulk_;
   qint64 pendingBulkBytes_ = 0;
+  // Media transmission accounting. The mediaReady handler used to return
+  // silently when the session had no validated peer, which made "no picture on
+  // the console" indistinguishable from "no frames from the camera".
+  quint64 mediaTxMessages_ = 0;
+  quint64 mediaTxBytes_ = 0;
+  quint64 mediaTxDropped_ = 0;
+  quint64 mediaTxLaserImage_ = 0;
+  quint64 mediaTxLaserPoints_ = 0;
+  quint64 mediaTxUsb_[2] = {0, 0};
+  qint64 mediaTxLastLogMs_ = 0;
+  QHash<quint16, quint64> mediaTxStreamMessages_;
+  QHash<quint16, quint64> mediaTxStreamBytes_;
+  // Bulk channel accounting (ultrasound scan batches). Separate window because
+  // batches can be megabytes each and must be visible in the link budget.
+  quint64 bulkTxMessages_ = 0;
+  quint64 bulkTxBytes_ = 0;
+  qint64 bulkTxLastLogMs_ = 0;
 };
 
 }  // namespace pa1664::remote

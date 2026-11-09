@@ -11,10 +11,41 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QJsonValue>
+#include <QStringList>
 #include <QThread>
 #include <QTimer>
 
+#include <algorithm>
+#include <exception>
+#include <functional>
+
 namespace pa1664::remote {
+
+namespace {
+// The vendor ultrasound SDK throws C++ exceptions from worker-thread callbacks
+// (observed: eintik::ScopedFramework / GlobalConfig inside Client::getInstance,
+// aborting the whole robot host ~5-50s after start). Qt does not catch
+// exceptions that escape a slot, so the event loop itself stays exception-safe:
+// log the reason, then let the thread end instead of killing the process.
+class GuardedThread final : public QThread {
+ public:
+  using QThread::QThread;
+  std::function<void(const QString&)> onException;
+
+ protected:
+  void run() override {
+    try {
+      exec();
+    } catch (const std::exception& e) {
+      if (onException)
+        onException(QString::fromUtf8(e.what()));
+    } catch (...) {
+      if (onException)
+        onException(QStringLiteral("未知类型"));
+    }
+  }
+};
+}  // namespace
 
 HostApplication::HostApplication(QObject* parent)
     : QObject(parent),
@@ -173,18 +204,26 @@ void HostApplication::wireServices() {
   connect(peripheral_, &RobotPeripheralHostService::eventReady, this,
           &HostApplication::sendSessionEvent);
   connect(peripheral_, &RobotPeripheralHostService::logMessage, this,
-          [](quint64 sessionId, const QString& message) {
+          [this](quint64 sessionId, const QString& message) {
             qInfo().noquote() << "ROBOT_PERIPHERAL" << sessionId << message;
+            // Clamp/IMU/camera diagnostics used to stay in the host log file,
+            // so an operator could never see which clamp motor failed to
+            // answer. Forward them as an event the console can display.
+            sendSessionEvent(sessionId, QStringLiteral("robot.peripheral.log"),
+                             QJsonObject{{QStringLiteral("message"), message}});
           });
   connect(peripheral_, &RobotPeripheralHostService::mediaReady, this,
           [this](quint16 streamId, MediaStreamKind kind,
                  const QByteArray& payload) {
             const quint64 owner = robot_->ownerSessionId();
-            if (owner == 0 || payload.isEmpty() ||
-                !media_->hasPeer(owner)) {
-              return;
+            const bool hasPeer = owner != 0 && media_->hasPeer(owner);
+            if (!hasPeer || payload.isEmpty()) {
+              ++mediaTxDropped_;
+            } else {
+              media_->sendMessage(owner, streamId, kind, payload);
+              noteMediaTx(streamId, payload.size());
             }
-            media_->sendMessage(owner, streamId, kind, payload);
+            maybeLogMediaTx();
           });
   connect(peripheral_,
           &RobotPeripheralHostService::driveCorrectionCommand, robot_,
@@ -378,8 +417,19 @@ void HostApplication::onMotionSetpoint(quint64 sessionId,
 
 void HostApplication::startUltrasoundService() {
   if (ultrasoundThread_) return;
-  ultrasoundThread_ = new QThread(this);
-  ultrasoundThread_->setObjectName(QStringLiteral("UltrasoundHostControl"));
+  auto* ultrasoundThread = new GuardedThread(this);
+  ultrasoundThread->setObjectName(QStringLiteral("UltrasoundHostControl"));
+  ultrasoundThread->onException =
+      [this](const QString& reason) {
+        qCritical().noquote() << "ULTRASOUND_THREAD_EXCEPTION" << reason;
+        sendSessionEvent(robot_->ownerSessionId(),
+                         QStringLiteral("ultrasound.threadException"),
+                         QJsonObject{{QStringLiteral("reason"), reason}});
+        // The thread is gone now; drop the dangling pointer so a later stop
+        // does not wait on a finished thread twice.
+        ultrasound_ = nullptr;
+      };
+  ultrasoundThread_ = ultrasoundThread;
   ultrasound_ = new UltrasoundHostService;
   ultrasound_->moveToThread(ultrasoundThread_);
 
@@ -441,9 +491,11 @@ void HostApplication::onUltrasoundFrame(const QByteArray& payload, int groupId,
   const quint64 owner = robot_->ownerSessionId();
   if (owner == 0 || payload.isEmpty() || !media_->hasPeer(owner)) return;
   if (groupId < 0 || groupId > 255) return;
-  media_->sendMessage(owner,
-                      static_cast<quint16>(kMediaStreamUltrasoundLiveBase + groupId),
-                      MediaStreamKind::UltrasoundFrame, payload);
+  const quint16 streamId =
+      static_cast<quint16>(kMediaStreamUltrasoundLiveBase + groupId);
+  media_->sendMessage(owner, streamId, MediaStreamKind::UltrasoundFrame, payload);
+  noteMediaTx(streamId, payload.size());
+  maybeLogMediaTx();
 }
 
 void HostApplication::onUltrasoundScanBatch(const QByteArray& payload) {
@@ -490,11 +542,111 @@ void HostApplication::drainBulkQueue() {
   }
   while (!pendingBulk_.isEmpty()) {
     const PendingBulk& item = pendingBulk_.head();
-    if (!bulk_->sendMessage(owner, item.kind, item.payload)) return;
+    if (!bulk_->sendMessage(owner, item.kind, item.payload)) {
+      maybeLogBulkTx();
+      return;
+    }
+    ++bulkTxMessages_;
+    bulkTxBytes_ += static_cast<quint64>(item.payload.size());
     pendingBulkBytes_ = qMax<qint64>(0, pendingBulkBytes_ - item.payload.size());
     pendingBulk_.dequeue();
   }
+  maybeLogBulkTx();
   bulkDrainTimer_->stop();
+}
+
+void HostApplication::noteMediaTx(quint16 streamId, qint64 bytes) {
+  if (bytes <= 0) return;
+  const quint64 size = static_cast<quint64>(bytes);
+  ++mediaTxMessages_;
+  mediaTxBytes_ += size;
+  ++mediaTxStreamMessages_[streamId];
+  mediaTxStreamBytes_[streamId] += size;
+  if (streamId == kMediaStreamLaserImage) {
+    ++mediaTxLaserImage_;
+  } else if (streamId == kMediaStreamLaserPointCloud) {
+    ++mediaTxLaserPoints_;
+  } else if (streamId >= kMediaStreamUsbCameraBase) {
+    const int slot = int(streamId - kMediaStreamUsbCameraBase);
+    if (slot >= 0 && slot < 2) ++mediaTxUsb_[slot];
+  }
+}
+
+void HostApplication::maybeLogMediaTx() {
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  if (mediaTxLastLogMs_ == 0) {
+    mediaTxLastLogMs_ = now;
+    return;
+  }
+  if (now - mediaTxLastLogMs_ < 2000) return;
+  // Every 2 s report what actually left the host, plus the server counters
+  // (dropped no-peer / oversize / send failures) and a per-stream breakdown so
+  // the link budget can be attributed to a producer instead of guessed.
+  const MediaServerStats stats = media_->stats();
+  const quint64 owner = robot_->ownerSessionId();
+  const bool hasPeer = owner != 0 && media_->hasPeer(owner);
+  QList<quint16> streamIds = mediaTxStreamBytes_.keys();
+  std::sort(streamIds.begin(), streamIds.end());
+  QStringList streams;
+  streams.reserve(streamIds.size());
+  for (quint16 streamId : streamIds) {
+    streams << QStringLiteral("0x%1:%2/%3")
+                   .arg(streamId, 4, 16, QLatin1Char('0'))
+                   .arg(mediaTxStreamMessages_.value(streamId))
+                   .arg(mediaTxStreamBytes_.value(streamId));
+  }
+  qInfo().noquote() << QStringLiteral(
+      "MEDIA.TX window_ms=%1 owner=%2 has_peer=%3 "
+      "sent=%4 bytes=%5 dropped=%6 laser_img=%7 laser_pts=%8 "
+      "usb0=%9 usb1=%10 srv_sent=%11 srv_frag=%12 srv_bytes=%13 "
+      "srv_nopeer=%14 srv_oversize=%15 srv_fail=%16 streams=%17")
+      .arg(now - mediaTxLastLogMs_)
+      .arg(owner)
+      .arg(hasPeer ? 1 : 0)
+      .arg(mediaTxMessages_)
+      .arg(mediaTxBytes_)
+      .arg(mediaTxDropped_)
+      .arg(mediaTxLaserImage_)
+      .arg(mediaTxLaserPoints_)
+      .arg(mediaTxUsb_[0])
+      .arg(mediaTxUsb_[1])
+      .arg(stats.messagesSent)
+      .arg(stats.fragmentsSent)
+      .arg(stats.bytesSent)
+      .arg(stats.droppedNoPeer)
+      .arg(stats.droppedOversize)
+      .arg(stats.sendFailures)
+      .arg(streams.join(QLatin1Char(',')));
+  mediaTxMessages_ = 0;
+  mediaTxBytes_ = 0;
+  mediaTxDropped_ = 0;
+  mediaTxLaserImage_ = 0;
+  mediaTxLaserPoints_ = 0;
+  mediaTxUsb_[0] = 0;
+  mediaTxUsb_[1] = 0;
+  mediaTxStreamMessages_.clear();
+  mediaTxStreamBytes_.clear();
+  mediaTxLastLogMs_ = now;
+}
+
+void HostApplication::maybeLogBulkTx() {
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  if (bulkTxLastLogMs_ == 0) {
+    bulkTxLastLogMs_ = now;
+    return;
+  }
+  if (now - bulkTxLastLogMs_ < 2000) return;
+  qInfo().noquote() << QStringLiteral(
+      "BULK.TX window_ms=%1 sent=%2 bytes=%3 pending_msgs=%4 "
+      "pending_bytes=%5")
+      .arg(now - bulkTxLastLogMs_)
+      .arg(bulkTxMessages_)
+      .arg(bulkTxBytes_)
+      .arg(pendingBulk_.size())
+      .arg(pendingBulkBytes_);
+  bulkTxMessages_ = 0;
+  bulkTxBytes_ = 0;
+  bulkTxLastLogMs_ = now;
 }
 
 void HostApplication::sendSessionEvent(quint64 sessionId,

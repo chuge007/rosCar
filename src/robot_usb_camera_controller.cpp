@@ -9,6 +9,7 @@
 #include <QCamera>
 #include <QCameraDevice>
 #include <QCameraFormat>
+#include <QDateTime>
 #include <QMediaCaptureSession>
 #include <QMediaDevices>
 #include <QStringBuilder>
@@ -28,7 +29,12 @@ namespace {
 
 constexpr int kNetworkWatchdogIntervalMs = 1000;
 constexpr int kNetworkFrameTimeoutMs = 6000;
-constexpr int kNetworkReconnectMaxDelayMs = 10000;
+// Grace period for the RTSP handshake before the open is considered stuck.
+// Open attempts now finish in tens of milliseconds (IP literals skip DNS), so
+// a stream that is still silent after 8 s is dead; retrying sooner beats
+// waiting 15 s per attempt.
+constexpr int kNetworkOpenStuckMs = 8000;
+constexpr int kNetworkReconnectMaxDelayMs = 3000;
 
 QString slotLabel(int slot) {
   return CRAWLING_TEXT("USB 摄像头 %1").arg(slot + 1);
@@ -128,6 +134,7 @@ void RobotUsbCameraController::teardownSlot(UsbSlot& slot) {
   delete slot.networkReconnectTimer;
   slot.networkReconnectTimer = nullptr;
   slot.networkWanted = false;
+  slot.networkOpening = false;
   slot.reconnectAttempts = 0;
   slot.frameProcessing.storeRelease(0);
 }
@@ -165,9 +172,36 @@ void RobotUsbCameraController::shutdown() {
 void RobotUsbCameraController::frameConsumed(int slot) {
   if (slot < 0 || slot >= kUsbCameraChannelCount)
     return;
+  ++slots_[slot].frameConsumedCount;
   slots_[slot].frameProcessing.storeRelease(0);
   if (slots_[slot].networkReader)
     slots_[slot].networkReader->releaseFrame();
+  maybeLogControllerStats(QDateTime::currentMSecsSinceEpoch());
+}
+
+void RobotUsbCameraController::maybeLogControllerStats(qint64 nowMs) {
+  if (nowMs - lastControllerLogMs_ < 2000) return;
+  const qint64 windowMs = nowMs - lastControllerLogMs_;
+  lastControllerLogMs_ = nowMs;
+  QString detail;
+  for (int slot = 0; slot < kUsbCameraChannelCount; ++slot) {
+    UsbSlot& current = slots_[slot];
+    if (!detail.isEmpty()) detail += QLatin1Char(' ');
+    detail += QStringLiteral("slot%1 ready=%2 changed=%3 consumed=%4 stale=%5")
+                  .arg(slot)
+                  .arg(current.frameReadyCount)
+                  .arg(current.frameChangedCount)
+                  .arg(current.frameConsumedCount)
+                  .arg(current.staleGenerationCount);
+    current.frameReadyCount = 0;
+    current.frameChangedCount = 0;
+    current.frameConsumedCount = 0;
+    current.staleGenerationCount = 0;
+  }
+  AppLogger::write(QStringLiteral("CAMERA.CONTROLLER"),
+                   QStringLiteral("event=controller_frames window_ms=%1 %2")
+                       .arg(windowMs)
+                       .arg(detail));
 }
 
 void RobotUsbCameraController::setDisplaySize(int slot, int width, int height) {
@@ -431,6 +465,7 @@ void RobotUsbCameraController::startNetworkStream(int slot) {
   stopNetworkReader(target);
   target.frameProcessing.storeRelease(0);
   target.lastFrameTime = clock_.elapsed();
+  target.networkOpening = true;
 
   const QString value = target.networkAddress;
   const quint64 generation = ++target.networkGeneration;
@@ -458,6 +493,7 @@ void RobotUsbCameraController::startNetworkStream(int slot) {
             if (current.networkReader != reader || current.networkGeneration != generation)
               return;
             current.lastFrameTime = clock_.elapsed();
+            current.networkOpening = false;
             if (current.reconnectAttempts > 0) {
               const QString message = CRAWLING_TEXT("%1 已重新连接：%2")
                                           .arg(slotLabel(slot), current.networkAddress);
@@ -492,12 +528,34 @@ void RobotUsbCameraController::startNetworkStream(int slot) {
           },
           Qt::QueuedConnection);
 
-  connect(reader, &NetworkStreamReader::frameReady, this,
-          [this, slot, generation, reader](int, const QImage& image) {
+  // Decoder liveness: grab() keeps succeeding even when the consumer (or the
+  // media pipeline) is not draining frames, so the watchdog must not treat a
+  // backpressure stall as a dead stream.
+  connect(reader, &NetworkStreamReader::progress, this,
+          [this, slot, generation, reader](int) {
             UsbSlot& current = slots_[slot];
             if (!current.networkWanted || current.networkReader != reader ||
                 current.networkGeneration != generation)
               return;
+            current.lastFrameTime = clock_.elapsed();
+            current.networkOpening = false;
+          },
+          Qt::QueuedConnection);
+
+  connect(reader, &NetworkStreamReader::frameReady, this,
+          [this, slot, generation, reader](int, const QImage& image) {
+            UsbSlot& current = slots_[slot];
+            const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+            ++current.frameReadyCount;
+            if (!current.networkWanted || current.networkReader != reader ||
+                current.networkGeneration != generation) {
+              // Stale reader: it is being torn down by stopNetworkReader(), so
+              // never dereference the captured pointer. Count the drop and keep
+              // the 2 s diagnostic alive even when no frame is acknowledged.
+              ++current.staleGenerationCount;
+              maybeLogControllerStats(nowMs);
+              return;
+            }
             current.lastFrameTime = clock_.elapsed();
             if (current.reconnectAttempts > 0) {
               const QString message = CRAWLING_TEXT("%1 已重新连接：%2")
@@ -506,6 +564,8 @@ void RobotUsbCameraController::startNetworkStream(int slot) {
               emit connectionChanged(slot, true, message);
               emit logMessage(message);
             }
+            ++current.frameChangedCount;
+            maybeLogControllerStats(nowMs);
             emit frameChanged(slot, image);
           },
           Qt::QueuedConnection);
@@ -516,6 +576,7 @@ void RobotUsbCameraController::startNetworkStream(int slot) {
             if (!current.networkWanted || current.networkReader != reader ||
                 current.networkGeneration != generation)
               return;
+            current.networkOpening = false;
             emit logMessage(CRAWLING_TEXT("%1 打开失败：%2（%3）")
                                 .arg(slotLabel(slot), slots_[slot].networkAddress, reason));
             AppLogger::error(QStringLiteral("USB_CAMERA.CONNECTION"),
@@ -525,14 +586,28 @@ void RobotUsbCameraController::startNetworkStream(int slot) {
                                  .arg(NetworkStreamReader::redactStreamUrl(
                                      slots_[slot].networkAddress))
                                  .arg(reason));
-            scheduleNetworkReconnect(slot);
+            scheduleNetworkReconnect(slot, QStringLiteral("open_failed"));
+          },
+          Qt::QueuedConnection);
+
+  // Surface the pre-flight probe on the operator console; without this the
+  // only trace of "camera will not open" is a 15 s timeout with no stage.
+  connect(reader, &NetworkStreamReader::diagnostic, this,
+          [this, slot, generation, reader](int, const QString& text) {
+            UsbSlot& current = slots_[slot];
+            if (!current.networkWanted || current.networkReader != reader ||
+                current.networkGeneration != generation)
+              return;
+            emit logMessage(CRAWLING_TEXT("%1 连接探测：%2")
+                                .arg(slotLabel(slot), text));
           },
           Qt::QueuedConnection);
 
   reader->start();
 }
 
-void RobotUsbCameraController::scheduleNetworkReconnect(int slot) {
+void RobotUsbCameraController::scheduleNetworkReconnect(int slot,
+                                                        const QString& trigger) {
   UsbSlot& target = slots_[slot];
   if (!target.networkWanted || !target.networkReconnectTimer ||
       target.networkReconnectTimer->isActive())
@@ -540,13 +615,14 @@ void RobotUsbCameraController::scheduleNetworkReconnect(int slot) {
 
   stopNetworkReader(target);
   target.frameProcessing.storeRelease(0);
+  target.networkOpening = false;
 
   ++target.reconnectAttempts;
   const int shift = qMin(target.reconnectAttempts - 1, 4);
   const int delayMs = qMin(1000 << shift, kNetworkReconnectMaxDelayMs);
   const QString message =
-      CRAWLING_TEXT("%1 连接中断，%2 秒后第 %3 次重连")
-          .arg(slotLabel(slot))
+      CRAWLING_TEXT("%1 连接中断（%2），%3 秒后第 %4 次重连")
+          .arg(slotLabel(slot), trigger)
           .arg(delayMs / 1000)
           .arg(target.reconnectAttempts);
   emit connectionChanged(slot, false, message);
@@ -567,16 +643,48 @@ void RobotUsbCameraController::checkNetworkWatchdog(int slot) {
     return;
   if (target.networkReconnectTimer && target.networkReconnectTimer->isActive())
     return;
-  if (clock_.elapsed() - target.lastFrameTime < kNetworkFrameTimeoutMs)
+
+  const qint64 silentMs = clock_.elapsed() - target.lastFrameTime;
+
+  // RTSP over TCP can legitimately take several seconds to open (DESCRIBE /
+  // SETUP / PLAY plus the first key frame). Do not treat the open phase as a
+  // stalled stream, otherwise every connect is killed after 6 s and the camera
+  // never gets a chance to deliver its first frame.
+  if (target.networkOpening) {
+    if (silentMs < kNetworkOpenStuckMs)
+      return;
+    AppLogger::error(
+        QStringLiteral("USB_CAMERA.CONNECTION"),
+        QStringLiteral("event=network_open_stuck slot=%1 elapsed_ms=%2 limit_ms=%3 "
+                       "address=\"%4\"")
+            .arg(slot)
+            .arg(silentMs)
+            .arg(kNetworkOpenStuckMs)
+            .arg(NetworkStreamReader::redactStreamUrl(target.networkAddress)));
+    emit logMessage(
+        CRAWLING_TEXT("%1 打开超时（%2 秒未就绪），正在重连：%3")
+            .arg(slotLabel(slot))
+            .arg(kNetworkOpenStuckMs / 1000)
+            .arg(target.networkAddress));
+    scheduleNetworkReconnect(slot, QStringLiteral("open_timeout"));
+    return;
+  }
+
+  if (silentMs < kNetworkFrameTimeoutMs)
     return;
   AppLogger::write(QStringLiteral("USB_CAMERA.CONNECTION"),
                    QStringLiteral("event=network_frame_timeout slot=%1 timeout_ms=%2 "
-                                  "address=\"%3\"")
+                                  "silent_ms=%3 address=\"%4\"")
                        .arg(slot)
                        .arg(kNetworkFrameTimeoutMs)
+                       .arg(silentMs)
                        .arg(NetworkStreamReader::redactStreamUrl(
                            target.networkAddress)));
-  scheduleNetworkReconnect(slot);
+  emit logMessage(CRAWLING_TEXT("%1 超过 %2 秒未收到视频帧，正在重连：%3")
+                      .arg(slotLabel(slot))
+                      .arg(kNetworkFrameTimeoutMs / 1000)
+                      .arg(target.networkAddress));
+  scheduleNetworkReconnect(slot, QStringLiteral("frame_timeout"));
 }
 
 }  // namespace crawling

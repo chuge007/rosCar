@@ -37,6 +37,15 @@ inline constexpr quint16 kMediaHeaderBytes = 58;
 // 28-byte wire header; the 16-byte HMAC tag is appended separately.
 inline constexpr quint16 kBulkHeaderBytes = 28;
 inline constexpr int kMediaAuthTagBytes = 16;
+// Media fragments fill a standard Ethernet frame (1500 B MTU - 28 B IP/UDP
+// header = 1472 B datagram). The previous 1200 B cap spent 74 B of header +
+// HMAC on every 1126 B of payload (6.6% overhead); 1398 B of payload lowers
+// that to 5.0% and cuts the fragment count (and per-fragment HMAC work) by
+// ~20%. Both endpoints must be updated together: an older operator rejects
+// oversized datagrams. The realtime channel keeps its conservative 1200 B cap.
+inline constexpr int kMediaDatagramBytes = 1472;
+inline constexpr int kMediaFragmentPayloadBytes =
+    kMediaDatagramBytes - kMediaHeaderBytes - kMediaAuthTagBytes;
 inline constexpr int kMediaHeartbeatIntervalMs = 500;
 inline constexpr int kMediaAssemblyTimeoutMs = 1500;
 inline constexpr int kMaxMediaMessageBytes = 8 * 1024 * 1024;
@@ -60,6 +69,10 @@ inline constexpr quint16 kMediaStreamUltrasoundLiveBase = 0x0100;
 inline constexpr quint16 kMediaStreamLaserImage = 0x0201;
 inline constexpr quint16 kMediaStreamLaserPointCloud = 0x0202;
 inline constexpr quint16 kMediaStreamImu = 0x0203;
+// Full weld observation (points + gap detection + SDK frame number) for the
+// operator's X/Z profile view. Kept separate from the decimated preview point
+// cloud so the two producers cannot alternate inside one mailbox.
+inline constexpr quint16 kMediaStreamProfileObservation = 0x0204;
 inline constexpr quint16 kMediaStreamUsbCameraBase = 0x0300;
 inline constexpr quint16 kMediaStreamCorrectionStatus = 0x0401;
 
@@ -158,6 +171,9 @@ enum class MediaStreamKind : quint8 {
   CorrectionStatus = 7,
   DeviceEvent = 8,
   ImuSample = 9,
+  // Points + LaserGapDetection + frame metadata for the weld profile view.
+  // Older operators ignore unknown kinds instead of aborting the session.
+  LaserProfileObservation = 10,
 };
 
 enum class BulkStreamKind : quint16 {

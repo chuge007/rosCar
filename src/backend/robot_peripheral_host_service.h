@@ -41,8 +41,14 @@ class RobotPeripheralMediaEncoder final : public QObject {
 
  public slots:
   void setActive(bool active);
-  void submitLaserImage(const QImage& image);
   void submitLaserPoints(const QVector<QVector3D>& points);
+  // Complete weld observation (full single-row profile + gap detection + SDK
+  // frame metadata). Kept in a separate mailbox from the decimated preview
+  // point cloud so the two producers can never alternate inside one stream.
+  void submitProfileObservation(const QVector<QVector3D>& points,
+                                const crawling::LaserGapDetection& detection,
+                                quint32 frameNumber,
+                                qint64 receivedAtEpochMs);
   void submitUsbImage(int slot, const QImage& image);
   void submitImu(const crawling::ImuSample& sample);
   void shutdown();
@@ -58,16 +64,16 @@ class RobotPeripheralMediaEncoder final : public QObject {
   bool intervalElapsed(qint64* lastMs, qint64 intervalMs, qint64 nowMs);
 
   QTimer* timer_ = nullptr;
-  QImage laserImage_;
   QVector<QVector3D> laserPoints_;
+  QByteArray profileObservationPayload_;
+  bool profileObservationPending_ = false;
+  qint64 lastProfileObservationMs_ = -100000;
   QImage usbImages_[crawling::kUsbCameraChannelCount];
   crawling::ImuSample imuSample_;
-  bool laserImagePending_ = false;
   bool laserPointsPending_ = false;
   bool usbImagePending_[crawling::kUsbCameraChannelCount] = {false, false};
   bool imuPending_ = false;
   bool active_ = false;
-  qint64 lastLaserImageMs_ = -100000;
   qint64 lastLaserPointsMs_ = -100000;
   qint64 lastUsbImageMs_[crawling::kUsbCameraChannelCount] = {-100000, -100000};
   qint64 lastImuMs_ = -100000;
@@ -143,6 +149,10 @@ class RobotPeripheralHostService final : public QObject {
   void stopSensorThreads();
   QString clampStatusText() const;
   void appendLog(const QString& message);
+  // A stalled preview is otherwise indistinguishable from a dead camera: count
+  // every stage of the frame handshake (frameChanged -> submitUsbImage ->
+  // frameConsumed) and emit one aggregated CAMERA.PIPELINE line per 2 s.
+  void maybeLogCameraPipeline(qint64 nowMs);
 
   RobotHostService* drive_ = nullptr;
   QThread* sensorThread_ = nullptr;
@@ -175,6 +185,12 @@ class RobotPeripheralHostService final : public QObject {
   int lastLaserImageHeight_ = 0;
   int lastLaserPointCount_ = 0;
   quint64 cameraFrameSequence_[crawling::kUsbCameraChannelCount] = {0, 0};
+  // Per-slot camera frame counters for the 2 s CAMERA.PIPELINE window.
+  quint64 cameraFramesIn_[crawling::kUsbCameraChannelCount] = {0, 0};
+  quint64 cameraFramesSubmitted_[crawling::kUsbCameraChannelCount] = {0, 0};
+  quint64 cameraFramesAcked_[crawling::kUsbCameraChannelCount] = {0, 0};
+  quint64 cameraFramesDropped_[crawling::kUsbCameraChannelCount] = {0, 0};
+  qint64 lastCameraPipelineLogMs_ = -100000;
   qint64 lastLaserEventMs_ = -100000;
   qint64 lastCorrectionStatusMs_ = -100000;
   bool initialized_ = false;

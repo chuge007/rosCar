@@ -12,6 +12,7 @@
 #include <QHostAddress>
 #include <QLockFile>
 #include <QMutex>
+#include <QProcess>
 #include <QTextStream>
 #include <QTimer>
 
@@ -144,10 +145,39 @@ int main(int argc, char* argv[]) {
   }
 
   const QString lockPath = QDir(QCoreApplication::applicationDirPath())
-                               .filePath(QStringLiteral("robot_host.lock"));
+                              .filePath(QStringLiteral("robot_host.lock"));
   QLockFile instanceLock(lockPath);
   instanceLock.setStaleLockTime(15000);
-  if (!instanceLock.tryLock(100)) {
+  bool haveInstanceLock = instanceLock.tryLock(100);
+  if (!haveInstanceLock) {
+    // A killed instance leaves a lock file behind. QLockFile decides whether it
+    // is stale by checking if the recorded PID still exists, and Windows reuses
+    // PIDs quickly: once that number belongs to an unrelated process the lock
+    // looks alive forever, so every double-click exits with "已有实例运行" and
+    // the console window closes before anyone can read it. Confirm against the
+    // real process list before giving up.
+    QProcess probe;
+    probe.start(QStringLiteral("tasklist"),
+                {QStringLiteral("/FI"),
+                 QStringLiteral("IMAGENAME eq PA1664RobotHost.exe"),
+                 QStringLiteral("/NH")});
+    bool known = false;
+    if (probe.waitForStarted(2000) && probe.waitForFinished(3000)) {
+      const QString output =
+          QString::fromLocal8Bit(probe.readAllStandardOutput());
+      known = output.contains(QStringLiteral("PA1664RobotHost.exe"),
+                              Qt::CaseInsensitive);
+    } else {
+      // Cannot verify: keep behaving like before rather than stealing a lock
+      // that may be held by a live instance.
+      known = true;
+    }
+    if (!known && QFile::remove(lockPath)) {
+      qInfo() << "清理残留的单实例锁:" << lockPath;
+      haveInstanceLock = instanceLock.tryLock(100);
+    }
+  }
+  if (!haveInstanceLock) {
     qCritical() << "已有 PA1664RobotHost 实例运行";
     return 3;
   }

@@ -150,6 +150,10 @@ struct DriveSettings {
   SynchronizerConfig synchronizer;
 
   QString validationError() const;
+  // Same checks as validationError(), but the serial-port fields are treated
+  // as host-owned. A remote operator console validates what it can change
+  // without being blocked by COM ports that only exist on the robot host.
+  QString nonPortValidationError() const;
   QString clampValidationError() const;
   static QString persistentFilePath();
   void save(QSettings& settings) const;

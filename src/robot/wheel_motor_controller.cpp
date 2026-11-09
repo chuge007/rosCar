@@ -1,5 +1,7 @@
 #include "wheel_motor_controller.h"
 
+#include "robot_app_logger.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -12,6 +14,11 @@ constexpr int kInterByteWaitMs = 2;
 constexpr int kPositionReplyWaitMs = 20;
 constexpr double kHoldMaximumMotorSpeedDps = 360.0;
 constexpr int kCanAckWaitMs = 15;
+// The left drive needs a wider reply window than the right one; the connect
+// probe proves it answers when the bus is not switched to the other motor
+// immediately after the query.
+constexpr int kExtendedAckWaitMs = 40;
+constexpr int kStaleMissThreshold = 3;
 constexpr int kFallbackFeedbackQueryIntervalMs = 200;
 constexpr int kPositionQueryIntervalMs = 1000;
 
@@ -24,6 +31,50 @@ QByteArray slcanBitrateCommand(int bitrate) {
     case 1000000: return "S8\r";
     default: return {};
   }
+}
+
+// Human-readable CAN frame trace for the COMM.WHEEL_CAN channel. Every TX/RX
+// frame is recorded so "we sent it but the motor never answered" is directly
+// observable instead of inferred from feedback ages.
+QString canFrameTrace(const char* direction, const CanFrame& frame) {
+  QString data;
+  data.reserve(16);
+  for (const std::uint8_t byte : frame.data) {
+    data += QStringLiteral("%1").arg(byte, 2, 16, QLatin1Char('0'));
+  }
+  QString text = QStringLiteral("%1 id=0x%2 data=%3")
+                     .arg(QLatin1String(direction))
+                     .arg(frame.id, 3, 16, QLatin1Char('0'))
+                     .arg(data);
+  QString op;
+  switch (frame.data[0]) {
+    case ServoProtocol::kSpeedClosedLoop: op = QStringLiteral("SPEED_A2"); break;
+    case 0xA0: op = QStringLiteral("SPEED_OPEN_A0"); break;
+    case 0x83: op = QStringLiteral("MODE_CLOSED_LOOP_83"); break;
+    case 0x82: op = QStringLiteral("MODE_OPEN_LOOP_82"); break;
+    case ServoProtocol::kMotorStop: op = QStringLiteral("STOP_81"); break;
+    case ServoProtocol::kMotorRun: op = QStringLiteral("RUN_88"); break;
+    case ServoProtocol::kBrakeControl: op = QStringLiteral("BRAKE_8C"); break;
+    case ServoProtocol::kStatusQuery: op = QStringLiteral("QUERY_STATUS_9A"); break;
+    case ServoProtocol::kSpeedFeedbackQuery: op = QStringLiteral("QUERY_SPEED_9C"); break;
+    case 0x35: op = QStringLiteral("QUERY_35"); break;
+    case 0x30: op = QStringLiteral("QUERY_FW_30"); break;
+    case ServoProtocol::kSystemReset: op = QStringLiteral("RESET_80"); break;
+    case 0xF3: op = QStringLiteral("SPEED_V4_F3"); break;
+    default: break;
+  }
+  if (!op.isEmpty()) text += QStringLiteral(" op=%1").arg(op);
+  if (frame.data[0] == ServoProtocol::kSpeedClosedLoop) {
+    const std::int32_t raw = static_cast<std::int32_t>(frame.data[1]) |
+                             (static_cast<std::int32_t>(frame.data[2]) << 8) |
+                             (static_cast<std::int32_t>(frame.data[3]) << 16) |
+                             (static_cast<std::int32_t>(frame.data[4]) << 24);
+    text += QStringLiteral(" speed_dps=%1 acc=%2 sync=%3")
+                .arg(raw / 100.0, 0, 'f', 2)
+                .arg(int(frame.data[5]))
+                .arg(int(frame.data[6]));
+  }
+  return text;
 }
 
 QByteArray encodeSlcanFrame(const CanFrame& frame) {
@@ -104,6 +155,13 @@ bool WheelMotorController::initialize(const WheelMotorConfig& config,
     errorMessage->clear();
   }
   shutdown();
+  canLinkRxTotal_ = 0;
+  canLinkRxLeft_ = 0;
+  canLinkRxRight_ = 0;
+  canLinkRxOther_ = 0;
+  canLinkBel_ = 0;
+  canLinkTx_ = 0;
+  canLinkTxFailed_ = 0;
   config_ = config;
   canMode_ = config_.communicationMode == WheelCommunicationMode::Can;
   const bool samePort = config_.leftSerialPort.trimmed().compare(
@@ -188,6 +246,7 @@ bool WheelMotorController::initialize(const WheelMotorConfig& config,
     }
     canSerialPort_->clear(QSerialPort::AllDirections);
     canReceiveBuffer_.clear();
+    probeCanBusIds();
   } else if (!openPort(config_.leftSerialPort, config_.leftBaudRate,
                        &leftSerialPort_, &portOpenError) ||
              (!sharedPort_ &&
@@ -306,7 +365,30 @@ bool WheelMotorController::sendSpeed(bool leftMotor, std::uint8_t motorId,
   const double encodedSpeedDps = canMode_ ? speedDps : std::round(speedDps);
   bool sent = false;
   if (canMode_) {
-    sent = sendCanFrame(ServoProtocol::speedCommand(motorId, encodedSpeedDps));
+    // Both drives receive the identical ServoProtocol::speedCommand encoding,
+    // exactly as in the integrated build. Per-side reserved bytes, a legacy
+    // 0xF3 fallback and extra enable/brake frames made one wheel obey a
+    // different command set than the other, which is what showed up as a
+    // permanent left turn.
+    const CanFrame speedFrame =
+        ServoProtocol::speedCommand(motorId, encodedSpeedDps);
+    if (!*running) {
+      // Log the real wire payload once per run: the intended dps in the control
+      // log is not enough, an encoding bug silently shipped a different speed.
+      QString hex;
+      for (std::uint8_t byte : speedFrame.data)
+        hex += QStringLiteral("%1").arg(byte, 2, 16, QLatin1Char('0'));
+      crawling::AppLogger::write(
+          QStringLiteral("DRIVE.CAN"),
+          QStringLiteral("event=can_speed_frame motor_id=%1 intended_dps=%2 "
+                         "frame_type=0x%3 frame_id=0x%4 data=%5")
+              .arg(int(motorId))
+              .arg(encodedSpeedDps, 0, 'f', 2)
+              .arg(speedFrame.data[0], 2, 16, QLatin1Char('0'))
+              .arg(speedFrame.id, 3, 16, QLatin1Char('0'))
+              .arg(hex));
+    }
+    sent = sendCanFrame(speedFrame);
   } else {
     const QByteArray speedFrame = MwdRs485Protocol::speedCommand(
         motorId, static_cast<int>(encodedSpeedDps));
@@ -557,14 +639,46 @@ bool WheelMotorController::pollCanFeedback(bool requestStatus,
   const auto consume = [this] {
     CanFrame frame;
     while (takeSlcanFrame(&canReceiveBuffer_, &frame)) {
+      ++canDiagTotal_;
+      ++canLinkRxTotal_;
+      if (frame.id == ServoProtocol::kFeedbackIdBase + config_.leftMotorId) {
+        ++canDiagLeft_;
+        ++canLinkRxLeft_;
+      } else if (frame.id ==
+                 ServoProtocol::kFeedbackIdBase + config_.rightMotorId) {
+        ++canDiagRight_;
+        ++canLinkRxRight_;
+      } else {
+        ++canDiagOther_;
+        ++canLinkRxOther_;
+      }
+      if (const auto status = ServoProtocol::parseStatus(frame);
+          status.has_value()) {
+        if (status->motorId == config_.leftMotorId) {
+          leftStatus_ = status;
+        } else if (status->motorId == config_.rightMotorId) {
+          rightStatus_ = status;
+        }
+        continue;
+      }
       if (const auto parsed = ServoProtocol::parseFeedback(frame);
           parsed.has_value()) {
         if (parsed->motorId == config_.leftMotorId) {
           leftCanFeedback_ = *parsed;
           leftCanFeedbackUpdated_ = true;
+          if (frame.data[0] == ServoProtocol::kSpeedFeedbackQuery) {
+            std::copy(std::begin(frame.data), std::end(frame.data),
+                      leftSpeedFrame_.begin());
+            leftSpeedFrameValid_ = true;
+          }
         } else if (parsed->motorId == config_.rightMotorId) {
           rightCanFeedback_ = *parsed;
           rightCanFeedbackUpdated_ = true;
+          if (frame.data[0] == ServoProtocol::kSpeedFeedbackQuery) {
+            std::copy(std::begin(frame.data), std::end(frame.data),
+                      rightSpeedFrame_.begin());
+            rightSpeedFrameValid_ = true;
+          }
         }
       }
       if (const auto angle = ServoProtocol::parseMultiTurnAngle(frame);
@@ -590,7 +704,11 @@ bool WheelMotorController::pollCanFeedback(bool requestStatus,
       }
     }
   };
-  canReceiveBuffer_.append(canSerialPort_->readAll());
+  const QByteArray received = canSerialPort_->readAll();
+  const int belBytes = received.count('\a');
+  canDiagBel_ += belBytes;
+  canLinkBel_ += belBytes;
+  canReceiveBuffer_.append(received);
   consume();
 
   const auto sendRequest = [this](std::uint8_t motorId,
@@ -600,11 +718,14 @@ bool WheelMotorController::pollCanFeedback(bool requestStatus,
     frame.data[0] = command;
     return sendCanFrame(frame);
   };
-  const auto collectReply = [this, &consume] {
-    // Both query frames share one CAN bus. Send them first, then wait once so
-    // a 50 Hz control tick never pays two independent 15 ms timeouts.
+  const auto collectReply = [this, &consume](int extendedWaitMs) {
+    // One query, one wait. Sending both motor queries back to back made the
+    // left drive miss its reply: it answers every command when queried alone
+    // (the connect-time probe waits 80 ms per command), but stayed silent under
+    // the batched 15 ms poll.
+    const int firstWaitMs = extendedWaitMs > 0 ? extendedWaitMs : kCanAckWaitMs;
     for (int attempt = 0; attempt < 2; ++attempt) {
-      const int waitMs = attempt == 0 ? kCanAckWaitMs : kInterByteWaitMs;
+      const int waitMs = attempt == 0 ? firstWaitMs : kInterByteWaitMs;
       if (!canSerialPort_->waitForReadyRead(waitMs)) break;
       canReceiveBuffer_.append(canSerialPort_->readAll());
       consume();
@@ -615,22 +736,45 @@ bool WheelMotorController::pollCanFeedback(bool requestStatus,
       now - lastFeedbackQueryMs_ >= kFallbackFeedbackQueryIntervalMs;
   if (queryFeedback) {
     lastFeedbackQueryMs_ = now;
-    bool requested = false;
-    if (!leftCanFeedbackUpdated_ &&
+    const bool leftNeeded = !leftCanFeedbackUpdated_;
+    const bool rightNeeded = !rightCanFeedbackUpdated_;
+    // A side that keeps missing gets a relaxed retry window, so a drive with a
+    // slow reply cannot be starved forever by the other motor's traffic.
+    const bool leftExtended = leftNeeded && leftMissCount_ >= kStaleMissThreshold;
+    const bool rightExtended = rightNeeded && rightMissCount_ >= kStaleMissThreshold;
+    if (leftNeeded &&
         sendRequest(config_.leftMotorId, ServoProtocol::kSpeedFeedbackQuery)) {
-      requested = true;
+      collectReply(leftExtended ? kExtendedAckWaitMs : 0);
     }
-    if (!rightCanFeedbackUpdated_ &&
+    if (rightNeeded &&
         sendRequest(config_.rightMotorId, ServoProtocol::kSpeedFeedbackQuery)) {
-      requested = true;
+      collectReply(rightExtended ? kExtendedAckWaitMs : 0);
     }
-    if (requested) collectReply();
+    leftMissCount_ = leftCanFeedbackUpdated_ ? 0 : leftMissCount_ + 1;
+    rightMissCount_ = rightCanFeedbackUpdated_ ? 0 : rightMissCount_ + 1;
+    if ((leftExtended || rightExtended) &&
+        (canStaleLogMs_ < 0 || now - canStaleLogMs_ >= 5000)) {
+      canStaleLogMs_ = now;
+      const QString message =
+          QStringLiteral("event=can_feedback_stale left_misses=%1 right_misses=%2 "
+                         "extended_wait_ms=%3 left_id=%4 right_id=%5")
+              .arg(leftMissCount_)
+              .arg(rightMissCount_)
+              .arg(kExtendedAckWaitMs)
+              .arg(int(config_.leftMotorId))
+              .arg(int(config_.rightMotorId));
+      crawling::AppLogger::write(QStringLiteral("DRIVE.CAN"), message);
+      if (diagnosticSink_) diagnosticSink_(message);
+    }
   }
 
   const double positionScale = config_.wheelRadiusM * kPi / 18000.0 /
                                config_.motorOutputToWheelRatio;
   const double speedScale = config_.wheelRadiusM * kPi / 180.0 /
                             config_.motorOutputToWheelRatio;
+  // No per-side fallback ladder: both wheels keep the same 0xA2 speed command
+  // forever. The feedback below remains diagnostic only.
+
   feedback->leftUpdated = leftCanFeedbackUpdated_;
   feedback->rightUpdated = rightCanFeedbackUpdated_;
   feedback->valid = leftCanFeedbackUpdated_ && rightCanFeedbackUpdated_;
@@ -650,6 +794,70 @@ bool WheelMotorController::pollCanFeedback(bool requestStatus,
   feedback->rightSpeedMps = feedback->rightMotorSpeedDps * speedScale;
   feedback->leftTemperatureC = leftCanFeedback_.temperatureC;
   feedback->rightTemperatureC = rightCanFeedback_.temperatureC;
+  if (canDiagLastLogMs_ < 0) {
+    canDiagLastLogMs_ = now;
+  } else if (now - canDiagLastLogMs_ >= 2000) {
+    // Ask each drive for a status frame; brake state and error code are the
+    // only way to tell "command ignored because the shaft is braked" apart
+    // from "command never arrived".
+    if (sendCanFrame(ServoProtocol::statusQuery(config_.leftMotorId)) &&
+        canSerialPort_->waitForReadyRead(kCanAckWaitMs)) {
+      canReceiveBuffer_.append(canSerialPort_->readAll());
+    }
+    if (sendCanFrame(ServoProtocol::statusQuery(config_.rightMotorId)) &&
+        canSerialPort_->waitForReadyRead(kCanAckWaitMs)) {
+      canReceiveBuffer_.append(canSerialPort_->readAll());
+    }
+    consume();
+    const QString message =
+        QStringLiteral("event=can_rx_stats window_ms=%1 rx_total=%2 "
+                       "rx_left_id=%3 rx_right_id=%4 rx_other=%5 bel=%6 "
+                       "tx=%7 tx_failed=%8 buf=%9 port=%10 left_motor_id=%11 "
+                       "right_motor_id=%12 left_9c=%13 right_9c=%14 "
+                       "left_brake=%15 left_err=%16 right_brake=%17 right_err=%18")
+            .arg(now - canDiagLastLogMs_)
+            .arg(canDiagTotal_)
+            .arg(canDiagLeft_)
+            .arg(canDiagRight_)
+            .arg(canDiagOther_)
+            .arg(canDiagBel_)
+            .arg(canDiagTx_)
+            .arg(canDiagTxFailed_)
+            .arg(canReceiveBuffer_.size())
+            .arg(canSerialPort_ != nullptr ? canSerialPort_->portName()
+                                           : QString())
+            .arg(int(config_.leftMotorId))
+            .arg(int(config_.rightMotorId))
+            .arg(lastSpeedFrameHex(true), lastSpeedFrameHex(false))
+            .arg(leftStatus_.has_value()
+                     ? (leftStatus_->brakeReleased ? QStringLiteral("released")
+                                                   : QStringLiteral("LOCKED"))
+                     : QStringLiteral("none"))
+            .arg(leftStatus_.has_value()
+                     ? QStringLiteral("0x%1").arg(leftStatus_->errorState, 4, 16,
+                                                  QLatin1Char('0'))
+                     : QStringLiteral("none"))
+            .arg(rightStatus_.has_value()
+                     ? (rightStatus_->brakeReleased ? QStringLiteral("released")
+                                                    : QStringLiteral("LOCKED"))
+                     : QStringLiteral("none"))
+            .arg(rightStatus_.has_value()
+                     ? QStringLiteral("0x%1").arg(rightStatus_->errorState, 4, 16,
+                                                  QLatin1Char('0'))
+                     : QStringLiteral("none"));
+    crawling::AppLogger::write(QStringLiteral("DRIVE.CAN"), message);
+    // The same window line goes to the operator console so a flaky motor can
+    // be diagnosed remotely without copying the host log file.
+    if (diagnosticSink_) diagnosticSink_(message);
+    canDiagTotal_ = 0;
+    canDiagLeft_ = 0;
+    canDiagRight_ = 0;
+    canDiagOther_ = 0;
+    canDiagBel_ = 0;
+    canDiagTx_ = 0;
+    canDiagTxFailed_ = 0;
+    canDiagLastLogMs_ = now;
+  }
   return leftCanFeedbackUpdated_ || rightCanFeedbackUpdated_;
 }
 
@@ -693,23 +901,162 @@ bool WheelMotorController::sendCommand(bool leftMotor, std::uint8_t command,
   return true;
 }
 
+void WheelMotorController::probeCanBusIds() {
+  if (!canMode_ || canSerialPort_ == nullptr || !canSerialPort_->isOpen()) {
+    return;
+  }
+  // One status query per candidate ID; log which nodes answer so a wrong
+  // leftMotorId (or a silent node) is visible immediately after connect.
+  QString replies;
+  for (std::uint8_t id = 1; id <= 8; ++id) {
+    CanFrame query;
+    query.id = ServoProtocol::kCommandIdBase + id;
+    query.data[0] = ServoProtocol::kStatusQuery;
+    if (!sendCanFrame(query)) {
+      continue;
+    }
+    if (canSerialPort_->waitForReadyRead(50)) {
+      canReceiveBuffer_.append(canSerialPort_->readAll());
+    }
+    CanFrame frame;
+    while (takeSlcanFrame(&canReceiveBuffer_, &frame)) {
+      if (frame.id == ServoProtocol::kFeedbackIdBase + id) {
+        replies += QStringLiteral(" id%1=OK").arg(int(id));
+      }
+    }
+  }
+  crawling::AppLogger::write(
+      QStringLiteral("DRIVE.CAN"),
+      QStringLiteral("event=can_bus_probe result=done replies:%1")
+          .arg(replies.isEmpty() ? QStringLiteral("(none)") : replies));
+
+  // The integrated build sends no mode-switch, enable, brake, firmware or
+  // legacy-speed probes at connect. Those extra frames (sent separately per
+  // motor, each with a blocking 80 ms wait) left the two drives in different
+  // command states before the first motion command, so they are removed.
+  // Only read-only bus discovery above remains, for wrong-ID diagnosis.
+}
+
+WheelMotorController::CanLinkDiagnostics
+WheelMotorController::canLinkDiagnostics() const {
+  CanLinkDiagnostics stats;
+  stats.canMode = canMode_;
+  stats.rxTotal = canLinkRxTotal_;
+  stats.rxLeftId = canLinkRxLeft_;
+  stats.rxRightId = canLinkRxRight_;
+  stats.rxOther = canLinkRxOther_;
+  stats.bel = canLinkBel_;
+  stats.tx = canLinkTx_;
+  stats.txFailed = canLinkTxFailed_;
+  stats.receiveBufferBytes = canReceiveBuffer_.size();
+  return stats;
+}
+
+void WheelMotorController::setDiagnosticSink(
+    std::function<void(const QString&)> sink) {
+  diagnosticSink_ = std::move(sink);
+}
+
+QString WheelMotorController::lastSpeedFrameHex(bool leftMotor) const {
+  const auto& frame = leftMotor ? leftSpeedFrame_ : rightSpeedFrame_;
+  const bool valid = leftMotor ? leftSpeedFrameValid_ : rightSpeedFrameValid_;
+  if (!valid) return QStringLiteral("none");
+  QString hex;
+  for (std::uint8_t byte : frame)
+    hex += QStringLiteral("%1").arg(byte, 2, 16, QLatin1Char('0'));
+  return hex;
+}
+
 bool WheelMotorController::sendCanFrame(const CanFrame& frame) {
+  const QString canId = QStringLiteral("0x%1")
+                            .arg(static_cast<quint32>(frame.id), 3, 16,
+                                 QLatin1Char('0'))
+                            .toUpper();
+  const QString command = QStringLiteral("0x%1")
+                              .arg(static_cast<int>(frame.data[0]), 2, 16,
+                                   QLatin1Char('0'))
+                              .toUpper();
   if (!canMode_ || canSerialPort_ == nullptr ||
       !canSerialPort_->isOpen()) {
+    AppLogger::write(
+        QStringLiteral("WHEEL.CAN_TX"),
+        QStringLiteral("event=tx result=FAILED reason=port_not_ready "
+                       "can_id=%1 command=%2")
+            .arg(canId, command));
     return false;
   }
   const QByteArray encoded = encodeSlcanFrame(frame);
-  if (encoded.isEmpty() ||
-      canSerialPort_->write(encoded) != encoded.size() ||
-      !canSerialPort_->waitForBytesWritten(20)) {
+  if (encoded.isEmpty()) {
+    AppLogger::write(
+        QStringLiteral("WHEEL.CAN_TX"),
+        QStringLiteral("event=tx result=FAILED reason=encode_failed "
+                       "can_id=%1 command=%2")
+            .arg(canId, command));
     return false;
   }
-  // Never block a 0xA2/0x81 command waiting for an optional reply. SLCAN
-  // frames are parsed asynchronously by pollCanFeedback(); only a BEL emitted
-  // immediately by the adapter is treated as a write failure here.
-  const QByteArray response = canSerialPort_->readAll();
-  if (response.contains('\a')) {
+  ++canDiagTx_;
+  ++canLinkTx_;
+  const qint64 written = canSerialPort_->write(encoded);
+  if (written != encoded.size()) {
+    ++canDiagTxFailed_;
+    ++canLinkTxFailed_;
+    AppLogger::write(
+        QStringLiteral("WHEEL.CAN_TX"),
+        QStringLiteral("event=tx result=FAILED reason=short_write "
+                       "can_id=%1 command=%2 written=%3 expected=%4 "
+                       "port_error=\"%5\"")
+            .arg(canId, command)
+            .arg(written)
+            .arg(encoded.size())
+            .arg(canSerialPort_->errorString()));
     return false;
+  }
+  if (!canSerialPort_->waitForBytesWritten(20)) {
+    ++canDiagTxFailed_;
+    ++canLinkTxFailed_;
+    AppLogger::write(
+        QStringLiteral("WHEEL.CAN_TX"),
+        QStringLiteral("event=tx result=FAILED reason=write_timeout "
+                       "can_id=%1 command=%2 port_error=\"%3\"")
+            .arg(canId, command)
+            .arg(canSerialPort_->errorString()));
+    return false;
+  }
+  AppLogger::write(
+      QStringLiteral("WHEEL.CAN_TX"),
+      QStringLiteral("event=tx result=SENT can_id=%1 command=%2 frame=\"%3\"")
+          .arg(canId, command)
+          .arg(QString::fromLatin1(encoded).replace(QChar('\r'), QStringLiteral("\\r"))));
+  // Wait for each CAN reply before writing the next command. Sending the left
+  // and right 0xA2 frames back-to-back can make the SLCAN adapter drop the left
+  // reply, leaving the left wheel stationary while the right wheel moves.
+  QByteArray response = canSerialPort_->readAll();
+  if (response.isEmpty() &&
+      canSerialPort_->waitForReadyRead(kCanAckWaitMs)) {
+    response = canSerialPort_->readAll();
+  }
+  while (canSerialPort_->waitForReadyRead(kInterByteWaitMs)) {
+    response += canSerialPort_->readAll();
+  }
+  if (response.contains('\a')) {
+    ++canDiagTxFailed_;
+    ++canLinkTxFailed_;
+    AppLogger::write(
+        QStringLiteral("WHEEL.CAN_TX"),
+        QStringLiteral("event=tx result=FAILED reason=adapter_bel "
+                       "can_id=%1 command=%2 response=\"%3\"")
+            .arg(canId, command)
+            .arg(QString::fromLatin1(response).replace(QChar('\a'), QStringLiteral("<BEL>"))));
+    return false;
+  }
+  if (frame.data[0] == ServoProtocol::kSpeedClosedLoop &&
+      response.isEmpty()) {
+    AppLogger::write(
+        QStringLiteral("WHEEL.CAN_TX"),
+        QStringLiteral("event=tx result=NO_REPLY can_id=%1 command=%2 "
+                       "wait_ms=%3")
+            .arg(canId, command)
+            .arg(kCanAckWaitMs));
   }
   canReceiveBuffer_.append(response);
   return true;

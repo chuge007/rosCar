@@ -1,0 +1,126 @@
+
+========================================
+   PA1664 Robot Communication Test
+   Binary Protocol Version
+========================================
+
+Target: 192.168.1.20:43100
+Settings: D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmpSeparate\robot_comm_test\..\startup_deploy\robot_host\app\config\drive_settings.ini
+Hold: 60s
+
+[1] TCP Connection Test
+-----------------------------------
+[ OK ] TCP Connected (8ms)
+  Local: 192.168.1.100:54003
+  Remote: 192.168.1.20:43100
+
+[2] PA1664 Hello Handshake
+-----------------------------------
+  Waiting for HelloAck...
+
+[ OK ] Received HelloAck (64ms)
+  SessionId: 1
+  Host: DESKTOP-3AQ3FDU  Version: 
+
+
+[1/9] robot.connect (apply drive_settings.ini)
+[ OK ] robot.connect (apply drive_settings.ini)  (requestId=1, 56 ms)
+       {"data":{"queued":true},"ok":true}
+       [log] event=connect_start module=DRIVE.MOTOR mode=CAN left_port=COM6 left_baud=115200 right_port=COM6 right_baud=115200 can_port=COM8 can_adapter_baud=115200 can_bitrate=1000000 left_id=1 left_sign=1 right_id=2 right_sign=-1 wheel_radius_m=0.074000 motor_to_wheel_ratio=1.0000
+       [log] event=connect_complete result=OK module=DRIVE.MOTOR mode=CAN left_port= right_port= can_port=COM8 can_bitrate=1000000
+       [log] event=wheel_stop result=OK module=DRIVE.MOTOR reason=connect command=0x81
+       [log] event=motor_communication_profile cyclic_hz=10 interval_ms=100 feedback_timeout_ms=800 mode=CAN_A2_9C
+       [log] event=wheel_command_limit configured_mps=0.1600 effective_mps=0.1600 motor_limit_dps=32767
+       [robot.connectionChanged] {"connected":true,"message":"Servo CAN wheel motor bus connected"}
+       [robot.connectionChanged] {"connected":true,"message":"Servo CAN wheel motor bus connected"}
+
+[2/9] robot.laser.scan
+[ OK ] robot.laser.scan  (requestId=2, 3 ms)
+       {"data":{"queued":true},"ok":true}
+       [robot.laser.devices] ["DB2666828 | 192.168.1.25 | MV-TD240-2D"]
+       [log] 线激光扫描到 1 个设备
+
+[3/9] robot.laser.connect DB2666828
+       [robot.laser.connecting] {"serialNumber":"DB2666828"}
+[ OK ] robot.laser.connect DB2666828  (requestId=3, 4 ms)
+       {"data":{"queued":true},"ok":true}
+       [robot.laser.devices] ["DB2666828 | 192.168.1.25 | MV-TD240-2D"]
+       [log] 线激光扫描到 1 个设备
+       [robot.laser.connection] {"connected":true,"message":"线激光相机已连接：DB2666828"}
+       [log] 线激光相机已连接：DB2666828
+
+[4/9] robot.camera.scan
+[ OK ] robot.camera.scan  (requestId=4, 3 ms)
+       {"data":{"queued":true},"ok":true}
+       [robot.camera.devices] []
+       [log] USB 摄像头扫描到 0 个设备
+
+[5/9] robot.camera.connect slot=0
+[ OK ] robot.camera.connect slot=0  (requestId=5, 2 ms)
+       {"data":{"queued":true,"slot":0},"ok":true}
+       [log] 正在连接USB 摄像头 1：rtsp://192.168.1.104:554/user=admin&password=&channel=1&stream=0.sdp?real_stream
+
+[6/9] robot.camera.connect slot=1
+[ OK ] robot.camera.connect slot=1  (requestId=6, 3 ms)
+       {"data":{"queued":true,"slot":1},"ok":true}
+       [log] 正在连接USB 摄像头 2：rtsp://192.168.1.103:554/user=admin&password=&channel=1&stream=0.sdp?real_stream
+       [robot.camera.connection] {"connected":true,"message":"USB 摄像头 1 已连接：rtsp://192.168.1.104:554/user=admin&password=&channel=1&stream=0.sdp?real_stream（1920x1080，15.0 fps，低延迟）","slot":0}
+       [log] USB 摄像头 1 已连接：rtsp://192.168.1.104:554/user=admin&password=&channel=1&stream=0.sdp?real_stream（1920x1080，15.0 fps，低延迟）
+
+[7/9] robot.imu.connect COM3
+       [robot.imu.connecting] {"baudRate":9600,"port":"COM3"}
+[ OK ] robot.imu.connect COM3  (requestId=7, 2 ms)
+       {"data":{"queued":true},"ok":true}
+       [robot.imu.connection] {"connected":false,"message":"RIM302 已断开"}
+       [log] RIM302 已断开
+       [robot.imu.connection] {"connected":true,"message":"RIM302 已连接：COM3，9600 bps"}
+       [log] RIM302 已连接：COM3，9600 bps
+       [robot.camera.connection] {"connected":true,"message":"USB 摄像头 2 已连接：rtsp://192.168.1.103:554/user=admin&password=&channel=1&stream=0.sdp?real_stream（1920x1080，15.0 fps，低延迟）","slot":1}
+       [log] USB 摄像头 2 已连接：rtsp://192.168.1.103:554/user=admin&password=&channel=1&stream=0.sdp?real_stream（1920x1080，15.0 fps，低延迟）
+
+[8/9] robot.snapshot
+[ OK ] robot.snapshot  (requestId=8, 26 ms)
+       drive=1  state=idle  left(valid=1,temp=41)  right(valid=1,temp=41)
+
+[9/9] robot.peripherals.snapshot
+[ OK ] robot.peripherals.snapshot  (requestId=9, 16 ms)
+       drive=1  laser=1  imu=1  clamp=0  usb=[true,true]
+
+===== holding the session for 60s (peripheral snapshot every 10s) =====
+[ OK ] peripherals.poll  (requestId=10, 14 ms)
+       drive=1  laser=1  imu=1  clamp=0  usb=[true,true]
+[ OK ] peripherals.poll  (requestId=11, 17 ms)
+       drive=1  laser=1  imu=1  clamp=0  usb=[true,true]
+[ OK ] peripherals.poll  (requestId=12, 8 ms)
+       drive=1  laser=1  imu=1  clamp=0  usb=[true,true]
+[ OK ] peripherals.poll  (requestId=13, 12 ms)
+       drive=1  laser=1  imu=1  clamp=0  usb=[true,true]
+[ OK ] peripherals.poll  (requestId=14, 12 ms)
+       drive=1  laser=1  imu=1  clamp=0  usb=[true,true]
+
+laser frame rate ~ 9.1 fps (60s, 545 frames, 3200 points/frame)
+
+========================================
+Test Summary
+========================================
+
+TCP Connection                 [ OK ] Pass
+PA1664 Hello Handshake         [ OK ] Pass
+Responses received             [ OK ] Pass
+
+Peripheral verdict
+-----------------------------------
+drive motors           [ OK ] connected  state=idle left_feedback=OK right_feedback=OK
+line laser             [ OK ] connected  线激光相机已连接：DB2666828
+camera 1               [ OK ] connected  USB 摄像头 1 已连接：rtsp://192.168.1.104:554/user=admin&password=&channel=1&stream=0.sdp?real_stream（1920x1080，15.0 fps，低延迟）
+camera 2               [ OK ] connected  USB 摄像头 2 已连接：rtsp://192.168.1.103:554/user=admin&password=&channel=1&stream=0.sdp?real_stream（1920x1080，15.0 fps，低延迟）
+IMU                    [ OK ] connected  -
+clamp motors           [FAIL] not connected  not attempted (unsupported by this tool)
+
+Responses: 14  Laser frames: 632
+Connection time: 8ms
+
+Logs: robot_comm_test.log, robot_comm_test_full.log
+
+
+Connection closed

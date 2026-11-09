@@ -508,11 +508,22 @@ FocalType UltrasoundParameterService::getFocusMode(int groupId) {
 
 QVector<int> UltrasoundParameterService::getGroupsNo(bool includeHardware) {
   if (!remote_) return Client::getInstance().getGroupsNo(includeHardware);
-  return QVector<int>{0};
+  // The host snapshot/getMany channel carries the SDK's real group list.
+  const QVariant value = cachedValue(QStringLiteral("getGroupsNo"),
+                                     QJsonArray{includeHardware}, QVariant{});
+  QVector<int> groups;
+  const QVariantList list = value.toList();
+  for (const QVariant& item : list) groups.append(item.toInt());
+  if (groups.isEmpty()) groups.append(0);
+  return groups;
 }
 
 int UltrasoundParameterService::getBeamCounts(int groupId) {
   if (!remote_) return Client::getInstance().getBeamCounts(groupId);
+  const QVariant value = cachedValue(QStringLiteral("getBeamCounts"),
+                                     QJsonArray{groupId}, -1);
+  const int sdkCount = value.toInt();
+  if (sdkCount > 0) return sdkCount;
   const int first = getBeamFirstElement(groupId);
   const int last = getBeamLastElement(groupId);
   const int step = qMax(1, getBeamElementStep(groupId));

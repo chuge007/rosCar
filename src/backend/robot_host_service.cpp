@@ -12,8 +12,40 @@
 #include <QTimer>
 
 #include <cmath>
+#include <array>
 
 namespace pa1664::remote {
+namespace {
+
+// Serial ports describe hardware that exists on the robot host, not on the
+// operator console. The panel saves its configuration with empty port fields;
+// fill those from the host's live settings before the strict validation so a
+// valid remote save is never rejected for a COM port the operator cannot have.
+void adoptHostPorts(crawling::DriveSettings* requested,
+                    const crawling::DriveSettings& host) {
+  if (requested->wheelCanSerialPort.trimmed().isEmpty())
+    requested->wheelCanSerialPort = host.wheelCanSerialPort;
+  if (requested->leftMotorSerialPort.trimmed().isEmpty())
+    requested->leftMotorSerialPort = host.leftMotorSerialPort;
+  if (requested->rightMotorSerialPort.trimmed().isEmpty())
+    requested->rightMotorSerialPort = host.rightMotorSerialPort;
+  if (requested->imuSerialPort.trimmed().isEmpty())
+    requested->imuSerialPort = host.imuSerialPort;
+  if (requested->clampSerialPort.trimmed().isEmpty())
+    requested->clampSerialPort = host.clampSerialPort;
+  for (std::size_t axis = 0; axis < requested->clampMotors.size(); ++axis) {
+    auto& requestedAxis = requested->clampMotors[axis];
+    const auto& hostAxis = host.clampMotors[axis];
+    for (int index = 0; index < requestedAxis.size(); ++index) {
+      if (!requestedAxis[index].serialPort.trimmed().isEmpty() ||
+          index >= hostAxis.size())
+        continue;
+      requestedAxis[index].serialPort = hostAxis[index].serialPort;
+    }
+  }
+}
+
+}  // namespace
 RobotHostService::RobotHostService(QObject* parent) : QObject(parent) {
   qRegisterMetaType<crawling::DriveSettings>("crawling::DriveSettings");
   qRegisterMetaType<crawling::DriveTelemetry>("crawling::DriveTelemetry");
@@ -91,10 +123,22 @@ void RobotHostService::initialize() {
   driveThread_->start(QThread::HighPriority);
   QTimer::singleShot(0, this, [this] {
     if (shuttingDown_) return;
-    if (settings_.autoConnectOnStartup &&
-        settings_.validationError().isEmpty()) {
-      connectDrive(settings_, ownerSessionId_);
+    if (!settings_.autoConnectOnStartup) {
+      qInfo().noquote()
+          << QStringLiteral(
+                 "底盘未自动连接：autoConnectOnStartup=false，等待操作台下发 "
+                 "robot.connect");
+      return;
     }
+    const QString validation = settings_.validationError();
+    if (!validation.isEmpty()) {
+      qWarning().noquote()
+          << QStringLiteral(
+                 "底盘未自动连接：config/drive_settings.ini 配置无效 - %1")
+                 .arg(validation);
+      return;
+    }
+    connectDrive(settings_, ownerSessionId_);
   });
 }
 
@@ -190,6 +234,7 @@ void RobotHostService::handleRequest(quint64 sessionId, quint64 requestId,
                 QStringLiteral("invalid_settings"), error);
         return;
       }
+      adoptHostPorts(&requested, settings_);
     }
     const QString validation = requested.validationError();
     if (!validation.isEmpty()) {
@@ -200,8 +245,22 @@ void RobotHostService::handleRequest(quint64 sessionId, quint64 requestId,
     settings_ = requested;
     persistSettings(settings_);
     connectDrive(settings_, sessionId);
+    qInfo().noquote()
+        << "ROBOT_SETTINGS_APPLIED"
+        << QStringLiteral("can_port=%1 left_id=%2 right_id=%3 left_sign=%4 "
+                          "right_sign=%5 max_wheel_mps=%6 feedback_ms=%7 "
+                          "arming_ms=%8")
+               .arg(settings_.wheelCanSerialPort)
+               .arg(settings_.leftMotorId)
+               .arg(settings_.rightMotorId)
+               .arg(settings_.leftMotorSign)
+               .arg(settings_.rightMotorSign)
+               .arg(settings_.maximumWheelSpeedMps, 0, 'f', 3)
+               .arg(settings_.feedbackTimeoutMs)
+               .arg(settings_.armingTimeoutMs);
     respond(sessionId, requestId, true,
-            QJsonObject{{QStringLiteral("queued"), true}});
+            QJsonObject{{QStringLiteral("queued"), true},
+                        {QStringLiteral("settings"), driveSettingsToJson(settings_)}});
     return;
   }
   if (operation == QStringLiteral("robot.disconnect")) {
@@ -252,6 +311,7 @@ void RobotHostService::handleRequest(quint64 sessionId, quint64 requestId,
               QStringLiteral("invalid_settings"), error);
       return;
     }
+    adoptHostPorts(&requested, settings_);
     settings_ = requested;
     persistSettings(settings_);
     respond(sessionId, requestId, true, snapshot());

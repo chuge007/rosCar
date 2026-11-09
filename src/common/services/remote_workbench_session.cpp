@@ -6,8 +6,10 @@
 #include "transport/realtime_channel.h"
 
 #include <QDebug>
+#include <QDateTime>
 #include <QJsonValue>
 #include <QThread>
+#include <QTimer>
 
 namespace pa1664::remote {
 
@@ -82,6 +84,31 @@ RemoteWorkbenchSession::RemoteWorkbenchSession(QObject* parent)
           [this] { emit bulkReadyChanged(true); });
   connect(bulk_, &BulkClient::disconnected, this,
           [this](const QString&) { emit bulkReadyChanged(false); });
+
+  // Watchdog: the control client owns its own reconnect timer, but if that
+  // machinery ever stalls (half-open socket, missed state transition, ...),
+  // the operator console would sit "degraded" forever. Restart the client
+  // when no control-channel progress is observed for a while.
+  reconnectWatchdog_ = new QTimer(this);
+  reconnectWatchdog_->setInterval(2000);
+  connect(reconnectWatchdog_, &QTimer::timeout, this,
+          &RemoteWorkbenchSession::checkReconnectWatchdog);
+  reconnectWatchdog_->start();
+}
+
+void RemoteWorkbenchSession::checkReconnectWatchdog() {
+  if (!started_) return;
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  if (state_ == WorkbenchConnectionState::Online) {
+    lastControlProgressMs_ = now;
+    return;
+  }
+  if (lastControlProgressMs_ == 0) lastControlProgressMs_ = now;
+  if (now - lastControlProgressMs_ < 10000) return;
+  lastControlProgressMs_ = now;
+  qInfo().noquote() << "CONTROL_RECONNECT_WATCHDOG: no control progress for"
+                    << "10s, restarting control client";
+  control_->start(host_, controlPort_);
 }
 
 RemoteWorkbenchSession::~RemoteWorkbenchSession() {
@@ -127,6 +154,10 @@ bool RemoteWorkbenchSession::mediaReady() const {
   return media_ && media_->isActive();
 }
 
+MediaClientStats RemoteWorkbenchSession::mediaStats() const {
+  return media_ ? media_->stats() : MediaClientStats{};
+}
+
 bool RemoteWorkbenchSession::bulkReady() const {
   return bulk_ && bulk_->isConnected();
 }
@@ -134,6 +165,8 @@ bool RemoteWorkbenchSession::bulkReady() const {
 void RemoteWorkbenchSession::start(const QString& host, quint16 controlPort) {
   host_ = host.trimmed();
   started_ = true;
+  controlPort_ = controlPort;
+  lastControlProgressMs_ = QDateTime::currentMSecsSinceEpoch();
   pendingOperations_.clear();
   capabilities_.clear();
   stopRealtimeAsync();
@@ -220,6 +253,7 @@ quint64 RemoteWorkbenchSession::sendBulk(BulkStreamKind kind,
 
 void RemoteWorkbenchSession::onControlStateChanged(ConnectionState state,
                                                    const QString& detail) {
+  lastControlProgressMs_ = QDateTime::currentMSecsSinceEpoch();
   switch (state) {
     case ConnectionState::Disconnected:
       stopRealtimeAsync();
@@ -258,6 +292,7 @@ void RemoteWorkbenchSession::onControlStateChanged(ConnectionState state,
 void RemoteWorkbenchSession::onSessionReady(
     quint64, const QByteArray& sessionKey, quint16 realtimePort,
     quint16 mediaPort, quint16 bulkPort, int) {
+  lastControlProgressMs_ = QDateTime::currentMSecsSinceEpoch();
   realtimePort_ = realtimePort == 0 ? kDefaultRealtimePort : realtimePort;
   mediaPort_ = mediaPort == 0 ? kDefaultMediaPort : mediaPort;
   bulkPort_ = bulkPort == 0 ? kDefaultBulkPort : bulkPort;

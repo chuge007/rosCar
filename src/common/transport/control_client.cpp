@@ -1,10 +1,13 @@
 ﻿#include "control_client.h"
 
+#include "robot_app_logger.h"
+
 #include <QDateTime>
 #include <QHostInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QNetworkProxy>
 #include <QTcpSocket>
 #include <QTimer>
 
@@ -67,14 +70,63 @@ ControlClient::ControlClient(QObject* parent)
     const qint64 now = nowMs();
     expireRequests(now);
     if (lastInboundMs_ > 0 && now - lastInboundMs_ > kSessionTimeoutMs) {
+      logLink(QStringLiteral("event=session_timeout reason=inbound_stale %1")
+                  .arg(linkSnapshot()));
       scheduleReconnect(QStringLiteral("控制会话心跳超时"));
       return;
     }
+    if (lastPingSentMs_ > 0 && lastPongMs_ < lastPingSentMs_) {
+      ++missedPongs_;
+      logLink(QStringLiteral("event=pong_missing missed_total=%1 %2")
+                  .arg(missedPongs_).arg(linkSnapshot()));
+    }
     sendPing();
+    // A steady status line makes "control stopped working" measurable: you can
+    // see whether the socket is up, how stale inbound traffic is and how many
+    // requests are still unanswered.
+    if (lastStatusLogMs_ == 0 || now - lastStatusLogMs_ >= 5000) {
+      lastStatusLogMs_ = now;
+      logLink(QStringLiteral("event=link_status %1").arg(linkSnapshot()));
+    }
   });
 }
 
 ControlClient::~ControlClient() { stop(); }
+
+QString ControlClient::linkSnapshot() const {
+  const qint64 now = nowMs();
+  return QStringLiteral(
+             "state=%1 target=%2:%3 session=%4 tcp_connected=%5 "
+             "inbound_age_ms=%6 rtt_ms=%7 missed_pongs=%8 pending=%9 "
+             "tx_frames=%10 rx_frames=%11 timeouts=%12 bytes_to_write=%13 "
+             "seq=%14 attempts=%15")
+      .arg(connectionStateText(state_))
+      .arg(host_)
+      .arg(controlPort_)
+      .arg(sessionId_)
+      .arg(socket_ != nullptr &&
+                   socket_->state() == QAbstractSocket::ConnectedState
+               ? 1
+               : 0)
+      .arg(lastInboundMs_ > 0 ? now - lastInboundMs_ : -1)
+      .arg(lastRttMs_)
+      .arg(missedPongs_)
+      .arg(pendingRequests_.size())
+      .arg(diagTxFrames_)
+      .arg(diagRxFrames_)
+      .arg(diagTimeouts_)
+      .arg(socket_ != nullptr ? socket_->bytesToWrite() : -1)
+      .arg(lastInboundSequence_)
+      .arg(connectAttempts_);
+}
+
+void ControlClient::logLink(const QString& message) {
+  crawling::AppLogger::write(QStringLiteral("LINK.CONTROL"), message);
+}
+
+void ControlClient::logRequest(const QString& message) {
+  crawling::AppLogger::write(QStringLiteral("COMM.CONTROL"), message);
+}
 
 void ControlClient::start(const QString& host, quint16 controlPort) {
   host_ = host.trimmed();
@@ -124,8 +176,20 @@ quint64 ControlClient::sendRequest(const QString& operation,
   request.insert(QStringLiteral("operation"), operation);
   if (!data.isEmpty()) request.insert(QStringLiteral("data"), data);
   const int writtenBytes = writeFrame(ControlMessageType::Request, request, requestId);
-  if (writtenBytes <= 0) return 0;
+  if (writtenBytes <= 0) {
+    logLink(QStringLiteral("event=request_write_failed operation=%1 request_id=%2 %3")
+                .arg(operation)
+                .arg(requestId)
+                .arg(linkSnapshot()));
+    return 0;
+  }
+  ++diagTxFrames_;
   pendingRequests_.insert(requestId, PendingRequest{operation, nowMs()});
+  logRequest(QStringLiteral("event=request_sent operation=%1 request_id=%2 bytes=%3 pending=%4")
+                 .arg(operation)
+                 .arg(requestId)
+                 .arg(writtenBytes)
+                 .arg(pendingRequests_.size()));
   return requestId;
 }
 
@@ -143,9 +207,19 @@ void ControlClient::connectSocket() {
   capabilities_.clear();
   lastInboundSequence_ = 0;
   setState(state_ == ConnectionState::Reconnecting
-               ? ConnectionState::Reconnecting
-               : ConnectionState::Connecting,
-           QStringLiteral("连接 %1:%2").arg(host_).arg(controlPort_));
+              ? ConnectionState::Reconnecting
+              : ConnectionState::Connecting,
+          QStringLiteral("连接 %1:%2").arg(host_).arg(controlPort_));
+  // A process-wide system proxy (vendor SDK / OS setting) would wrap this raw
+  // TCP socket in an HTTP proxy, which QTcpSocket cannot do; the connection
+  // then fails with "The proxy type is invalid for this operation" before any
+  // byte reaches the robot host. Our control link is always direct.
+  socket_->setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+  ++connectAttempts_;
+  logLink(QStringLiteral("event=connect_start target=%1:%2 attempt=%3")
+              .arg(host_)
+              .arg(controlPort_)
+              .arg(connectAttempts_));
   socket_->connectToHost(host_, controlPort_);
 }
 
@@ -169,6 +243,10 @@ void ControlClient::scheduleReconnect(const QString& reason) {
            QStringLiteral("%1，%2 ms 后重连")
                .arg(reason)
                .arg(reconnectDelayMs_));
+  logLink(QStringLiteral("event=reconnect_scheduled reason=\"%1\" delay_ms=%2 %3")
+              .arg(reason)
+              .arg(reconnectDelayMs_)
+              .arg(linkSnapshot()));
   emit errorOccurred(reason, true);
   reconnectTimer_->start(reconnectDelayMs_);
   reconnectDelayMs_ = qMin(reconnectDelayMs_ * 2, 5000);
@@ -176,7 +254,11 @@ void ControlClient::scheduleReconnect(const QString& reason) {
 
 void ControlClient::setState(ConnectionState state, const QString& detail) {
   if (state_ == state) return;
+  const ConnectionState previous = state_;
   state_ = state;
+  logLink(QStringLiteral("event=state_change from=%1 to=%2 detail=\"%3\" %4")
+              .arg(connectionStateText(previous),
+                   connectionStateText(state), detail, linkSnapshot()));
   emit connectionStateChanged(state_, detail);
 }
 
@@ -189,6 +271,9 @@ void ControlClient::onConnected() {
   }
   lastInboundMs_ = nowMs();
   reconnectDelayMs_ = 500;
+  logLink(QStringLiteral("event=tcp_connected local=%1 peer=%2")
+              .arg(socket_->localAddress().toString())
+              .arg(socket_->peerAddress().toString()));
   setState(ConnectionState::Handshaking, QStringLiteral("TCP 已连接，正在握手"));
   handshakeTimer_->start();
   sendHello();
@@ -208,7 +293,9 @@ void ControlClient::sendHello() {
 void ControlClient::sendPing() {
   QJsonObject ping;
   ping.insert(QStringLiteral("clientTimeMs"), QString::number(nowMs()));
-  writeFrame(ControlMessageType::Ping, ping, nextRequestId_++);
+  const quint64 pingId = nextRequestId_++;
+  lastPingSentMs_ = nowMs();
+  writeFrame(ControlMessageType::Ping, ping, pingId);
 }
 
 void ControlClient::onReadyRead() {
@@ -231,6 +318,9 @@ void ControlClient::onReadyRead() {
 void ControlClient::onDisconnected() {
   heartbeatTimer_->stop();
   handshakeTimer_->stop();
+  logLink(QStringLiteral("event=tcp_disconnected stop_requested=%1 %2")
+              .arg(stopRequested_ ? 1 : 0)
+              .arg(linkSnapshot()));
   if (!stopRequested_) {
     scheduleReconnect(QStringLiteral("主机连接已断开"));
   } else {
@@ -241,11 +331,15 @@ void ControlClient::onDisconnected() {
 void ControlClient::onSocketError() {
   if (stopRequested_ || suppressReconnect_ || reconnectTimer_->isActive()) return;
   const QString detail = socket_->errorString();
+  logLink(QStringLiteral("event=socket_error code=%1 text=\"%2\" %3")
+              .arg(int(socket_->error()))
+              .arg(detail, linkSnapshot()));
   emit errorOccurred(detail, true);
   if (state_ != ConnectionState::Reconnecting) scheduleReconnect(detail);
 }
 
 void ControlClient::handleFrame(const ControlFrame& frame) {
+  ++diagRxFrames_;
   if (frame.type == ControlMessageType::HelloAck) {
     if (lastInboundSequence_ != 0) {
       failProtocol(QStringLiteral("重复的握手响应"));
@@ -300,7 +394,14 @@ void ControlClient::handleFrame(const ControlFrame& frame) {
     emit eventReceived(name, event);
     return;
   }
-  if (frame.type == ControlMessageType::Pong) return;
+  if (frame.type == ControlMessageType::Pong) {
+    lastPongMs_ = nowMs();
+    if (lastPingSentMs_ > 0) {
+      lastRttMs_ = int(lastPongMs_ - lastPingSentMs_);
+      lastPingSentMs_ = 0;
+    }
+    return;
+  }
   if (frame.type == ControlMessageType::Error) {
     bool ok = false;
     const QJsonObject error = objectFromPayload(frame.payload, &ok);
@@ -365,6 +466,17 @@ void ControlClient::handleHelloAck(const ControlFrame& frame) {
   heartbeatTimer_->setInterval(qBound(100, heartbeatMs, 2000));
   heartbeatTimer_->start();
   lastInboundMs_ = nowMs();
+  lastPingSentMs_ = 0;
+  lastPongMs_ = 0;
+  missedPongs_ = 0;
+  logLink(QStringLiteral("event=handshake_ok session=%1 heartbeat_ms=%2 "
+                         "ports rt=%3 media=%4 bulk=%5 caps=%6")
+              .arg(sessionId_)
+              .arg(heartbeatTimer_->interval())
+              .arg(realtimePort_)
+              .arg(mediaPort_)
+              .arg(bulkPort_)
+              .arg(capabilities_.join(QLatin1Char(','))));
   setState(ConnectionState::Ready,
            QStringLiteral("会话 %1 已就绪").arg(sessionId_));
   emit sessionReady(sessionId_, sessionKey_, realtimePort_, mediaPort_,
@@ -372,6 +484,8 @@ void ControlClient::handleHelloAck(const ControlFrame& frame) {
 }
 
 void ControlClient::failProtocol(const QString& detail) {
+  logLink(QStringLiteral("event=protocol_error detail=\"%1\" %2")
+              .arg(detail, linkSnapshot()));
   emit errorOccurred(detail, true);
 }
 
@@ -383,7 +497,15 @@ void ControlClient::expireRequests(qint64 now) {
     if (it == pendingRequests_.constEnd()) continue;
     if (now - it.value().sentAtMs <= kRequestTimeoutMs) continue;
     const QString operation = it.value().operation;
+    const qint64 elapsed = now - it.value().sentAtMs;
     pendingRequests_.remove(id);
+    ++diagTimeouts_;
+    logLink(QStringLiteral("event=request_timeout operation=%1 request_id=%2 "
+                           "elapsed_ms=%3 %4")
+                .arg(operation)
+                .arg(id)
+                .arg(elapsed)
+                .arg(linkSnapshot()));
     emit requestTimedOut(id, operation);
   }
 }
@@ -392,8 +514,12 @@ void ControlClient::clearPendingRequests(const QString& reason) {
   if (pendingRequests_.isEmpty()) return;
   const auto pending = pendingRequests_;
   pendingRequests_.clear();
+  if (!pending.isEmpty()) {
+    logLink(QStringLiteral("event=pending_dropped count=%1 reason=\"%2\" %3")
+                .arg(pending.size())
+                .arg(reason, linkSnapshot()));
+  }
   for (auto it = pending.constBegin(); it != pending.constEnd(); ++it) {
-    Q_UNUSED(reason);
     emit requestTimedOut(it.key(), it.value().operation);
   }
 }

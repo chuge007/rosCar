@@ -14,6 +14,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
+#include <exception>
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QQueue>
@@ -385,7 +386,29 @@ void UltrasoundHostService::handleRequest(quint64 sessionId,
   const QString operation =
       request.value(QStringLiteral("operation")).toString();
   const QJsonObject data = request.value(QStringLiteral("data")).toObject();
+  try {
+    dispatchRequest(sessionId, requestId, operation, data);
+  } catch (const std::exception& e) {
+    const QString reason = QString::fromUtf8(e.what());
+    emit logMessage(ownerSessionId_,
+                    QStringLiteral("超声 SDK 异常（operation=%1）：%2")
+                        .arg(operation, reason));
+    respond(sessionId, requestId, false, {},
+            QStringLiteral("sdk_exception"),
+            QStringLiteral("超声 SDK 异常：%1").arg(reason));
+  } catch (...) {
+    emit logMessage(ownerSessionId_,
+                    QStringLiteral("超声 SDK 未知异常（operation=%1）").arg(operation));
+    respond(sessionId, requestId, false, {},
+            QStringLiteral("sdk_exception"),
+            QStringLiteral("超声 SDK 未知异常"));
+  }
+}
 
+void UltrasoundHostService::dispatchRequest(quint64 sessionId,
+                                            quint64 requestId,
+                                            const QString& operation,
+                                            const QJsonObject& data) {
   if (operation == QStringLiteral("ultrasound.parameters.snapshot")) {
     handleParameterSnapshot(sessionId, requestId);
     return;
@@ -643,6 +666,16 @@ void UltrasoundHostService::handleParameterApply(
       }
     }
   }
+  // Write/readback evidence: the operator's cached values are refreshed from
+  // these readbacks, so logging the pair makes "parameter was accepted but not
+  // applied" attributable instead of silent.
+  qInfo().noquote()
+      << "ULTRASOUND_APPLY"
+      << QStringLiteral("writes=%1 readbacks=%2 errors=%3 limit=\"%4\"")
+             .arg(changes.size())
+             .arg(readbacks.size())
+             .arg(errors.size())
+             .arg(limitMessage);
   respond(sessionId, requestId, errors.isEmpty(),
           QJsonObject{{QStringLiteral("readbacks"), readbacks},
                       {QStringLiteral("errors"), errors},

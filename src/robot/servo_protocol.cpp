@@ -60,6 +60,9 @@ CanFrame ServoProtocol::speedCommand(std::uint8_t motorId, double outputSpeedDps
                                                     : 0.0),
                                       static_cast<double>(std::numeric_limits<std::int32_t>::min()),
                                       static_cast<double>(std::numeric_limits<std::int32_t>::max()));
+  // Bytes 4..7 are the whole int32 speed. Never touch data[5] (an earlier
+  // "acceleration tier" write corrupted every speed command) or data[3]: the
+  // integrated build leaves all reserved bytes zero for both motors.
   writeInt32LittleEndian(frame.data, 4, static_cast<std::int32_t>(bounded));
   return frame;
 }

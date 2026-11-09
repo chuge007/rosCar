@@ -44,12 +44,16 @@ class CameraServerClient : public QObject {
 
  private:
   void sendCommand(const QString& command);
-  QImage readFrameFromSharedMemory(int slot);
+  // skipUnchanged=false is used for the server's per-frame FRAME <slot>
+  // notification (always deliver); true is the polling fallback that avoids
+  // re-emitting a frame when no notification arrived.
+  void readSlot(int slot, bool skipUnchanged);
 
   QProcess* serverProcess_ = nullptr;
   QSharedMemory* sharedMemory_[kUsbCameraChannelCount] = {nullptr};
   QString ipcKeyBase_;
   QTimer* pollTimer_ = nullptr;
+  QByteArray outputBuffer_;
 
   quint32 lastFrameSize_[kUsbCameraChannelCount] = {0};
 };

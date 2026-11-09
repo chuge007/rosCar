@@ -103,7 +103,12 @@ bool driveSettingsFromJson(const QJsonObject& json,
     return false;
   }
   *settings = crawling::DriveSettings::load(stored);
-  const QString validation = settings->validationError();
+  // Serial ports belong to the robot host, not to the operator console. The
+  // panel saves with nonPortValidationError(), so decoding with the strict
+  // validationError() here used to reject a perfectly good configuration just
+  // because this PC has no COM8. The host restores its own ports before doing
+  // the strict check (see preserveHostPorts in robot_host_service.cpp).
+  const QString validation = settings->nonPortValidationError();
   if (!validation.isEmpty()) {
     if (error) *error = validation;
     return false;

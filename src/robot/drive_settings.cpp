@@ -259,6 +259,19 @@ QString DriveSettings::validationError() const {
   return {};
 }
 
+QString DriveSettings::nonPortValidationError() const {
+  DriveSettings probe = *this;
+  // Placeholder ports keep the port-dependent branches from firing while
+  // every value the operator can actually edit is still validated.
+  if (probe.wheelCanSerialPort.trimmed().isEmpty())
+    probe.wheelCanSerialPort = QStringLiteral("REMOTE-CAN");
+  if (probe.leftMotorSerialPort.trimmed().isEmpty())
+    probe.leftMotorSerialPort = QStringLiteral("REMOTE-LEFT");
+  if (probe.rightMotorSerialPort.trimmed().isEmpty())
+    probe.rightMotorSerialPort = QStringLiteral("REMOTE-RIGHT");
+  return probe.validationError();
+}
+
 void DriveSettings::save(QSettings& settings) const {
   settings.beginGroup(CRAWLING_TEXT("drive"));
   settings.setValue(CRAWLING_TEXT("settingsSchemaVersion"),

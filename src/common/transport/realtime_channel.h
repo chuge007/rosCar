@@ -61,6 +61,13 @@ class RealtimeClient final : public QObject {
   bool motionActive_ = false;
   int emergencyRepeats_ = 0;
   bool active_ = false;
+  // Operator-side motion-link diagnostics, see LINK.REALTIME in the log.
+  qint64 lastTelemetryMs_ = -1;
+  qint64 lastSetpointLogMs_ = -1;
+  qint64 lastDiagMs_ = -1;
+  quint64 diagTx_ = 0;
+  quint64 diagRxTelemetry_ = 0;
+  quint64 diagTxFailed_ = 0;
 };
 
 class RealtimeServer final : public QObject {

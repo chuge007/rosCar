@@ -1,6 +1,7 @@
 ﻿#include "bulk_channel.h"
 
 #include <QAbstractSocket>
+#include <QNetworkProxy>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -59,6 +60,9 @@ void BulkClient::stop() {
 void BulkClient::connectNow() {
   if (!active_ || socket_->state() != QAbstractSocket::UnconnectedState) return;
   decoder_.reset();
+  // Same reason as ControlClient: never let a system proxy intercept the
+  // direct bulk TCP link to the robot host.
+  socket_->setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
   socket_->connectToHost(host_, port_);
 }
 

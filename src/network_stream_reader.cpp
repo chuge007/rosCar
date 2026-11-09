@@ -5,9 +5,12 @@
 
 #include <QByteArray>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QHostAddress>
+#include <QHostInfo>
 #include <QLibrary>
 #include <QMutex>
 #include <QMutexLocker>
@@ -15,6 +18,8 @@
 #include <QSize>
 #include <QSysInfo>
 #include <QStringList>
+#include <QTcpSocket>
+#include <QUrl>
 
 #include <opencv2/core.hpp>
 #include <opencv2/core/version.hpp>
@@ -33,6 +38,8 @@ namespace {
 
 constexpr int kOpenTimeoutMs = 5000;
 constexpr int kReadTimeoutMs = 3000;
+// Liveness heartbeat period while the decoder keeps producing frames.
+constexpr int kProgressIntervalMs = 1000;
 
 void ensureLowLatencyFfmpegOptions() {
   // Read by OpenCV's FFmpeg backend at open time. Respect a user override.
@@ -305,10 +312,132 @@ void NetworkStreamReader::setFlip(bool horizontal, bool vertical) {
 
 void NetworkStreamReader::releaseFrame() {
   busy_.storeRelease(0);
+  diagReleased_.fetchAndAddRelaxed(1);
+}
+
+void NetworkStreamReader::maybeLogReaderStats(qint64 nowMs) {
+  if (nowMs - lastReaderLogMs_ < 2000) return;
+  const qint64 windowMs = nowMs - lastReaderLogMs_;
+  lastReaderLogMs_ = nowMs;
+  const int released = diagReleased_.fetchAndStoreRelaxed(0);
+  crawling::AppLogger::write(
+      QStringLiteral("CAMERA.READER"),
+      QStringLiteral("event=reader_backpressure slot=%1 window_ms=%2 "
+                     "emitted=%3 released=%4 busy_skips=%5 busy_now=%6")
+          .arg(slot_)
+          .arg(windowMs)
+          .arg(diagEmitted_)
+          .arg(released)
+          .arg(diagBusySkips_)
+          .arg(busy_.loadAcquire()));
+  diagEmitted_ = 0;
+  diagBusySkips_ = 0;
 }
 
 void NetworkStreamReader::requestStop() {
   stop_.storeRelease(1);
+}
+
+void NetworkStreamReader::probeEndpoint(const QString& safeUrl) {
+  const auto report = [this, &safeUrl](const QString& stage, const QString& detail) {
+    const QString text =
+        QStringLiteral("event=rtsp_probe slot=%1 stage=%2 %3 url=\"%4\"")
+            .arg(slot_)
+            .arg(stage, detail, safeUrl);
+    AppLogger::write(QStringLiteral("USB_CAMERA.CONNECTION"), text);
+    emit diagnostic(slot_, text);
+  };
+
+  const QUrl parsed(url_);
+  const QString host = parsed.host();
+  if (host.isEmpty()) {
+    report(QStringLiteral("parse"), QStringLiteral("result=FAILED reason=empty_host"));
+    return;
+  }
+  const int port = parsed.port(554) > 0 ? parsed.port(554) : 554;
+
+  QElapsedTimer timer;
+  timer.start();
+  QHostAddress literal;
+  if (literal.setAddress(host)) {
+    // The camera URLs are IP literals. Resolving them through the system
+    // resolver cost ~9.4 s on the robot host (dead DNS server), which pushed
+    // every open attempt into the 15 s timeout window.
+    report(QStringLiteral("dns"),
+           QStringLiteral("result=SKIP reason=ip_literal addr=%1 elapsed_ms=%2")
+               .arg(literal.toString())
+               .arg(timer.elapsed()));
+  } else {
+    const QHostInfo info = QHostInfo::fromName(host);
+    QStringList addresses;
+    for (const QHostAddress& address : info.addresses())
+      addresses << address.toString();
+    if (info.error() != QHostInfo::NoError || addresses.isEmpty()) {
+      report(QStringLiteral("dns"),
+             QStringLiteral("result=FAILED host=%1 error=\"%2\" elapsed_ms=%3")
+                 .arg(host, info.errorString())
+                 .arg(timer.elapsed()));
+      return;
+    }
+    report(QStringLiteral("dns"),
+           QStringLiteral("result=OK host=%1 addrs=%2 elapsed_ms=%3")
+               .arg(host, addresses.join(QLatin1Char(',')),
+                    QString::number(timer.elapsed())));
+  }
+
+  QTcpSocket socket;
+  timer.restart();
+  socket.connectToHost(host, static_cast<quint16>(port));
+  if (!socket.waitForConnected(3000)) {
+    report(QStringLiteral("tcp"),
+           QStringLiteral("result=FAILED peer=%1:%2 error=\"%3\" elapsed_ms=%4")
+               .arg(host)
+               .arg(port)
+               .arg(socket.errorString())
+               .arg(timer.elapsed()));
+    return;
+  }
+  report(QStringLiteral("tcp"),
+         QStringLiteral("result=OK peer=%1:%2 local=%3 elapsed_ms=%4")
+             .arg(host)
+             .arg(port)
+             .arg(socket.localPort())
+             .arg(timer.elapsed()));
+
+  QString path = parsed.path();
+  if (path.isEmpty()) path = QStringLiteral("/");
+  if (!parsed.query().isEmpty()) path += QLatin1Char('?') + parsed.query();
+  QByteArray request = "DESCRIBE " + path.toUtf8() + " RTSP/1.0\r\n";
+  request += "CSeq: 1\r\n";
+  request += "User-Agent: PA1664Probe\r\n";
+  request += "Accept: application/sdp\r\n";
+  if (!parsed.userName().isEmpty()) {
+    const QByteArray credentials =
+        (parsed.userName() + QLatin1Char(':') + parsed.password()).toUtf8();
+    request += "Authorization: Basic " + credentials.toBase64() + "\r\n";
+  }
+  request += "\r\n";
+
+  timer.restart();
+  socket.write(request);
+  socket.waitForBytesWritten(1000);
+  if (!socket.waitForReadyRead(3000)) {
+    report(QStringLiteral("rtsp"),
+           QStringLiteral("result=NO_REPLY elapsed_ms=%1 error=\"%2\"")
+               .arg(timer.elapsed())
+               .arg(socket.errorString()));
+    socket.abort();
+    return;
+  }
+  const QByteArray reply = socket.readAll();
+  socket.abort();
+  const int lineEnd = reply.indexOf('\r');
+  const QString status = QString::fromUtf8(
+      lineEnd > 0 ? reply.left(lineEnd) : reply.left(80));
+  report(QStringLiteral("rtsp"),
+         QStringLiteral("result=REPLY status=\"%1\" elapsed_ms=%2")
+             .arg(status)
+             .arg(timer.elapsed()));
 }
 
 void NetworkStreamReader::run() {
@@ -317,6 +446,7 @@ void NetworkStreamReader::run() {
   const QString safeUrl = redactStreamUrl(url_);
   QElapsedTimer openTimer;
   openTimer.start();
+  probeEndpoint(safeUrl);
   AppLogger::write(
       QStringLiteral("USB_CAMERA.CONNECTION"),
       QStringLiteral("event=stream_open_attempt slot=%1 url=\"%2\" "
@@ -382,6 +512,13 @@ void NetworkStreamReader::run() {
   quint64 emittedFrames = 0;
   QElapsedTimer streamTimer;
   streamTimer.start();
+  qint64 lastProgressMs = -kProgressIntervalMs;
+  // OpenCV throws cv::Exception from grab()/retrieve() when the RTSP session is
+  // reset (camera drops a client, network hiccup, decoder error). Those calls
+  // used to sit outside any try/catch, so the exception escaped this QThread,
+  // hit std::terminate and aborted the whole robot host ~9-15 s after start —
+  // right when the cameras begin streaming.
+  try {
   while (!stop_.loadAcquire()) {
     // grab() only demuxes/decodes; it keeps the network/decoder buffers empty.
     if (!capture.grab()) {
@@ -401,11 +538,21 @@ void NetworkStreamReader::run() {
     }
     ++grabbedFrames;
 
+    // Report liveness once per second regardless of consumer backpressure.
+    const qint64 elapsedMs = streamTimer.elapsed();
+    if (elapsedMs - lastProgressMs >= kProgressIntervalMs) {
+      lastProgressMs = elapsedMs;
+      emit progress(slot_);
+    }
+    maybeLogReaderStats(QDateTime::currentMSecsSinceEpoch());
+
     // While the consumer is busy, grab() advances the decoder and drops the
     // skipped frame. Keep strict backpressure so stale frames cannot pile up
     // in the UI event queue.
-    if (busy_.loadAcquire())
+    if (busy_.loadAcquire()) {
+      ++diagBusySkips_;
       continue;
+    }
 
     // retrieve() does the colour conversion, so only pay for it on frames we send.
     if (!capture.retrieve(frame) || frame.empty())
@@ -418,7 +565,40 @@ void NetworkStreamReader::run() {
 
     busy_.storeRelease(1);
     ++emittedFrames;
+    ++diagEmitted_;
     emit frameReady(slot_, image);
+  }
+  } catch (const cv::Exception& e) {
+    const QString reason = streamOpenFailureReason(QString::fromUtf8(e.what()));
+    AppLogger::error(
+        QStringLiteral("USB_CAMERA.CONNECTION"),
+        QStringLiteral("event=stream_exception slot=%1 url=\"%2\" "
+                       "grabbed_frames=%3 emitted_frames=%4 reason=\"%5\"")
+            .arg(slot_)
+            .arg(safeUrl)
+            .arg(grabbedFrames)
+            .arg(emittedFrames)
+            .arg(reason));
+    if (!stop_.loadAcquire()) emit failed(slot_, reason);
+  } catch (const std::exception& e) {
+    const QString reason = QString::fromUtf8(e.what());
+    AppLogger::error(
+        QStringLiteral("USB_CAMERA.CONNECTION"),
+        QStringLiteral("event=stream_exception slot=%1 url=\"%2\" kind=std reason=\"%3\"")
+            .arg(slot_)
+            .arg(safeUrl)
+            .arg(reason));
+    if (!stop_.loadAcquire())
+      emit failed(slot_, reason.isEmpty() ? CRAWLING_TEXT("视频流异常中断")
+                                          : reason);
+  } catch (...) {
+    AppLogger::error(
+        QStringLiteral("USB_CAMERA.CONNECTION"),
+        QStringLiteral("event=stream_exception slot=%1 url=\"%2\" kind=unknown")
+            .arg(slot_)
+            .arg(safeUrl));
+    if (!stop_.loadAcquire())
+      emit failed(slot_, CRAWLING_TEXT("视频流异常中断"));
   }
   capture.release();
   AppLogger::write(

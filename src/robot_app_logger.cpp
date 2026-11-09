@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QThread>
 #include <QVector>
 
@@ -330,9 +331,14 @@ class LoggerEngine final {
     QVector<const QueuedLogRecord*> mainRecords;
     QVector<const QueuedLogRecord*> cameraRecords;
     QVector<const QueuedLogRecord*> profileRecords;
+    QHash<QString, QVector<const QueuedLogRecord*>> commRecords;
     for (const QueuedLogRecord& record : records) {
       if (record.channel == LogChannel::Profile) {
         profileRecords.push_back(&record);
+      } else if (record.category.startsWith(QLatin1String("COMM."))) {
+        // Communication/control traces get one file per part and stay out of
+        // the main console log (frame traffic would flood it).
+        commRecords[record.category].push_back(&record);
       } else {
         mainRecords.push_back(&record);
         if (record.cameraCopy)
@@ -345,6 +351,21 @@ class LoggerEngine final {
                  kCameraConnectionRetainedBytes, cameraSequence_);
     writeRecords(profilePath_, profileRecords, kProfileDetectionMaximumBytes,
                  kProfileDetectionRetainedBytes, profileSequence_);
+    for (auto it = commRecords.begin(); it != commRecords.end(); ++it) {
+      CommSink& sink = commSinks_[it.key()];
+      if (sink.path.isEmpty()) {
+        QString name = it.key();
+        name.remove(0, 5);  // strip "COMM."
+        name = name.toLower();
+        for (int i = 0; i < name.size(); ++i) {
+          if (!name[i].isLetterOrNumber()) name[i] = QLatin1Char('_');
+        }
+        sink.path = QDir(QCoreApplication::applicationDirPath())
+                        .filePath(QStringLiteral("logs/comm/%1.log").arg(name));
+      }
+      writeRecords(sink.path, it.value(), kMaximumBytes, kRetainedBytes,
+                   sink.sequence);
+    }
   }
 
   void writeRecords(const QString& path,
@@ -403,6 +424,11 @@ class LoggerEngine final {
   quint64 mainSequence_ = 0;
   quint64 cameraSequence_ = 0;
   quint64 profileSequence_ = 0;
+  struct CommSink {
+    QString path;
+    quint64 sequence = 0;
+  };
+  QHash<QString, CommSink> commSinks_;
 };
 
 LoggerEngine& loggerEngine() {

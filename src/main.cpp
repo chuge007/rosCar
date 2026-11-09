@@ -16,12 +16,15 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QNetworkProxy>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QUrl>
 #include <QSet>
 #include <QTimer>
 #include <cstdio>
+#include <cstdlib>
+#include <exception>
 #include <memory>
 #include <stdexcept>
 
@@ -213,15 +216,66 @@ bool parseRemoteEndpoint(const QString &text, QString *host, quint16 *port)
 struct AppLoggerShutdownGuard {
     ~AppLoggerShutdownGuard() { crawling::AppLogger::shutdown(); }
 };
+
+// Operator-side crash/exit evidence: without this the app can vanish (terminal
+// closed, unhandled exception, Qt fatal) and the log simply stops mid-sentence.
+void installDiagnosticHooks(QApplication *app)
+{
+    qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &context,
+                              const QString &message) {
+        const char *level = "INFO";
+        switch (type) {
+        case QtDebugMsg: level = "DEBUG"; break;
+        case QtInfoMsg: level = "INFO"; break;
+        case QtWarningMsg: level = "WARN"; break;
+        case QtCriticalMsg: level = "ERROR"; break;
+        case QtFatalMsg: level = "FATAL"; break;
+        }
+        const QString line = QStringLiteral("[%1] %2 (%3:%4)")
+                                 .arg(QString::fromLatin1(level), message,
+                                      QString::fromLatin1(context.file ? context.file : ""))
+                                 .arg(context.line);
+        std::fprintf(stderr, "%s\n", line.toUtf8().constData());
+        std::fflush(stderr);
+        crawling::AppLogger::write(QStringLiteral("QT.MESSAGE"), line);
+        if (type == QtFatalMsg) std::abort();
+    });
+    std::set_terminate([] {
+        crawling::AppLogger::write(
+            QStringLiteral("SESSION"),
+            QStringLiteral("event=terminate reason=unhandled_exception"));
+        crawling::AppLogger::shutdown();
+        std::abort();
+    });
+    QObject::connect(app, &QCoreApplication::aboutToQuit, [] {
+        crawling::AppLogger::write(
+            QStringLiteral("SESSION"),
+            QStringLiteral("event=app_quit reason=about_to_quit"));
+    });
+}
 }
 
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     AppLoggerShutdownGuard loggerShutdownGuard;
+    // Windows machines in the field may have a system HTTP proxy configured
+    // (Clash/VPN tools, corporate policy). Qt would then try to tunnel our raw
+    // TCP control link through that proxy and fail with "The proxy type is
+    // invalid for this operation". This application only talks to the robot on
+    // the local network, so never use a proxy.
+    QNetworkProxy::setApplicationProxy(QNetworkProxy(QNetworkProxy::NoProxy));
     QCoreApplication::setOrganizationName("PA1664");
     QCoreApplication::setApplicationName("PA1664Workbench");
     QDir::setCurrent(QCoreApplication::applicationDirPath());
+    installDiagnosticHooks(&app);
+    crawling::AppLogger::write(
+        QStringLiteral("SESSION"),
+        QStringLiteral("event=app_start pid=%1 exe=\"%2\" args=\"%3\" qt=%4")
+            .arg(QCoreApplication::applicationPid())
+            .arg(QCoreApplication::applicationFilePath())
+            .arg(QCoreApplication::arguments().join(QLatin1Char(' ')))
+            .arg(QString::fromLatin1(qVersion())));
     prepareSessionLogs();
     const bool localTestMode = isLocalTestMode(app.arguments());
     const bool localMode = localTestMode || app.arguments().contains("--local");
@@ -424,6 +478,11 @@ int main(int argc, char *argv[])
                          remoteSession,
                          &pa1664::remote::RemoteWorkbenchSession::stop);
         window.showMaximized();
+        crawling::AppLogger::write(
+            QStringLiteral("SESSION"),
+            QStringLiteral("event=remote_start host=%1 port=%2")
+                .arg(remoteHost)
+                .arg(remotePort));
         remoteSession->start(remoteHost, remotePort);
         return app.exec();
     }

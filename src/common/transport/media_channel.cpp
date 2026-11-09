@@ -1,7 +1,9 @@
 #include "media_channel.h"
 
+#include <QAbstractSocket>
 #include <QDateTime>
 #include <QNetworkDatagram>
+#include <QThread>
 #include <QTimer>
 #include <QUdpSocket>
 
@@ -13,8 +15,7 @@ namespace {
 qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
 qint64 nowUs() { return nowMs() * 1000; }
 
-constexpr int kDatagramPayloadBytes =
-    kMaxRealtimeDatagramBytes - kMediaHeaderBytes - kMediaAuthTagBytes;
+constexpr int kDatagramPayloadBytes = kMediaFragmentPayloadBytes;
 
 }  // namespace
 
@@ -37,6 +38,10 @@ void MediaClient::start(const QString& host, quint16 port, quint64 sessionId,
     emit errorOccurred(QStringLiteral("媒体通道会话参数无效"));
     return;
   }
+  socket_->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption,
+                           4 * 1024 * 1024);
+  socket_->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption,
+                           4 * 1024 * 1024);
   if (!socket_->bind(QHostAddress::AnyIPv4, 0)) {
     emit errorOccurred(QStringLiteral("媒体 UDP 绑定失败：%1")
                            .arg(socket_->errorString()));
@@ -88,6 +93,8 @@ void MediaClient::processDatagrams() {
   dropExpiredAssemblies(now);
   while (socket_->hasPendingDatagrams()) {
     const QNetworkDatagram datagram = socket_->receiveDatagram();
+    ++stats_.datagrams;
+    stats_.bytesReceived += static_cast<quint64>(datagram.data().size());
     qint64 senderPort = datagram.senderPort();
     if (senderPort != peerPort_) continue;
     quint64 packetSession = 0;
@@ -144,6 +151,7 @@ void MediaClient::processDatagrams() {
     const quint64 timestampUs = assembly.timestampUs;
     assemblies_.remove(packet.streamId);
     if (message.size() == static_cast<int>(packet.totalBytes)) {
+      ++stats_.messagesCompleted;
       emit messageReceived(packet.streamId, kind, messageId, timestampUs,
                            message);
     }
@@ -154,6 +162,7 @@ void MediaClient::dropExpiredAssemblies(qint64 now) {
   for (auto it = assemblies_.begin(); it != assemblies_.end();) {
     if (it.value().lastFragmentMs > 0 &&
         now - it.value().lastFragmentMs > kMediaAssemblyTimeoutMs) {
+      ++stats_.assemblyTimeouts;
       it = assemblies_.erase(it);
     } else {
       ++it;
@@ -171,6 +180,14 @@ MediaServer::~MediaServer() { stop(); }
 bool MediaServer::start(const QHostAddress& address, quint16 port,
                         QString* error) {
   stop();
+  // A 1080p JPEG is ~70 fragments written back-to-back. The default 64 KB UDP
+  // send buffer overflows with "Unable to send a message" (WSAEWOULDBLOCK),
+  // and the old loop discarded the whole frame on the first failed fragment.
+  // Enlarge both directions before binding so bursts fit in the kernel queue.
+  socket_->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption,
+                           4 * 1024 * 1024);
+  socket_->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption,
+                           4 * 1024 * 1024);
   if (!socket_->bind(address, port)) {
     if (error) *error = socket_->errorString();
     return false;
@@ -210,8 +227,13 @@ void MediaServer::sendMessage(quint64 sessionId, quint16 streamId,
                               MediaStreamKind kind,
                               const QByteArray& payload) {
   auto it = sessions_.find(sessionId);
-  if (it == sessions_.end() || !it.value().peer.valid) return;
+  if (it == sessions_.end() || !it.value().peer.valid) {
+    // No validated operator address yet: nothing can be delivered.
+    ++serverStats_.droppedNoPeer;
+    return;
+  }
   if (payload.size() > kMaxMediaMessageBytes) {
+    ++serverStats_.droppedOversize;
     emit packetRejected(sessionId, QStringLiteral("媒体消息超过上限，已丢弃"));
     return;
   }
@@ -221,6 +243,7 @@ void MediaServer::sendMessage(quint64 sessionId, quint16 streamId,
       std::max<qint64>(1, (payload.size() + kDatagramPayloadBytes - 1) /
                              kDatagramPayloadBytes));
   if (fragmentCount > static_cast<quint32>(kMaxMediaFragments)) {
+    ++serverStats_.droppedOversize;
     emit packetRejected(sessionId, QStringLiteral("媒体消息分片数量超限"));
     return;
   }
@@ -245,15 +268,35 @@ void MediaServer::sendMessage(quint64 sessionId, quint16 streamId,
       emit packetRejected(sessionId, error.detail);
       return;
     }
-    const qint64 written = socket_->writeDatagram(
-        bytes, session.peer.address, session.peer.port);
+    // WSAEWOULDBLOCK is transient under a fragment burst. Retry a few times
+    // with a short yield instead of throwing away the rest of the frame (the
+    // client can never assemble a frame with a missing fragment).
+    qint64 written = -1;
+    for (int attempt = 0; attempt < 4; ++attempt) {
+      written = socket_->writeDatagram(bytes, session.peer.address,
+                                       session.peer.port);
+      if (written == bytes.size()) break;
+      QThread::msleep(1);
+    }
     if (written != bytes.size()) {
-      emit packetRejected(sessionId,
-                          QStringLiteral("媒体数据报发送失败：%1")
-                              .arg(socket_->errorString()));
+      ++serverStats_.sendFailures;
+      const qint64 now = nowMs();
+      // Rate-limited: one warning per 2 s instead of one per failed fragment,
+      // which used to flood robot_host.log on a busy 100 Mbit link.
+      if (now - lastRejectLogMs_ >= 2000) {
+        lastRejectLogMs_ = now;
+        emit packetRejected(
+            sessionId,
+            QStringLiteral("媒体数据报发送失败(累计 %1)：%2")
+                .arg(serverStats_.sendFailures)
+                .arg(socket_->errorString()));
+      }
       return;
     }
+    ++serverStats_.fragmentsSent;
+    serverStats_.bytesSent += static_cast<quint64>(written);
   }
+  ++serverStats_.messagesSent;
 }
 
 void MediaServer::processDatagrams() {

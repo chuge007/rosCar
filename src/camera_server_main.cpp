@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QCommandLineParser>
 #include <QTimer>
+#include <cstdio>
 #include "camera_server.h"
 
 int main(int argc, char* argv[]) {
@@ -25,6 +26,14 @@ int main(int argc, char* argv[]) {
   const QString ipcKey = parser.value(ipcKeyOption);
 
   crawling::CameraServer server(ipcKey);
+  // Push a frame notification so the client does not have to guess whether a
+  // new JPEG is available from its byte length alone (static scenes compress
+  // to the same size and used to be swallowed).
+  QObject::connect(&server, &crawling::CameraServer::frameReady,
+                   [](int slot, const QString&) {
+                     std::printf("FRAME %d\n", slot);
+                     std::fflush(stdout);
+                   });
   if (!server.start()) {
     qCritical() << "Failed to start camera server";
     return 1;

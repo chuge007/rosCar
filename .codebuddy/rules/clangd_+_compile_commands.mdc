@@ -1,0 +1,9 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2026-11-05T09:43:36.837Z
+provider: 
+---
+
+更新exe时要用这个技术clangd + compile_commands
