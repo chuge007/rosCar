@@ -34,6 +34,7 @@ public slots:
                                const crawling::LaserGapDetection &detection,
                                quint32 sourceFrameNumber = 0,
                                qint64 receivedAtEpochMs = 0);
+    bool hasActiveDetection() const { return m_hasDetection; }
     void clear();
     void setViewMode(int mode);
     void setTemplateSelectionEnabled(bool enabled);

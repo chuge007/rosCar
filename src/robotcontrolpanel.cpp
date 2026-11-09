@@ -4449,7 +4449,9 @@ void RobotControlPanel::refreshVisibleUi()
 void RobotControlPanel::setLaserProfilePoints(const QVector<QVector3D> &points)
 {
     m_laserPoints = points;
-    if (m_laserView)
+    // When LaserProfileObservation (detection result) is active, ignore raw
+    // LaserPointCloud to prevent overwriting detection state.
+    if (m_laserView && !m_laserView->hasActiveDetection())
         m_laserView->setPoints(points);
 }
 
