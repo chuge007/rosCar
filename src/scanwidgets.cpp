@@ -53,9 +53,19 @@ QColor waveColor(double normalized)
                             float(normalized > 0.02 ? 0.95 : 1.0));
 }
 
+QRectF depthPlotRect(const QWidget *w, qreal leftMargin, qreal rightMargin)
+{
+    constexpr qreal topMargin = 8.0;
+    constexpr qreal bottomMargin = 32.0;
+    return QRectF(leftMargin, topMargin,
+                  qMax<qreal>(1.0, w->width() - leftMargin - rightMargin),
+                  qMax<qreal>(1.0, w->height() - topMargin - bottomMargin));
+}
+
 QRectF plotRect(const QWidget *w)
 {
-    return QRectF(62, 22, qMax(1, w->width() - 82), qMax(1, w->height() - 68));
+    // A 扫把唯一一套深度尺放在右侧，作为 A 扫与 E/B 扫之间的共用标尺。
+    return depthPlotRect(w, 16.0, 70.0);
 }
 
 constexpr int kCScanViewQuantum = 32;
@@ -97,7 +107,7 @@ struct CScanViewGeometry
 };
 
 CScanViewGeometry cScanViewGeometry(const QRect &widgetRect, int minX, int maxX,
-                                    int minY, int maxY)
+                                    int minY, int maxY, bool compactOverview = false)
 {
     CScanViewGeometry geometry;
     geometry.dataMinX = minX;
@@ -122,7 +132,9 @@ CScanViewGeometry cScanViewGeometry(const QRect &widgetRect, int minX, int maxX,
     if (geometry.viewMaxY <= geometry.viewMinY)
         geometry.viewMaxY = geometry.viewMinY + kCScanViewQuantum;
 
-    const QRect available = widgetRect.adjusted(82, 38, -32, -62);
+    const QRect available = compactOverview
+        ? widgetRect.adjusted(10, 26, -10, -8)
+        : widgetRect.adjusted(82, 38, -32, -62);
     const double spanX = qMax(1, geometry.viewMaxX - geometry.viewMinX);
     const double spanY = qMax(1, geometry.viewMaxY - geometry.viewMinY);
     geometry.target = available;
@@ -370,7 +382,8 @@ CScanRenderConfig makeCScanRenderConfig(const QRect &widgetRect, int minX,
                                         int maxX, int minY, int maxY,
                                         int activeGate, bool enabled,
                                         bool hasCells, double amplitudeScale,
-                                        double thresholdPercent)
+                                        double thresholdPercent,
+                                        bool compactOverview = false)
 {
     CScanRenderConfig config;
     config.valid = enabled && hasCells;
@@ -380,7 +393,8 @@ CScanRenderConfig makeCScanRenderConfig(const QRect &widgetRect, int minX,
     if (!config.valid)
         return config;
     const CScanViewGeometry geometry = cScanViewGeometry(widgetRect, minX, maxX,
-                                                          minY, maxY);
+                                                          minY, maxY,
+                                                          compactOverview);
     config.imageSize = QSize(qMax(1, qRound(geometry.target.width())),
                              qMax(1, qRound(geometry.target.height())));
     config.viewMinX = geometry.viewMinX;
@@ -413,25 +427,26 @@ void AScanWidget::setWaveform(const QVector<qint16> &samples, double scale,
     updateSurfaceTracking();
 
     const QRectF pr = plotRect(this);
-    qreal minY = pr.bottom();
-    qreal maxY = pr.bottom();
+    const qreal baseX = m_bipolar ? pr.center().x() : pr.left();
+    qreal minX = baseX;
+    qreal maxX = baseX;
     for (qint16 sample : m_samples) {
         const double percent = qBound(-1.0, double(sample) / m_scale, 1.0);
-        const qreal y = m_bipolar ? pr.center().y() - percent * pr.height() / 2.0
-                                  : pr.bottom() - qMax(0.0, percent) * pr.height();
-        minY = qMin(minY, y);
-        maxY = qMax(maxY, y);
+        const qreal x = m_bipolar ? pr.center().x() + percent * pr.width() / 2.0
+                                  : pr.left() + qMax(0.0, percent) * pr.width();
+        minX = qMin(minX, x);
+        maxX = qMax(maxX, x);
     }
-    const QRect nextWaveformRect = QRectF(pr.left() - 3.0, minY - 3.0,
-                                          pr.width() + 6.0,
-                                          qMax<qreal>(6.0, maxY - minY + 6.0))
+    const QRect nextWaveformRect = QRectF(minX - 3.0, pr.top() - 3.0,
+                                          qMax<qreal>(6.0, maxX - minX + 6.0),
+                                          pr.height() + 6.0)
                                          .toAlignedRect().intersected(rect());
     if (axisChanged) {
         m_staticBackground = {};
         m_waveformDirtyRect = nextWaveformRect;
         update();
     } else if (m_surfaceEnabled) {
-        // 表面点和跟踪闸门可能每帧横向移动，需要刷新整个绘图区；静态网格仍复用缓存。
+        // 表面点和跟踪闸门可能每帧纵向移动，需要刷新整个绘图区；静态网格仍复用缓存。
         m_waveformDirtyRect = nextWaveformRect;
         update();
     } else {
@@ -464,7 +479,7 @@ void AScanWidget::beginGatePlacement(int gateIndex)
     m_placementMode = PlacementMode::Gate;
     m_placementHasStart = false;
     setCursor(Qt::CrossCursor);
-    emit interactionHint(QStringLiteral("请在 A 扫图上依次点击闸门左、右边界；右键可取消"));
+    emit interactionHint(QStringLiteral("请在 A 扫图上依次点击闸门深度起点、终点；右键可取消"));
     update();
 }
 
@@ -526,10 +541,22 @@ void AScanWidget::setReviewCursor(double range, bool visible)
     update();
 }
 
-double AScanWidget::positionToRange(qreal x) const
+void AScanWidget::setDepthCursor(double depth, bool visible)
+{
+    const double bounded = qBound(qMin(m_rangeStart, m_rangeEnd), depth,
+                                  qMax(m_rangeStart, m_rangeEnd));
+    if (m_depthCursorVisible == visible
+        && qFuzzyCompare(m_depthCursor + 1.0, bounded + 1.0))
+        return;
+    m_depthCursor = bounded;
+    m_depthCursorVisible = visible;
+    update();
+}
+
+double AScanWidget::positionToRange(qreal y) const
 {
     const QRectF pr = plotRect(this);
-    const double ratio = qBound(0.0, (x - pr.left()) / qMax<qreal>(1.0, pr.width()), 1.0);
+    const double ratio = qBound(0.0, (y - pr.top()) / qMax<qreal>(1.0, pr.height()), 1.0);
     return m_rangeStart + ratio * (m_rangeEnd - m_rangeStart);
 }
 
@@ -537,22 +564,22 @@ qreal AScanWidget::rangeToPosition(double value) const
 {
     const QRectF pr = plotRect(this);
     const double span = qMax(0.001, m_rangeEnd - m_rangeStart);
-    return pr.left() + (value - m_rangeStart) / span * pr.width();
+    return pr.top() + (value - m_rangeStart) / span * pr.height();
 }
 
-double AScanWidget::positionToThreshold(qreal y) const
+double AScanWidget::positionToThreshold(qreal x) const
 {
     const QRectF pr = plotRect(this);
-    const qreal base = m_bipolar ? pr.center().y() : pr.bottom();
-    const qreal height = m_bipolar ? pr.height() / 2.0 : pr.height();
-    return qBound(0.0, (base - y) / qMax<qreal>(1.0, height) * 100.0, 100.0);
+    const qreal base = m_bipolar ? pr.center().x() : pr.left();
+    const qreal width = m_bipolar ? pr.width() / 2.0 : pr.width();
+    return qBound(0.0, (x - base) / qMax<qreal>(1.0, width) * 100.0, 100.0);
 }
 
 qreal AScanWidget::thresholdToPosition(double threshold) const
 {
     const QRectF pr = plotRect(this);
-    return m_bipolar ? pr.center().y() - threshold / 100.0 * pr.height() / 2.0
-                     : pr.bottom() - threshold / 100.0 * pr.height();
+    return m_bipolar ? pr.center().x() + threshold / 100.0 * pr.width() / 2.0
+                     : pr.left() + threshold / 100.0 * pr.width();
 }
 
 QVector<double> AScanWidget::displayedGate(int index) const
@@ -631,23 +658,49 @@ void AScanWidget::paintEvent(QPaintEvent *)
         for (int i = 0; i <= 4; ++i) {
             const qreal y = pr.top() + pr.height() * i / 4.0;
             background.drawLine(QPointF(pr.left(), y), QPointF(pr.right(), y));
+            const double value = m_rangeStart
+                                 + (m_rangeEnd - m_rangeStart) * i / 4.0;
             background.setPen(QColor("#52606d"));
-            background.drawText(QRectF(4, y - 10, 52, 20),
-                                Qt::AlignRight | Qt::AlignVCenter,
-                                QString::number(m_bipolar ? 100 - i * 50
-                                                          : 100 - i * 25) + "%");
+            background.drawLine(QPointF(pr.right(), y),
+                                QPointF(pr.right() + 8.0, y));
+            const qreal labelY = qBound<qreal>(0.0, y - 10.0,
+                                                qMax<qreal>(0.0, height() - 20.0));
+            background.drawText(QRectF(pr.right() + 11.0, labelY, 57.0, 20.0),
+                                Qt::AlignLeft | Qt::AlignVCenter,
+                                QString::number(value, 'f', 1) + " mm");
             background.setPen(QColor("#d9e0e7"));
+            if (i < 4) {
+                background.setPen(QColor("#52606d"));
+                for (int minor = 1; minor < 5; ++minor) {
+                    const qreal minorY = y + pr.height() * minor / 20.0;
+                    background.drawLine(QPointF(pr.right(), minorY),
+                                        QPointF(pr.right() + 4.0, minorY));
+                }
+                background.setPen(QColor("#d9e0e7"));
+            }
         }
         for (int i = 0; i <= 4; ++i) {
             const qreal x = pr.left() + pr.width() * i / 4.0;
             background.drawLine(QPointF(x, pr.top()), QPointF(x, pr.bottom()));
-            const double value = m_rangeStart
-                                 + (m_rangeEnd - m_rangeStart) * i / 4.0;
+            const int amplitude = m_bipolar ? -100 + i * 50 : i * 25;
             background.setPen(QColor("#52606d"));
-            background.drawText(QRectF(x - 35, pr.bottom() + 6, 70, 22),
-                                Qt::AlignHCenter,
-                                QString::number(value, 'f', 1) + " mm");
+            background.drawLine(QPointF(x, pr.bottom()),
+                                QPointF(x, pr.bottom() + 7.0));
+            const qreal amplitudeLabelX = qBound<qreal>(0.0, x - 35.0,
+                                                        qMax<qreal>(0.0, width() - 70.0));
+            background.drawText(QRectF(amplitudeLabelX, pr.bottom() + 7, 70, 20),
+                                Qt::AlignHCenter | Qt::AlignTop,
+                                QString::number(amplitude) + "%");
             background.setPen(QColor("#d9e0e7"));
+            if (i < 4) {
+                background.setPen(QColor("#52606d"));
+                for (int minor = 1; minor < 5; ++minor) {
+                    const qreal minorX = x + pr.width() * minor / 20.0;
+                    background.drawLine(QPointF(minorX, pr.bottom()),
+                                        QPointF(minorX, pr.bottom() + 4.0));
+                }
+                background.setPen(QColor("#d9e0e7"));
+            }
         }
         background.setPen(QPen(QColor("#22313f"), 1.2));
         background.drawRect(pr);
@@ -659,36 +712,37 @@ void AScanWidget::paintEvent(QPaintEvent *)
     const double span = qMax(0.001, m_rangeEnd - m_rangeStart);
 
     if (m_surfaceEnabled) {
-        const qreal sx = rangeToPosition(m_surfaceWindowStart);
-        const qreal ex = rangeToPosition(m_surfaceWindowEnd);
-        const QRectF windowRect(QPointF(qMin(sx, ex), pr.top()),
-                                QPointF(qMax(sx, ex), pr.bottom()));
+        const qreal sy = rangeToPosition(m_surfaceWindowStart);
+        const qreal ey = rangeToPosition(m_surfaceWindowEnd);
+        const QRectF windowRect(QPointF(pr.left(), qMin(sy, ey)),
+                                QPointF(pr.right(), qMax(sy, ey)));
         p.fillRect(windowRect.intersected(pr), QColor(3, 169, 244, 25));
         p.setPen(QPen(QColor("#039be5"), 1.4, Qt::DashLine));
-        p.drawLine(QPointF(sx, pr.top()), QPointF(sx, pr.bottom()));
-        p.drawLine(QPointF(ex, pr.top()), QPointF(ex, pr.bottom()));
-        const qreal thresholdY = thresholdToPosition(m_surfaceThreshold);
+        p.drawLine(QPointF(pr.left(), sy), QPointF(pr.right(), sy));
+        p.drawLine(QPointF(pr.left(), ey), QPointF(pr.right(), ey));
+        const qreal thresholdX = thresholdToPosition(m_surfaceThreshold);
         p.setPen(QPen(QColor("#00acc1"), 1.2, Qt::DashDotLine));
-        p.drawLine(QPointF(qMin(sx, ex), thresholdY),
-                   QPointF(qMax(sx, ex), thresholdY));
+        p.drawLine(QPointF(thresholdX, qMin(sy, ey)),
+                   QPointF(thresholdX, qMax(sy, ey)));
         if (m_bipolar) {
-            const qreal negativeThresholdY = pr.center().y()
-                    + m_surfaceThreshold / 100.0 * pr.height() / 2.0;
-            p.drawLine(QPointF(qMin(sx, ex), negativeThresholdY),
-                       QPointF(qMax(sx, ex), negativeThresholdY));
+            const qreal negativeThresholdX = pr.center().x()
+                    - m_surfaceThreshold / 100.0 * pr.width() / 2.0;
+            p.drawLine(QPointF(negativeThresholdX, qMin(sy, ey)),
+                       QPointF(negativeThresholdX, qMax(sy, ey)));
         }
-        p.drawText(QRectF(qMin(sx, ex) + 5, pr.top() + 4, 112, 20),
+        p.drawText(QRectF(pr.left() + 5, qMin(sy, ey) + 4, 112, 20),
                    QStringLiteral("表面搜索区域"));
         if (m_surfaceReferenceValid) {
             p.setPen(QPen(QColor("#1565c0"), 1.3, Qt::DotLine));
-            const qreal x = rangeToPosition(m_surfaceReference);
-            p.drawLine(QPointF(x, pr.top()), QPointF(x, pr.bottom()));
+            const qreal y = rangeToPosition(m_surfaceReference);
+            p.drawLine(QPointF(pr.left(), y), QPointF(pr.right(), y));
         }
         if (m_surfaceCurrentValid) {
             p.setPen(QPen(QColor("#00a884"), 2.2));
-            const qreal x = rangeToPosition(m_surfaceCurrent);
-            p.drawLine(QPointF(x, pr.top()), QPointF(x, pr.bottom()));
-            p.drawText(QRectF(x + 4, pr.top() + 24, 110, 20),
+            const qreal y = rangeToPosition(m_surfaceCurrent);
+            p.drawLine(QPointF(pr.left(), y), QPointF(pr.right(), y));
+            const qreal textY = qBound(pr.top(), y + 3.0, pr.bottom() - 20.0);
+            p.drawText(QRectF(pr.left() + 5, textY, 140, 20),
                        QStringLiteral("表面 %1 mm").arg(m_surfaceCurrent, 0, 'f', 2));
         }
     }
@@ -697,58 +751,74 @@ void AScanWidget::paintEvent(QPaintEvent *)
         const QVector<double> gate = displayedGate(i);
         if (gate.size() < 4 || gate[0] < 0.5)
             continue;
-        const qreal startX = pr.left() + (gate[1] - m_rangeStart) / span * pr.width();
-        const qreal endX = pr.left() + (gate[2] - m_rangeStart) / span * pr.width();
-        const qreal gateY = thresholdToPosition(gate[3]);
+        const qreal startY = pr.top() + (gate[1] - m_rangeStart) / span * pr.height();
+        const qreal endY = pr.top() + (gate[2] - m_rangeStart) / span * pr.height();
+        const qreal gateX = thresholdToPosition(gate[3]);
         const bool active = i == m_activeGate;
         p.setPen(QPen(gateColors[i], active ? 3.0 : 2.0));
-        p.drawLine(QPointF(startX, gateY), QPointF(endX, gateY));
-        p.drawLine(QPointF(startX, gateY - 8), QPointF(startX, gateY + 8));
-        p.drawLine(QPointF(endX, gateY - 8), QPointF(endX, gateY + 8));
+        p.drawLine(QPointF(gateX, startY), QPointF(gateX, endY));
+        p.drawLine(QPointF(gateX - 8, startY), QPointF(gateX + 8, startY));
+        p.drawLine(QPointF(gateX - 8, endY), QPointF(gateX + 8, endY));
         if (active) {
             p.setBrush(Qt::white);
-            p.drawEllipse(QPointF(startX, gateY), 4, 4);
-            p.drawEllipse(QPointF(endX, gateY), 4, 4);
+            p.drawEllipse(QPointF(gateX, startY), 4, 4);
+            p.drawEllipse(QPointF(gateX, endY), 4, 4);
         }
         p.setBrush(Qt::NoBrush);
-        p.drawText(QRectF(qMin(startX, endX) + 4, gateY - 25, 130, 20),
+        const qreal labelX = qBound(pr.left(), gateX + 5.0, pr.right() - 130.0);
+        const qreal labelY = qBound(pr.top(), qMin(startY, endY) + 4.0,
+                                   pr.bottom() - 20.0);
+        p.drawText(QRectF(labelX, labelY, 130, 20),
                    QStringLiteral("Gate %1  %2%").arg(QStringLiteral("ABCI").mid(i, 1))
                        .arg(gate[3], 0, 'f', 1));
     }
 
     if (m_placementMode != PlacementMode::None && m_placementHasStart) {
-        const qreal startX = rangeToPosition(m_placementStart);
-        const qreal currentX = qBound(pr.left(), m_mousePosition.x(), pr.right());
+        const qreal startY = rangeToPosition(m_placementStart);
+        const qreal currentY = qBound(pr.top(), m_mousePosition.y(), pr.bottom());
         p.setPen(QPen(QColor("#1976d2"), 1.5, Qt::DashLine));
-        p.drawLine(QPointF(startX, pr.top()), QPointF(startX, pr.bottom()));
-        p.drawLine(QPointF(currentX, pr.top()), QPointF(currentX, pr.bottom()));
+        p.drawLine(QPointF(pr.left(), startY), QPointF(pr.right(), startY));
+        p.drawLine(QPointF(pr.left(), currentY), QPointF(pr.right(), currentY));
+    }
+
+    if (m_depthCursorVisible) {
+        const qreal y = rangeToPosition(m_depthCursor);
+        p.setPen(QPen(QColor("#00a6c8"), 1.2, Qt::DashLine));
+        p.drawLine(QPointF(pr.left(), y), QPointF(pr.right(), y));
+        const qreal labelY = qBound<qreal>(0.0, y - 10.0,
+                                           qMax<qreal>(0.0, height() - 20.0));
+        const QRectF depthLabel(pr.right() + 7.0, labelY, 62.0, 20.0);
+        p.fillRect(depthLabel, QColor("#00a6c8"));
+        p.setPen(Qt::white);
+        p.drawText(depthLabel, Qt::AlignCenter,
+                   QString::number(m_depthCursor, 'f', 2) + " mm");
     }
 
     if (m_samples.size() < 2)
         return;
     QPainterPath path;
     auto appendSample = [&](int i, bool move) {
-        const qreal x = pr.left() + pr.width() * i / qMax(1, m_samples.size() - 1);
+        const qreal y = pr.top() + pr.height() * i / qMax(1, m_samples.size() - 1);
         const double percent = qBound(-1.0, double(m_samples[i]) / m_scale, 1.0);
-        const qreal y = m_bipolar ? pr.center().y() - percent * pr.height() / 2.0
-                                  : pr.bottom() - qMax(0.0, percent) * pr.height();
+        const qreal x = m_bipolar ? pr.center().x() + percent * pr.width() / 2.0
+                                  : pr.left() + qMax(0.0, percent) * pr.width();
         if (move) path.moveTo(x, y); else path.lineTo(x, y);
     };
 
     const int sampleCount = m_samples.size();
-    const int columns = qMax(1, int(pr.width()));
-    if (sampleCount <= columns * 2) {
+    const int rows = qMax(1, int(pr.height()));
+    if (sampleCount <= rows * 2) {
         for (int i = 0; i < sampleCount; ++i)
             appendSample(i, i == 0);
     } else {
-        // Min/max envelope per physical screen column.  Simple stride
+        // Min/max envelope per physical screen row.  Simple stride
         // decimation can erase a one-sample ultrasonic echo; preserving both
         // extrema keeps narrow positive and RF-negative peaks visible while
-        // bounding the painted path to roughly twice the viewport width.
+        // bounding the painted path to roughly twice the viewport height.
         bool firstPoint = true;
-        for (int column = 0; column < columns; ++column) {
-            const int begin = int((qint64(column) * sampleCount) / columns);
-            const int end = int((qint64(column + 1) * sampleCount) / columns);
+        for (int row = 0; row < rows; ++row) {
+            const int begin = int((qint64(row) * sampleCount) / rows);
+            const int end = int((qint64(row + 1) * sampleCount) / rows);
             if (end <= begin)
                 continue;
             int minIndex = begin;
@@ -770,9 +840,9 @@ void AScanWidget::paintEvent(QPaintEvent *)
     p.setPen(QPen(QColor("#0788d1"), 1.4));
     p.drawPath(path);
     if (m_reviewCursorVisible) {
-        const qreal x = rangeToPosition(m_reviewCursor);
+        const qreal y = rangeToPosition(m_reviewCursor);
         p.setPen(QPen(QColor("#ff9800"), 1.6, Qt::DashLine));
-        p.drawLine(QPointF(x, pr.top()), QPointF(x, pr.bottom()));
+        p.drawLine(QPointF(pr.left(), y), QPointF(pr.right(), y));
     }
 }
 
@@ -792,7 +862,7 @@ void AScanWidget::mousePressEvent(QMouseEvent *event)
         return;
 
     m_mousePosition = event->position();
-    const double value = positionToRange(event->position().x());
+    const double value = positionToRange(event->position().y());
     if (m_placementMode != PlacementMode::None) {
         if (!m_placementHasStart) {
             m_placementStart = value;
@@ -816,17 +886,17 @@ void AScanWidget::mousePressEvent(QMouseEvent *event)
         const QVector<double> gate = displayedGate(i);
         if (gate.size() < 4 || gate[0] < 0.5)
             continue;
-        const qreal sx = rangeToPosition(gate[1]);
-        const qreal ex = rangeToPosition(gate[2]);
-        const qreal gy = thresholdToPosition(gate[3]);
+        const qreal sy = rangeToPosition(gate[1]);
+        const qreal ey = rangeToPosition(gate[2]);
+        const qreal gx = thresholdToPosition(gate[3]);
         DragPart part = DragPart::None;
-        if (qAbs(event->position().x() - sx) <= hit && qAbs(event->position().y() - gy) <= 16)
+        if (qAbs(event->position().y() - sy) <= hit && qAbs(event->position().x() - gx) <= 16)
             part = DragPart::GateStart;
-        else if (qAbs(event->position().x() - ex) <= hit && qAbs(event->position().y() - gy) <= 16)
+        else if (qAbs(event->position().y() - ey) <= hit && qAbs(event->position().x() - gx) <= 16)
             part = DragPart::GateEnd;
-        else if (event->position().x() >= qMin(sx, ex) - hit
-                 && event->position().x() <= qMax(sx, ex) + hit
-                 && qAbs(event->position().y() - gy) <= hit)
+        else if (event->position().y() >= qMin(sy, ey) - hit
+                 && event->position().y() <= qMax(sy, ey) + hit
+                 && qAbs(event->position().x() - gx) <= hit)
             part = (event->modifiers() & Qt::ShiftModifier) ? DragPart::GateBody
                                                             : DragPart::GateThreshold;
         if (part != DragPart::None) {
@@ -846,6 +916,11 @@ void AScanWidget::mousePressEvent(QMouseEvent *event)
 void AScanWidget::mouseMoveEvent(QMouseEvent *event)
 {
     m_mousePosition = event->position();
+    const QRectF pr = plotRect(this);
+    if (pr.contains(event->position()))
+        emit depthHovered(positionToRange(event->position().y()), true);
+    else
+        emit depthHovered(0.0, false);
     if (m_placementMode != PlacementMode::None) {
         update();
         return;
@@ -856,9 +931,9 @@ void AScanWidget::mouseMoveEvent(QMouseEvent *event)
     }
     if (m_dragGate < 0 || m_dragGate >= m_gates.size())
         return;
-    double value = positionToRange(event->position().x());
+    double value = positionToRange(event->position().y());
     if (m_dragPart == DragPart::GateThreshold) {
-        const double threshold = positionToThreshold(event->position().y());
+        const double threshold = positionToThreshold(event->position().x());
         m_gates[m_dragGate][3] = threshold;
         emit gateThresholdEdited(m_dragGate, threshold);
     } else {
@@ -903,6 +978,7 @@ void AScanWidget::mouseReleaseEvent(QMouseEvent *)
 
 void AScanWidget::leaveEvent(QEvent *event)
 {
+    emit depthHovered(0.0, false);
     if (m_placementMode == PlacementMode::None && m_dragPart == DragPart::None)
         unsetCursor();
     QWidget::leaveEvent(event);
@@ -915,17 +991,17 @@ void AScanWidget::updateHoverCursor(const QPointF &position)
         const QVector<double> gate = displayedGate(i);
         if (gate.size() < 4 || gate[0] < 0.5)
             continue;
-        const qreal sx = rangeToPosition(gate[1]);
-        const qreal ex = rangeToPosition(gate[2]);
-        const qreal gy = thresholdToPosition(gate[3]);
-        if ((qAbs(position.x() - sx) <= hit || qAbs(position.x() - ex) <= hit)
-            && qAbs(position.y() - gy) <= 16) {
-            setCursor(Qt::SizeHorCursor);
+        const qreal sy = rangeToPosition(gate[1]);
+        const qreal ey = rangeToPosition(gate[2]);
+        const qreal gx = thresholdToPosition(gate[3]);
+        if ((qAbs(position.y() - sy) <= hit || qAbs(position.y() - ey) <= hit)
+            && qAbs(position.x() - gx) <= 16) {
+            setCursor(Qt::SizeVerCursor);
             return;
         }
-        if (position.x() >= qMin(sx, ex) - hit && position.x() <= qMax(sx, ex) + hit
-            && qAbs(position.y() - gy) <= hit) {
-            setCursor(Qt::SizeVerCursor);
+        if (position.y() >= qMin(sy, ey) - hit && position.y() <= qMax(sy, ey) + hit
+            && qAbs(position.x() - gx) <= hit) {
+            setCursor(Qt::SizeHorCursor);
             return;
         }
     }
@@ -935,12 +1011,17 @@ void AScanWidget::updateHoverCursor(const QPointF &position)
 EScanWidget::EScanWidget(QWidget *parent) : QWidget(parent)
 {
     setMinimumSize(480, 300);
+    setAttribute(Qt::WA_OpaquePaintEvent);
+    setMouseTracking(true);
 }
 
 void EScanWidget::setFrame(const DecodedFrame &frame, double scale)
 {
     if (!frame.eScanImage.isNull()) {
         m_image = frame.eScanImage;
+        if (m_image.format() != QImage::Format_Indexed8)
+            m_image = m_image.convertToFormat(QImage::Format_Indexed8);
+        rebuildColorTable();
         update();
         return;
     }
@@ -948,16 +1029,16 @@ void EScanWidget::setFrame(const DecodedFrame &frame, double scale)
         return;
     const int beams = frame.beams.size();
     const int points = frame.beams.first().size();
-    QImage image(beams, points, QImage::Format_RGB32);
+    QImage image(beams, points, QImage::Format_Indexed8);
     for (int y = 0; y < points; ++y) {
-        auto *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+        uchar *line = image.scanLine(y);
         for (int x = 0; x < beams; ++x) {
             const double n = qAbs(double(frame.beams[x][y])) / qMax(1.0, scale);
-            // E 扫：0 信号显示白色，不是 C 扫热力图的深蓝。
-            line[x] = waveColor(n).rgb();
+            line[x] = uchar(qBound(0, qRound(n * 255.0), 255));
         }
     }
     m_image = image;
+    rebuildColorTable();
     update();
 }
 
@@ -972,28 +1053,117 @@ void EScanWidget::setImagingGate(bool enabled, double start, double end,
     update();
 }
 
+void EScanWidget::setPaletteMode(int mode)
+{
+    m_paletteMode = qBound(int(HeatPalette), mode, int(RfPalette));
+    rebuildColorTable();
+    update();
+}
+
+void EScanWidget::setDepthCursor(double depth, bool visible)
+{
+    const double bounded = qBound(qMin(m_rangeStart, m_rangeEnd), depth,
+                                  qMax(m_rangeStart, m_rangeEnd));
+    if (m_depthCursorVisible == visible
+        && qFuzzyCompare(m_depthCursor + 1.0, bounded + 1.0))
+        return;
+    m_depthCursor = bounded;
+    m_depthCursorVisible = visible;
+    update();
+}
+
+QRectF EScanWidget::imageTargetRect() const
+{
+    return depthPlotRect(this, 8.0, 16.0);
+}
+
+void EScanWidget::rebuildColorTable()
+{
+    if (m_image.isNull() || m_image.format() != QImage::Format_Indexed8)
+        return;
+    QVector<QRgb> palette(256);
+    for (int i = 0; i < palette.size(); ++i) {
+        if (m_paletteMode == HeatPalette)
+            palette[i] = waveColor(double(i) / 255.0).rgb();
+        else
+            palette[i] = QColor(i, i, i).rgb();
+    }
+    m_image.setColorTable(palette);
+}
+
 void EScanWidget::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
     p.fillRect(rect(), Qt::white);
-    if (m_image.isNull()) {
-        p.setPen(QColor("#667788"));
-        p.drawText(rect(), Qt::AlignCenter, QStringLiteral("等待 E 扫数据"));
-        return;
-    }
-    if (!m_gateEnabled) {
-        p.setPen(QColor("#b42318"));
-        p.drawText(rect(), Qt::AlignCenter, QStringLiteral("当前成像闸门未启用"));
-        return;
-    }
+    const QRectF target = imageTargetRect();
     const double span = qMax(0.001, m_rangeEnd - m_rangeStart);
-    const int top = qBound(0, int((m_gateStart - m_rangeStart) / span * m_image.height()),
-                           qMax(0, m_image.height() - 1));
-    const int bottom = qBound(top + 1,
-                              int(qCeil((m_gateEnd - m_rangeStart) / span * m_image.height())),
-                              m_image.height());
-    p.drawImage(rect().adjusted(40, 20, -20, -40), m_image,
-                QRect(0, top, m_image.width(), qMax(1, bottom - top)));
+    if (!m_image.isNull() && m_gateEnabled) {
+        const int top = qBound(0, int((m_gateStart - m_rangeStart) / span
+                                     * m_image.height()),
+                               qMax(0, m_image.height() - 1));
+        const int bottom = qBound(top + 1,
+                                  int(qCeil((m_gateEnd - m_rangeStart) / span
+                                            * m_image.height())),
+                                  m_image.height());
+        p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        p.drawImage(target, m_image,
+                    QRect(0, top, m_image.width(), qMax(1, bottom - top)));
+    }
+
+    const int beamCount = m_image.isNull() ? 0 : m_image.width();
+    for (int i = 0; i <= 4; ++i) {
+        const qreal x = target.left() + target.width() * i / 4.0;
+        p.setPen(QColor("#52606d"));
+        p.drawLine(QPointF(x, target.bottom()), QPointF(x, target.bottom() + 7.0));
+        if (beamCount > 0) {
+            const int beam = 1 + qRound((beamCount - 1) * i / 4.0);
+            const qreal beamLabelX = qBound<qreal>(0.0, x - 32.0,
+                                                   qMax<qreal>(0.0, width() - 64.0));
+            p.drawText(QRectF(beamLabelX, target.bottom() + 7.0, 64.0, 20.0),
+                       Qt::AlignHCenter | Qt::AlignTop, QString::number(beam));
+        }
+        if (i < 4) {
+            for (int minor = 1; minor < 5; ++minor) {
+                const qreal minorX = x + target.width() * minor / 20.0;
+                p.drawLine(QPointF(minorX, target.bottom()),
+                           QPointF(minorX, target.bottom() + 4.0));
+            }
+        }
+    }
+    p.setPen(QPen(QColor("#22313f"), 1.2));
+    p.drawRect(target);
+
+    if (m_image.isNull() || !m_gateEnabled) {
+        p.setPen(m_gateEnabled ? QColor("#667788") : QColor("#b42318"));
+        p.drawText(target, Qt::AlignCenter,
+                   m_gateEnabled ? QStringLiteral("等待 E 扫数据")
+                                 : QStringLiteral("当前成像范围未启用"));
+    }
+    if (m_depthCursorVisible) {
+        const qreal y = target.top() + (m_depthCursor - m_rangeStart) / span
+                                       * target.height();
+        p.setPen(QPen(QColor("#00a6c8"), 1.2, Qt::DashLine));
+        p.drawLine(QPointF(target.left(), y), QPointF(target.right(), y));
+    }
+}
+
+void EScanWidget::mouseMoveEvent(QMouseEvent *event)
+{
+    const QRectF target = imageTargetRect();
+    if (target.contains(event->position())) {
+        const double ratio = qBound(0.0, (event->position().y() - target.top())
+                                          / qMax<qreal>(1.0, target.height()), 1.0);
+        emit depthHovered(m_rangeStart + ratio * (m_rangeEnd - m_rangeStart), true);
+    } else {
+        emit depthHovered(0.0, false);
+    }
+    QWidget::mouseMoveEvent(event);
+}
+
+void EScanWidget::leaveEvent(QEvent *event)
+{
+    emit depthHovered(0.0, false);
+    QWidget::leaveEvent(event);
 }
 
 BScanWidget::BScanWidget(QWidget *parent) : QWidget(parent)
@@ -1112,10 +1282,44 @@ void BScanWidget::setInterpolateMissing(bool enabled)
     m_interpolateMissing = enabled;
 }
 
+void BScanWidget::setDepthCursor(double depth, bool visible)
+{
+    const double bounded = qBound(qMin(m_rangeStart, m_rangeEnd), depth,
+                                  qMax(m_rangeStart, m_rangeEnd));
+    if (m_depthCursorVisible == visible
+        && qFuzzyCompare(m_depthCursor + 1.0, bounded + 1.0))
+        return;
+    m_depthCursor = bounded;
+    m_depthCursorVisible = visible;
+    update();
+}
+
+void BScanWidget::showEncoderCell(int encoderCellA)
+{
+    const qint64 signedColumn = qint64(encoderCellA);
+    const quint64 distanceColumn = signedColumn >= 0
+        ? quint64(signedColumn)
+        : quint64(-(signedColumn + 1)) + 1;
+    if (distanceColumn >= quint64(m_usedColumns)
+        || distanceColumn > quint64(std::numeric_limits<int>::max()))
+        return;
+    const QRect source = visibleSourceRect();
+    if (source.isEmpty())
+        return;
+    const int column = int(distanceColumn);
+    const int maximumLeft = qMax(0, m_usedColumns - source.width());
+    m_viewLeft = qBound(0, column - source.width() / 2, maximumLeft);
+    m_followLatest = false;
+    m_focusColumn = column;
+    update();
+}
+
 void BScanWidget::resetView()
 {
     m_zoom = 1.0;
-    m_viewCenter = 0.5;
+    m_viewLeft = 0;
+    m_followLatest = true;
+    m_focusColumn = -1;
     update();
 }
 
@@ -1461,7 +1665,8 @@ void BScanWidget::rebuildColorTable()
     QVector<QRgb> palette(256);
     for (int i = 0; i < 256; ++i) {
         if (m_paletteMode == GrayscalePalette) {
-            const int gray = 255 - i;
+            // 灰度：幅值越低越黑、越高越白（索引 0=空/低幅值，255=高幅值）。
+            const int gray = i;
             palette[i] = QColor(gray, gray, gray).rgb();
         } else if (m_paletteMode == RfPalette) {
             const double signedValue = (i - 127.5) / 127.5;
@@ -1676,17 +1881,22 @@ bool BScanWidget::loadFrom(QDataStream &in)
 
 QRect BScanWidget::imageTargetRect() const
 {
-    return rect().adjusted(72, 40, -82, -58);
+    return depthPlotRect(this, 8.0, 56.0).toAlignedRect();
 }
 
 QRect BScanWidget::visibleSourceRect() const
 {
     if (m_image.isNull())
         return {};
-    const int total = qMax(2, m_usedColumns);
-    const int visible = qBound(2, qCeil(total / m_zoom), total);
-    const int left = qBound(0, qRound(m_viewCenter * total - visible / 2.0),
-                            qMax(0, total - visible));
+    // At the default zoom one acquired B-scan column maps to one logical
+    // screen pixel. Once the viewport is full, follow the newest column rather
+    // than squeezing the complete path into the same width.
+    const int viewportColumns = qBound(2, imageTargetRect().width(), m_image.width());
+    const int visible = qBound(2, qCeil(viewportColumns / m_zoom),
+                               m_image.width());
+    const int maximumLeft = qMax(0, m_usedColumns - visible);
+    const int left = m_followLatest ? maximumLeft
+                                    : qBound(0, m_viewLeft, maximumLeft);
     const double rangeSpan = qMax(0.001, m_rangeEnd - m_rangeStart);
     const int top = qBound(0, int((m_gateStart - m_rangeStart) / rangeSpan
                                   * m_image.height()), m_image.height() - 1);
@@ -1700,18 +1910,106 @@ void BScanWidget::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
     p.fillRect(rect(), Qt::white);
+    const QRect target = imageTargetRect();
+    const auto drawRulerFrame = [&](const QRect &source, bool showPathValues) {
+        const int direction = m_direction == 0 ? 1 : m_direction;
+        for (int i = 0; i <= 4; ++i) {
+            const qreal x = target.left() + target.width() * i / 4.0;
+            p.setPen(QColor("#52606d"));
+            p.drawLine(QPointF(x, target.bottom()),
+                       QPointF(x, target.bottom() + 7.0));
+            if (showPathValues) {
+                const qint64 logical = source.left()
+                    + qint64(source.width() - 1) * i / 4;
+                const double mm = direction
+                    * double(logical * qint64(m_encoderPrecision)) * m_mmPerCount;
+                const qreal pathLabelX = qBound<qreal>(0.0, x - 55.0,
+                                                       qMax<qreal>(0.0, width() - 110.0));
+                p.drawText(QRectF(pathLabelX, target.bottom() + 7.0, 110.0, 20.0),
+                           Qt::AlignHCenter | Qt::AlignTop,
+                           QString::number(mm, 'f', 1));
+            }
+            if (i < 4) {
+                for (int minor = 1; minor < 5; ++minor) {
+                    const qreal minorX = x + target.width() * minor / 20.0;
+                    p.drawLine(QPointF(minorX, target.bottom()),
+                               QPointF(minorX, target.bottom() + 4.0));
+                }
+            }
+        }
+        p.setPen(QPen(QColor("#22313f"), 1.2));
+        p.drawRect(target);
+    };
+    const auto paletteColor = [this](int index) {
+        index = qBound(0, index, 255);
+        if (!m_image.isNull() && m_image.colorCount() > index)
+            return QColor::fromRgb(m_image.color(index));
+        if (m_paletteMode == GrayscalePalette)
+            return QColor(index, index, index);
+        if (m_paletteMode == RfPalette) {
+            const double signedValue = (index - 127.5) / 127.5;
+            const double magnitude = qAbs(signedValue);
+            return signedValue < 0.0
+                ? QColor::fromRgbF(1.0 - magnitude, 1.0 - magnitude, 1.0)
+                : QColor::fromRgbF(1.0, 1.0 - magnitude, 1.0 - magnitude);
+        }
+        return waveColor(double(index) / 255.0);
+    };
+    const auto drawColorBar = [&] {
+        const QRect colorBar(target.right() + 10, target.top(), 10, target.height());
+        for (int y = colorBar.top(); y <= colorBar.bottom(); ++y) {
+            const int index = qBound(0, qRound((1.0 - double(y - colorBar.top())
+                                               / qMax(1, colorBar.height())) * 255.0),
+                                     255);
+            p.setPen(paletteColor(index));
+            p.drawLine(colorBar.left(), y, colorBar.right(), y);
+        }
+        p.setPen(QColor("#52606d"));
+        p.drawRect(colorBar);
+        const double scaleMaximum = (m_scaleMode == DynamicScale
+                                     ? m_dynamicMaximum : 1.0) * 100.0;
+        p.drawText(QRect(colorBar.right() + 2, colorBar.top() - 6, 30, 18),
+                   Qt::AlignLeft | Qt::AlignVCenter,
+                   QString::number(scaleMaximum, 'f', 0) + "%");
+        p.drawText(QRect(colorBar.right() + 2, colorBar.bottom() - 10, 30, 18),
+                   Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("0%"));
+    };
+    const auto drawHoverDepth = [&] {
+        if (!m_hovering || !target.contains(m_mousePosition.toPoint()))
+            return;
+        const double ratio = qBound(0.0, (m_mousePosition.y() - target.top())
+                                          / qMax(1, target.height()), 1.0);
+        const double depth = m_gateStart + ratio * (m_gateEnd - m_gateStart);
+        p.setPen(QPen(QColor("#00a6c8"), 1.2, Qt::DashLine));
+        p.drawLine(QPointF(target.left(), m_mousePosition.y()),
+                   QPointF(target.right(), m_mousePosition.y()));
+        const qreal labelX = qBound<qreal>(target.left(), m_mousePosition.x() + 10.0,
+                                           qMax<qreal>(target.left(), target.right() - 104.0));
+        const qreal labelY = qBound<qreal>(target.top(), m_mousePosition.y() - 25.0,
+                                           qMax<qreal>(target.top(), target.bottom() - 22.0));
+        const QRectF labelRect(labelX, labelY, 104.0, 22.0);
+        p.fillRect(labelRect, QColor(0, 166, 200, 225));
+        p.setPen(Qt::white);
+        p.drawText(labelRect, Qt::AlignCenter,
+                   QStringLiteral("深度 %1 mm").arg(depth, 0, 'f', 2));
+    };
     if (m_image.isNull() || m_usedColumns <= 0) {
+        drawRulerFrame({}, false);
+        drawColorBar();
         p.setPen(QColor("#667788"));
-        p.drawText(rect(), Qt::AlignCenter,
+        p.drawText(target, Qt::AlignCenter,
                    QStringLiteral("启动 B 扫后，转动编码器 A 开始成像"));
+        drawHoverDepth();
         return;
     }
     if (!m_gateEnabled) {
+        drawRulerFrame({}, false);
+        drawColorBar();
         p.setPen(QColor("#b42318"));
-        p.drawText(rect(), Qt::AlignCenter, QStringLiteral("当前成像闸门未启用"));
+        p.drawText(target, Qt::AlignCenter, QStringLiteral("当前成像闸门未启用"));
+        drawHoverDepth();
         return;
     }
-    const QRect target = imageTargetRect();
     const QRect source = visibleSourceRect();
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
     p.drawImage(target, m_image, source);
@@ -1730,65 +2028,30 @@ void BScanWidget::paintEvent(QPaintEvent *)
                        ? QColor(255, 193, 7, 38) : QColor(95, 105, 115, 85));
     }
 
-    p.setPen(QPen(QColor("#22313f"), 1.2));
-    p.drawRect(target);
-    p.setPen(QColor("#52606d"));
-    const int direction = m_direction == 0 ? 1 : m_direction;
-    for (int i = 0; i <= 4; ++i) {
-        const qreal x = target.left() + target.width() * i / 4.0;
-        const qint64 logical = source.left() + qint64(source.width() - 1) * i / 4;
-        const double mm = direction * double(logical * qint64(m_encoderPrecision))
-                          * m_mmPerCount;
-        p.drawLine(QPointF(x, target.bottom()), QPointF(x, target.bottom() + 5));
-        p.drawText(QRectF(x - 55, target.bottom() + 7, 110, 20),
-                   Qt::AlignHCenter | Qt::AlignTop, QString::number(mm, 'f', 1));
-        const qreal y = target.top() + target.height() * i / 4.0;
-        const double depth = m_gateStart + (m_gateEnd - m_gateStart) * i / 4.0;
-        p.drawLine(QPointF(target.left() - 5, y), QPointF(target.left(), y));
-        p.drawText(QRectF(2, y - 10, 64, 20), Qt::AlignRight | Qt::AlignVCenter,
-                   QString::number(depth, 'f', 1));
+    if (m_focusColumn >= source.left() && m_focusColumn <= source.right()) {
+        const qreal focusX = target.left()
+            + (m_focusColumn - source.left() + 0.5)
+                  * target.width() / qMax(1.0, double(source.width()));
+        p.setPen(QPen(QColor("#ff9800"), 2.0));
+        p.drawLine(QPointF(focusX, target.top()),
+                   QPointF(focusX, target.bottom()));
     }
 
-    const QRect colorBar(target.right() + 18, target.top(), 16, target.height());
-    for (int y = colorBar.top(); y <= colorBar.bottom(); ++y) {
-        const int index = qBound(0, qRound((1.0 - double(y - colorBar.top())
-                                           / qMax(1, colorBar.height())) * 255.0), 255);
-        p.setPen(QColor::fromRgb(m_image.color(index)));
-        p.drawLine(colorBar.left(), y, colorBar.right(), y);
+    if (m_depthCursorVisible) {
+        const double span = qMax(0.001, m_gateEnd - m_gateStart);
+        const qreal y = target.top() + (m_depthCursor - m_gateStart) / span
+                                      * target.height();
+        p.setPen(QPen(QColor("#00a6c8"), 1.2, Qt::DashLine));
+        p.drawLine(QPointF(target.left(), y), QPointF(target.right(), y));
     }
-    p.setPen(QColor("#52606d"));
-    p.drawRect(colorBar);
-    const double scaleMaximum = (m_scaleMode == DynamicScale
-                                 ? m_dynamicMaximum : 1.0) * 100.0;
-    p.drawText(QRect(colorBar.right() + 3, colorBar.top() - 6, 42, 18),
-               Qt::AlignLeft | Qt::AlignVCenter,
-               QString::number(scaleMaximum, 'f', 0) + "%");
-    p.drawText(QRect(colorBar.right() + 3, colorBar.bottom() - 10, 42, 18),
-               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("0%"));
 
-    const int covered = m_acquiredColumns + m_interpolatedColumns;
-    const double coverage = 100.0 * covered / qMax(1, m_usedColumns);
-    const QString alignment = m_surfaceEnabled && m_surfaceAlignGate
-        ? QStringLiteral(" · 表面对齐") : QString();
-    p.drawText(QRectF(target.left(), 4, target.width(), 28),
-               Qt::AlignHCenter | Qt::AlignVCenter,
-               QStringLiteral("%1%2　有效列 %3/%4（%5%）　漏列 %6　最大跨格 %7")
-                   .arg(m_viewMode == ProfileView ? QStringLiteral("轮廓 B 扫")
-                                                   : QStringLiteral("幅值 B 扫"))
-                   .arg(alignment).arg(covered).arg(m_usedColumns)
-                   .arg(coverage, 0, 'f', 1).arg(qMax(0, m_usedColumns - covered))
-                   .arg(m_largestGap));
-    p.drawText(QRectF(2, target.top() - 4, 66, 20),
-               Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("深度"));
-    p.drawText(QRectF(target.left(), target.bottom() + 30, target.width(), 20),
-               Qt::AlignHCenter | Qt::AlignVCenter, QStringLiteral("路径（mm）"));
+    drawRulerFrame(source, true);
+    drawColorBar();
 
     if (m_hovering && target.contains(m_mousePosition.toPoint())) {
         p.setPen(QPen(QColor(25, 118, 210, 190), 1));
         p.drawLine(QPointF(m_mousePosition.x(), target.top()),
                    QPointF(m_mousePosition.x(), target.bottom()));
-        p.drawLine(QPointF(target.left(), m_mousePosition.y()),
-                   QPointF(target.right(), m_mousePosition.y()));
         const double xr = qBound(0.0, (m_mousePosition.x() - target.left())
                                       / qMax(1, target.width()), 1.0);
         const double yr = qBound(0.0, (m_mousePosition.y() - target.top())
@@ -1845,12 +2108,21 @@ void BScanWidget::mouseMoveEvent(QMouseEvent *event)
 {
     m_mousePosition = event->position();
     m_hovering = imageTargetRect().contains(event->position().toPoint());
+    if (m_hovering) {
+        const QRect target = imageTargetRect();
+        const double ratio = qBound(0.0, (event->position().y() - target.top())
+                                          / qMax(1, target.height()), 1.0);
+        emit depthHovered(m_gateStart + ratio * (m_gateEnd - m_gateStart), true);
+    } else {
+        emit depthHovered(0.0, false);
+    }
     update();
 }
 
 void BScanWidget::leaveEvent(QEvent *event)
 {
     m_hovering = false;
+    emit depthHovered(0.0, false);
     update();
     QWidget::leaveEvent(event);
 }
@@ -1861,24 +2133,36 @@ void BScanWidget::wheelEvent(QWheelEvent *event)
         QWidget::wheelEvent(event);
         return;
     }
+    const QRect before = visibleSourceRect();
+    if (before.isEmpty()) {
+        QWidget::wheelEvent(event);
+        return;
+    }
     if (event->modifiers() & Qt::ShiftModifier) {
-        const double step = 0.08 / m_zoom;
-        m_viewCenter = qBound(0.0, m_viewCenter
-            + (event->angleDelta().y() > 0 ? -step : step), 1.0);
+        const int maximumLeft = qMax(0, m_usedColumns - before.width());
+        const int step = qMax(1, qRound(before.width() * 0.08));
+        m_viewLeft = qBound(0, before.left()
+            + (event->angleDelta().y() > 0 ? -step : step), maximumLeft);
+        m_followLatest = m_viewLeft >= maximumLeft;
     } else {
         const QRect target = imageTargetRect();
         const double cursor = target.contains(event->position().toPoint())
             ? qBound(0.0, (event->position().x() - target.left())
                           / qMax(1, target.width()), 1.0) : 0.5;
-        const QRect before = visibleSourceRect();
-        const double anchor = (before.left() + cursor * before.width())
-                              / qMax(1, m_usedColumns);
+        const double anchorColumn = before.left()
+                                    + cursor * qMax(0, before.width() - 1);
+        const bool wasFollowing = m_followLatest;
         m_zoom = qBound(1.0, m_zoom
             * (event->angleDelta().y() > 0 ? 1.25 : 0.8), 32.0);
-        const int nextVisible = qBound(2, qCeil(qMax(2, m_usedColumns) / m_zoom),
-                                       qMax(2, m_usedColumns));
-        m_viewCenter = qBound(0.0, anchor + (0.5 - cursor)
-                              * nextVisible / qMax(1, m_usedColumns), 1.0);
+        const int viewportColumns = qBound(2, target.width(), m_image.width());
+        const int nextVisible = qBound(2, qCeil(viewportColumns / m_zoom),
+                                       m_image.width());
+        const int maximumLeft = qMax(0, m_usedColumns - nextVisible);
+        const int anchoredLeft = qRound(anchorColumn
+                                        - cursor * qMax(0, nextVisible - 1));
+        m_viewLeft = wasFollowing ? maximumLeft
+                                  : qBound(0, anchoredLeft, maximumLeft);
+        m_followLatest = wasFollowing || m_viewLeft >= maximumLeft;
     }
     update();
     event->accept();
@@ -2061,21 +2345,42 @@ void CScanWidget::setImagingGate(int gateIndex, bool enabled,
     update();
 }
 
-void CScanWidget::setEncoderPrecision(int countsPerCell)
+void CScanWidget::setCompactOverview(bool compact)
 {
-    countsPerCell = qMax(1, countsPerCell);
-    if (m_encoderPrecision == countsPerCell)
+    if (m_compactOverview == compact)
         return;
-    m_encoderPrecision = countsPerCell;
+    m_compactOverview = compact;
+    setMinimumSize(compact ? QSize(320, 90) : QSize(480, 300));
+    setMaximumHeight(compact ? 140 : QWIDGETSIZE_MAX);
+    setSizePolicy(QSizePolicy::Expanding,
+                  compact ? QSizePolicy::Fixed : QSizePolicy::Expanding);
+    updateGeometry();
+    update();
+}
+
+void CScanWidget::setEncoderPrecision(int countsPerCellA, int countsPerCellB)
+{
+    countsPerCellA = qMax(1, countsPerCellA);
+    countsPerCellB = qMax(1, countsPerCellB);
+    if (m_encoderPrecisionA == countsPerCellA
+        && m_encoderPrecisionB == countsPerCellB) {
+        return;
+    }
+    m_encoderPrecisionA = countsPerCellA;
+    m_encoderPrecisionB = countsPerCellB;
     clear();
 }
 
-void CScanWidget::setMmPerCount(double mmPerCount)
+void CScanWidget::setMmPerCount(double mmPerCountA, double mmPerCountB)
 {
-    mmPerCount = qMax(0.0, mmPerCount);
-    if (qFuzzyCompare(m_mmPerCount + 1.0, mmPerCount + 1.0))
+    mmPerCountA = qMax(0.0, mmPerCountA);
+    mmPerCountB = qMax(0.0, mmPerCountB);
+    if (qFuzzyCompare(m_mmPerCountA + 1.0, mmPerCountA + 1.0)
+        && qFuzzyCompare(m_mmPerCountB + 1.0, mmPerCountB + 1.0)) {
         return;
-    m_mmPerCount = mmPerCount;
+    }
+    m_mmPerCountA = mmPerCountA;
+    m_mmPerCountB = mmPerCountB;
     update();
 }
 
@@ -2116,11 +2421,10 @@ bool CScanWidget::appendFrameInternal(const DecodedFrame &frame, double scale,
         m_hasOrigin = true;
     }
 
-    auto cellForDelta = [this](qint64 delta, bool *ok) {
+    auto cellForDelta = [](qint64 delta, int precision, bool *ok) {
         const qint64 cell = delta >= 0
-                                ? delta / m_encoderPrecision
-                                : -((-delta + m_encoderPrecision - 1)
-                                    / m_encoderPrecision);
+                               ? delta / precision
+                               : -((-delta + precision - 1) / precision);
         if (cell < std::numeric_limits<int>::min()
             || cell > std::numeric_limits<int>::max()) {
             *ok = false;
@@ -2130,9 +2434,9 @@ bool CScanWidget::appendFrameInternal(const DecodedFrame &frame, double scale,
     };
     bool validCell = true;
     const int x = cellForDelta(m_currentEncoderA - m_originEncoderA,
-                               &validCell);
+                               m_encoderPrecisionA, &validCell);
     const int y = cellForDelta(m_currentEncoderB - m_originEncoderB,
-                               &validCell);
+                               m_encoderPrecisionB, &validCell);
     if (!validCell)
         return false;
 
@@ -2236,7 +2540,8 @@ void CScanWidget::clear()
 
 void CScanWidget::saveTo(QDataStream &out) const
 {
-    out << qint32(m_encoderPrecision) << m_mmPerCount << qint32(m_imagingGate)
+    out << qint32(m_encoderPrecisionA) << qint32(m_encoderPrecisionB)
+        << m_mmPerCountA << m_mmPerCountB << qint32(m_imagingGate)
         << bool(m_imagingGateEnabled) << m_imagingGateThreshold
         << m_amplitudeScale
         << qint64(m_originEncoderA) << qint64(m_originEncoderB)
@@ -2253,18 +2558,28 @@ void CScanWidget::saveTo(QDataStream &out) const
     }
 }
 
-bool CScanWidget::loadFrom(QDataStream &in)
+bool CScanWidget::loadFrom(QDataStream &in, bool dualAxisCalibration)
 {
-    qint32 encoderPrecision = 10, imagingGate = 0;
+    qint32 encoderPrecisionA = 10, encoderPrecisionB = 10, imagingGate = 0;
     qint32 minX = 0, maxX = 0, minY = 0, maxY = 0;
-    double mmPerCount = 0.0, threshold = 0.0, amplitudeScale = 4096.0;
+    double mmPerCountA = 0.0, mmPerCountB = 0.0, threshold = 0.0;
+    double amplitudeScale = 4096.0;
     qint64 originA = 0, originB = 0, currentA = 0, currentB = 0;
     bool gateEnabled = true, hasOrigin = false;
-    in >> encoderPrecision >> mmPerCount >> imagingGate >> gateEnabled
+    if (dualAxisCalibration) {
+        in >> encoderPrecisionA >> encoderPrecisionB >> mmPerCountA >> mmPerCountB;
+    } else {
+        in >> encoderPrecisionA >> mmPerCountA;
+        encoderPrecisionB = encoderPrecisionA;
+        mmPerCountB = mmPerCountA;
+    }
+    in >> imagingGate >> gateEnabled
        >> threshold >> amplitudeScale >> originA >> originB >> currentA
        >> currentB >> hasOrigin >> minX >> maxX >> minY >> maxY;
-    if (in.status() != QDataStream::Ok || encoderPrecision <= 0
-        || !qIsFinite(mmPerCount) || mmPerCount < 0.0
+    if (in.status() != QDataStream::Ok || encoderPrecisionA <= 0
+        || encoderPrecisionB <= 0
+        || !qIsFinite(mmPerCountA) || mmPerCountA < 0.0
+        || !qIsFinite(mmPerCountB) || mmPerCountB < 0.0
         || imagingGate < 0 || imagingGate > 3
         || !qIsFinite(threshold) || !qIsFinite(amplitudeScale)
         || amplitudeScale <= 0.0 || minX > maxX || minY > maxY) {
@@ -2294,8 +2609,10 @@ bool CScanWidget::loadFrom(QDataStream &in)
             return false;
     }
 
-    m_encoderPrecision = qMax(1, int(encoderPrecision));
-    m_mmPerCount = qMax(0.0, mmPerCount);
+    m_encoderPrecisionA = qMax(1, int(encoderPrecisionA));
+    m_encoderPrecisionB = qMax(1, int(encoderPrecisionB));
+    m_mmPerCountA = qMax(0.0, mmPerCountA);
+    m_mmPerCountB = qMax(0.0, mmPerCountB);
     m_imagingGate = qBound(0, int(imagingGate), 3);
     m_imagingGateEnabled = gateEnabled;
     m_imagingGateThreshold = threshold;
@@ -2386,11 +2703,11 @@ void CScanWidget::paintEvent(QPaintEvent *)
     }
 
     const CScanViewGeometry geometry = cScanViewGeometry(
-        rect(), m_minX, m_maxX, m_minY, m_maxY);
+        rect(), m_minX, m_maxX, m_minY, m_maxY, m_compactOverview);
     const CScanRenderConfig config = makeCScanRenderConfig(
         rect(), m_minX, m_maxX, m_minY, m_maxY, m_imagingGate,
         m_imagingGateEnabled, !cells.isEmpty(), m_amplitudeScale,
-        m_imagingGateThreshold);
+        m_imagingGateThreshold, m_compactOverview);
     if (m_renderState) {
         m_renderState->lastConfig = config;
         m_renderState->hasLastConfig = true;
@@ -2423,13 +2740,13 @@ void CScanWidget::paintEvent(QPaintEvent *)
         const qreal y = geometry.target.top()
                         + geometry.target.height() * i / 4.0;
         const qint64 countA = qRound64(
-            (geometry.viewMinX + spanX * i / 4.0) * m_encoderPrecision);
+            (geometry.viewMinX + spanX * i / 4.0) * m_encoderPrecisionA);
         const qint64 countB = geometry.flatY
-            ? qint64(m_minY) * m_encoderPrecision
+            ? qint64(m_minY) * m_encoderPrecisionB
             : qRound64((geometry.viewMaxY - spanY * i / 4.0)
-                       * m_encoderPrecision);
-        const double mmA = double(countA) * m_mmPerCount;
-        const double mmB = double(countB) * m_mmPerCount;
+                       * m_encoderPrecisionB);
+        const double mmA = double(countA) * m_mmPerCountA;
+        const double mmB = double(countB) * m_mmPerCountB;
         p.drawText(QRectF(x - 55, geometry.target.bottom() + 7, 110, 20),
                    Qt::AlignHCenter | Qt::AlignTop,
                    QString::number(mmA, 'f', 1));
@@ -2442,13 +2759,12 @@ void CScanWidget::paintEvent(QPaintEvent *)
     p.drawText(QRectF(geometry.target.left(), 5,
                       geometry.target.width(), 28),
                Qt::AlignHCenter | Qt::AlignVCenter,
-               QStringLiteral("C 扫 Gate %1　阈值 %2%　原点 A/B：%3/%4　当前 A/B：%5/%6　精度：%7 计数/格（%8 mm/格）")
-                   .arg(QStringLiteral("ABCI").mid(m_imagingGate, 1))
-                   .arg(m_imagingGateThreshold, 0, 'f', 1)
+               QStringLiteral("路径总览　原点 A/B：%1/%2　当前 A/B：%3/%4　精度：%5/%6 计数/格（%7/%8 mm/格）")
                    .arg(m_originEncoderA).arg(m_originEncoderB)
                    .arg(m_currentEncoderA).arg(m_currentEncoderB)
-                   .arg(m_encoderPrecision)
-                   .arg(double(m_encoderPrecision) * m_mmPerCount, 0, 'f', 2));
+                   .arg(m_encoderPrecisionA).arg(m_encoderPrecisionB)
+                   .arg(double(m_encoderPrecisionA) * m_mmPerCountA, 0, 'f', 2)
+                   .arg(double(m_encoderPrecisionB) * m_mmPerCountB, 0, 'f', 2));
     p.drawText(QRectF(2, geometry.target.top() - 4, 76, 22),
                Qt::AlignRight | Qt::AlignVCenter,
                QStringLiteral("B（mm）"));
@@ -2467,7 +2783,7 @@ void CScanWidget::mousePressEvent(QMouseEvent *event)
         return;
     }
     const CScanViewGeometry geometry = cScanViewGeometry(
-        rect(), m_minX, m_maxX, m_minY, m_maxY);
+        rect(), m_minX, m_maxX, m_minY, m_maxY, m_compactOverview);
     if (!geometry.target.contains(event->position())) {
         QWidget::mousePressEvent(event);
         return;

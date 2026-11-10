@@ -1,4 +1,5 @@
 #include "host_application.h"
+#include "robot_app_logger.h"
 #include "usbbootstrap.h"
 
 #include <QCommandLineOption>
@@ -22,6 +23,12 @@ namespace {
 
 QMutex g_logMutex;
 QFile g_logFile;
+QString g_logPath;
+int g_logLineCount = 0;
+// The host runs unattended for days. Keep only the newest lines so
+// robot_host.log cannot grow without bound; AppLogger applies the same policy to
+// the other log files.
+constexpr int kMaximumHostLogLines = crawling::AppLogger::Retention::HostLog;
 
 void hostMessageHandler(QtMsgType type, const QMessageLogContext&, const QString& message) {
   const char* level = "INFO";
@@ -42,10 +49,28 @@ void hostMessageHandler(QtMsgType type, const QMessageLogContext&, const QString
                 static_cast<size_t>(line.toUtf8().size()), stdout);
     std::fflush(stdout);
     if (g_logFile.isOpen()) {
-      g_logFile.write(line.toUtf8());
-      g_logFile.flush();
+      if (g_logLineCount >= kMaximumHostLogLines) {
+        // Trim one line below the limit so the line about to be written lands at
+        // exactly kMaximumHostLogLines instead of one over it. Closing first
+        // keeps the trim from fighting the append handle on Windows.
+        g_logPath = g_logFile.fileName();
+        g_logFile.close();
+        crawling::AppLogger::trimToLastLines(g_logPath,
+                                             kMaximumHostLogLines - 1);
+        g_logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+        g_logLineCount = kMaximumHostLogLines - 1;
+      }
+      if (g_logFile.isOpen()) {
+        g_logFile.write(line.toUtf8());
+        g_logFile.flush();
+        ++g_logLineCount;
+      }
     }
   }
+  // Warnings and errors also go to logs/errors.log through AppLogger, which
+  // applies its own retention. INFO/DEBUG stay out of that file on purpose.
+  if (type == QtWarningMsg || type == QtCriticalMsg || type == QtFatalMsg)
+    crawling::AppLogger::error(QStringLiteral("HOST"), message);
   if (type == QtFatalMsg) std::abort();
 }
 
@@ -56,11 +81,25 @@ bool openHostLog(QString* error) {
     if (error) *error = QStringLiteral("无法创建日志目录");
     return false;
   }
-  g_logFile.setFileName(logDir.filePath(QStringLiteral("robot_host.log")));
+  g_logPath = logDir.filePath(QStringLiteral("robot_host.log"));
+  // Whatever the previous run left behind is trimmed before the first write, so
+  // a restarted host does not keep appending to an oversized file. Trim while no
+  // append handle is open to avoid two handles racing on the same file.
+  crawling::AppLogger::trimToLastLines(g_logPath, kMaximumHostLogLines);
+  g_logFile.setFileName(g_logPath);
   if (!g_logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
     if (error) *error = QStringLiteral("无法打开主机日志文件");
     return false;
   }
+  g_logLineCount = 0;
+  QFile existing(g_logPath);
+  if (existing.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    const QByteArray tail = existing.readAll();
+    for (char ch : tail) {
+      if (ch == '\n') ++g_logLineCount;
+    }
+  }
+  g_logLineCount = qMin(g_logLineCount, kMaximumHostLogLines);
   return true;
 }
 
@@ -82,6 +121,22 @@ int main(int argc, char* argv[]) {
   if (!logError.isEmpty()) qWarning().noquote() << logError;
   if (!usbPreparationWarning.isEmpty())
     qWarning().noquote() << "USB_PREPARE:" << usbPreparationWarning;
+
+  // The ultrasound SDK writes one log_YYYYMMDD_HHMMSS.txt per run and never
+  // removes old ones; after a few dozen restarts the directory is full of them.
+  // Drop the previous runs' files here (the current run has not created its own
+  // yet, because the ultrasound service starts later). The SDK keeps writing its
+  // own file for this session, so exactly one remains on disk at any time.
+  {
+    const QDir sdkLogDir(QDir(QCoreApplication::applicationDirPath())
+                             .filePath(QStringLiteral("logs")));
+    const int removed = crawling::AppLogger::removeOldSessionLogs(
+        sdkLogDir.absolutePath(),
+        QStringLiteral("^log_\\d{8}_\\d{6}\\.txt$"), 0);
+    if (removed > 0)
+      qInfo().noquote() << "SESSION_LOG_CLEANUP: removed" << removed
+                        << "old ultrasound log files";
+  }
 
   QCommandLineParser parser;
   parser.setApplicationDescription(

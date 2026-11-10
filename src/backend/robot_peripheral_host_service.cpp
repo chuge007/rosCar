@@ -1485,6 +1485,28 @@ void RobotPeripheralHostService::applyClampSettings(
       appendLog(QStringLiteral("夹子配置写入主机设置文件失败"));
     }
   }
+  // 夹子配置以本服务为准；同步给底盘服务，否则整车连接会把启动时的旧限位写回去。
+  if (drive_) drive_->adoptClampSettings(settings_);
+  {
+    const char* axisNames[] = {"X", "Y", "Z"};
+    QString summary;
+    for (std::size_t axis = 0; axis < settings_.clampMotors.size(); ++axis) {
+      for (int index = 0; index < settings_.clampMotors[axis].size(); ++index) {
+        const auto& motor = settings_.clampMotors[axis][index];
+        if (!summary.isEmpty()) summary += QLatin1String(" | ");
+        summary += QStringLiteral("%1%2 %3 upper=%4@%5 lower=%6@%7")
+                       .arg(QString::fromLatin1(axisNames[axis]))
+                       .arg(index + 1)
+                       .arg(motor.alias.isEmpty() ? QStringLiteral("-")
+                                                  : motor.alias)
+                       .arg(motor.upperLimitEnabled ? 1 : 0)
+                       .arg(motor.upperLimit, 0, 'f', 2)
+                       .arg(motor.lowerLimitEnabled ? 1 : 0)
+                       .arg(motor.lowerLimit, 0, 'f', 2);
+      }
+    }
+    appendLog(QStringLiteral("夹子限位已应用：%1").arg(summary));
+  }
   if (clamp_) {
     const crawling::DriveSettings copy = settings_;
     QMetaObject::invokeMethod(

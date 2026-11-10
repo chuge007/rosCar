@@ -1,0 +1,39 @@
+---
+description: 超声(ultrasound)、小车(robot)、激光焊缝(laser)、共享协议(common) 四组代码的边界与改动流程；改任何功能前先归类，只碰本类文件、只编对应目标、只看对应日志
+alwaysApply: true
+enabled: true
+updatedAt: 2026-11-10T00:00:00.000Z
+provider:
+---
+
+# 改代码前先归类：U / R / L / S
+
+本项目是**三类功能 + 一层共享协议**，不是简单的"超声 / 小车"两条线。每次改动先判定归属，再动手。
+
+| 组 | 关键词 | 代表文件 |
+|----|--------|----------|
+| **U 超声** | 采集、A/B/C/E 扫、包解码、增益/闸门/滤波、探头、预设、固件引导 | `src/devicecontroller.*`、`packetdecoder.*`、`framedecoderworker.*`、`scanwidgets.*`、`scanwaveformcache.*`、`parameterpanel.*`、`parameterpresetstore.*`、`pulseloadguard.*`、`usbbootstrap.*`、`rawpacket.h`、`framerecorder.*`、`frameplayer.*`、`remotecontrolserver.*`、`src/services/ultrasound_*`、`src/services/remote_ultrasound_source.*`、`src/backend/ultrasound_*`、`src/probeadjustmentpanel.*` |
+| **R 小车** | 底盘、轮电机、差速、同步、点动、急停、CAN、串口、IMU、夹爪、车体相机 | `src/robot/*`、`src/robotcontrolpanel.*`、`src/robot_sensor_controller.*`、`src/robot_usb_camera_controller.*`、`src/robot_hardware_discovery_qt6.cpp`、`src/network_stream_reader.*`、`src/camera_frame_processor.*`、`src/backend/robot_host_service.*`、`src/backend/robot_peripheral_host_service.*`、`src/robot_profile_view.*` |
+| **L 激光/焊缝** | 轮廓、点云、纠偏、焊道、相机独立进程 | `src/laser_*`、`src/opencv_laser_contour.*`、`src/seam_state_machine.*`、`src/*weld_locator.h`、`src/profile_weld_detector.h`、`vendor/mv3dlp_laser_profile/`、`src/camera_server*` |
+| **S 共享层** | 协议帧、分片、通道、会话、能力协商 | `src/common/protocol/*`、`src/common/transport/*`、`src/common/services/*` |
+
+完整清单、数据流、RPC 路径见 `[docs/超声与小车代码分工.md](mdc:docs/超声与小车代码分工.md)`，需要细节时读它，不要凭文件名猜归属。
+
+# 硬性约束
+
+1. **不越界**：改 U 不动 `src/robot/`；改 R 不动 `devicecontroller` / `scanwidgets` / `parameter*`。必须越界时，先说明"为什么必须越界、会影响另一侧什么"。
+2. **交界文件要声明**：`src/mainwindow.cpp`（同时装配超声页与小车页）、`src/probeadjustmentpanel.cpp`（超声 UI 驱动车体夹爪电机）、`src/common/*`（双用途协议）改动前必须列出对另一侧的影响。
+3. **共享协议常量改动要两端同版本**：`protocol_types.h` 的分片/帧长/超时、`workbench_data_codec` 的载荷编码同时影响超声成像与激光点云。
+4. **只编对应目标**：U 的采集/UI → `build_workbench.bat`；U 的远程服务 → `build_host.bat`；R 的 `src/robot/` 与协议 → 两个目标都要编（Workbench 本地模式与 Host 共用同一份代码）。编后用 clangd + `compile_commands.json` 校验。
+
+# 标准流程
+
+1. 归类（U / R / L / S），判定不了就问，不要猜。
+2. 圈定文件 + 影响面（改符号前先查全部调用点；GitNexus `impact` 可用时优先用）。
+3. 只改本类文件，越界先声明。
+4. 编对应目标并验证：本地看 `bin\logs\`，小车端 `ssh a@192.168.1.20` 看 `C:\Users\a\Desktop\robot_host\app\logs\`。
+5. 判断日志不能靠想象：超声无专属日志文件，只能从 `robot_console.log` / `robot_host.log` 按内容找；`COMM.*`、`CAMERA.*`、`PROFILE.*`、`PROBE.SPACING` 是小车/通信侧的类别前缀。
+
+# 原始项目对照
+
+实现或功能逻辑异常时，读 `D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp2` 按 U/R/L/S 分组比对，**只读，禁止修改该目录任何文件**。

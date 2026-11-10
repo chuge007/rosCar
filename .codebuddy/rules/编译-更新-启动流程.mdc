@@ -1,0 +1,90 @@
+---
+description: 需要编译就直接编；先结束运行中的目标进程；编译成功后自动更新本地与小车端 exe、重启主机进程、打开 PA1664Workbench，全程不问直接做
+alwaysApply: true
+enabled: true
+updatedAt: 2026-11-10T00:00:00.000Z
+provider:
+---
+
+# 编译 → 更新 → 启动，一条龙做完
+
+需要验证代码能否编译时，直接走完「结束旧进程 → 编译 → 更新软件 → 启动软件」四步。四步是同一件事，**中途不要停下来问任何问题**。
+
+## 禁止询问清单（这些是默认动作，问了就是没执行规则）
+
+- ❌ 不问「要我现在 scp 新 exe 上去吗」→ 直接 scp
+- ❌ 不问「要不要重启主机进程」→ 直接结束旧进程并重新启动
+- ❌ 不问「要不要打开软件」→ Workbench 和 Host 都要启动
+- ❌ 不问「要不要编译」→ 直接编
+- ❌ 不说「如果需要我可以帮你部署」→ 直接部署完再报告
+
+编译成功只代表代码能过，**不等于修复生效**：主机端 exe 比源码旧就是没生效。所以「编译成功」的下一步必然是「把新 exe 送到运行位置并让它跑起来」，这一步没有任何判断分支。
+
+## 1. 先关掉正在运行的目标
+
+输出 exe 被占用会导致链接失败（`LNK1104: 无法打开文件 ...exe`）。编译前直接清掉同名进程：
+
+```powershell
+Get-Process PA1664Workbench, PA1664RobotHost, PA1664CameraServer -ErrorAction SilentlyContinue
+taskkill /IM PA1664Workbench.exe /F
+taskkill /IM PA1664RobotHost.exe /F
+taskkill /IM PA1664CameraServer.exe /F
+```
+
+只结束这三个本项目 exe，不要动系统其他程序。若进程由调试器启动，先说明再结束。
+
+## 2. 编译
+
+| 改了什么 | 命令 |
+|---|---|
+| 超声采集 / 成像 / 小车 UI / 激光显示 | `build_workbench.bat` |
+| 小车控制环、`src/robot/` 协议、超声远程服务 | `build_host.bat` |
+| 两者或拿不准 | `build_all.bat` |
+
+编完用 clangd + `compile_commands.json` 校验。编译失败就停下报错，不要继续更新和启动。
+
+## 3. 更新软件（固定动作，无判断分支）
+
+**Workbench（操作端）**：编译输出就在 `bin\`，即运行目录，无需复制。
+
+**RobotHost（小车端）**：只要编了 Host，就按顺序做完下面全部步骤，不要问、不要停：
+
+```powershell
+cd d:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmpSeparate
+
+# 1) 更新本地打包目录
+copy /Y bin\PA1664RobotHost.exe startup_deploy\robot_host\app\PA1664RobotHost.exe
+
+# 2) 远程停旧进程并清运行标记（不清 lock 会起不来）
+ssh a@192.168.1.20 "chcp 65001 >nul && taskkill /F /IM PA1664RobotHost.exe & del /Q C:\Users\a\Desktop\robot_host\app\robot_host.lock"
+
+# 3) 备份旧 exe 后上传新 exe
+ssh a@192.168.1.20 "chcp 65001 >nul && copy /Y C:\Users\a\Desktop\robot_host\app\PA1664RobotHost.exe C:\Users\a\Desktop\robot_host\app\PA1664RobotHost.exe.bak"
+scp bin\PA1664RobotHost.exe a@192.168.1.20:C:/Users/a/Desktop/robot_host/app/PA1664RobotHost.exe
+
+# 4) 校验上传结果（时间戳与字节数必须是刚编的那份）
+ssh a@192.168.1.20 "chcp 65001 >nul && dir C:\Users\a\Desktop\robot_host\app\PA1664RobotHost.exe"
+```
+
+判断依据是 `bin\PA1664RobotHost.exe` 的 LastWriteTime：现网 exe 时间戳比它旧，就等于修复没生效，必须推。
+
+## 4. 启动软件（Workbench 与 Host 都要开）
+
+```powershell
+# 小车端 Host
+ssh a@192.168.1.20 "chcp 65001 >nul && cd /d C:\Users\a\Desktop\robot_host && start \"\" StartRobotHost.cmd"
+
+# 本地 Workbench（即使是只改 Host，也要打开，方便看界面与联调）
+start .\bin\PA1664Workbench.exe
+
+# 本地 Host（需要本地联调时）
+start .\bin\PA1664RobotHost.exe
+```
+
+启动后确认真的起来了（`Get-Process` 或远程 `tasklist /FI "IMAGENAME eq PA1664RobotHost.exe"`），没起来要说清是启动失败还是闪退。
+
+## 5. 报告
+
+回复里必须写全：结束了哪个进程 → 编了哪个目标、结果如何 → 更新到了哪些位置（本地 `bin\` / `startup_deploy\` / 小车端 `app\`）→ 启动了哪个进程、是否存活 → 日志位置（本地 `bin\logs\`，小车端 `C:\Users\a\Desktop\robot_host\app\logs\`）。
+
+部署细节与远程排查见 `[docs/远程调试与部署指南.md](mdc:docs/远程调试与部署指南.md)`，功能归类见 `[.codebuddy/rules/超声与小车代码分工.mdc](mdc:.codebuddy/rules/超声与小车代码分工.mdc)`。

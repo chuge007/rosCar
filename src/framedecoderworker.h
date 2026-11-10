@@ -21,7 +21,9 @@ struct GroupScanSettings
     int scanModes = 0;
     int selectedBeam = 0;
     int amplitudeScale = 4096;
-    int encoderPrecision = 10;
+    int encoderPrecisionA = 10;
+    int encoderPrecisionB = 10;
+    quint64 encoderGeometryRevision = 0;
     double rangeStart = 0.0;
     double rangeEnd = 50.0;
 };
@@ -97,7 +99,7 @@ private:
         int lastBScore = -1;
         qint64 lastCColumn = -1;
         qint64 lastCRow = -1;
-        std::array<int, 4> lastCGateScores{{-1, -1, -1, -1}};
+        int lastCScore = -1;
         int direction = 0;
         bool hasOrigin = false;
     };

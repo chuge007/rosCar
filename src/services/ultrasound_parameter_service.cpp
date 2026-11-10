@@ -34,6 +34,10 @@ UltrasoundParameterService::UltrasoundParameterService(QObject* parent)
 
 void UltrasoundParameterService::bindRemoteSession(RemoteWorkbenchSession* session) {
   if (remote_ == session) return;
+  // 会话重建后，上一轮的 apply/commit 不会再收到任何响应。这里必须给出
+  // 终结结果，否则参数面板会永久停在“正在应用”，后续修改全部被丢弃。
+  if (applyCommitPending_)
+    finishRemoteApply(false, QStringLiteral("控制会话已重建，本轮参数下发已中止"));
   if (remote_) disconnect(remote_, nullptr, this, nullptr);
   remote_ = session;
   values_.clear();
@@ -243,21 +247,27 @@ void UltrasoundParameterService::requestScanPrecision(int presetId) {
 }
 
 void UltrasoundParameterService::saveEncoderCalibration(double wheelDiameterMm,
-                                                        int resolution) {
+                                                        int resolution,
+                                                        int calibrationMode,
+                                                        double countsPerMmA,
+                                                        double countsPerMmB) {
   if (!remote_ || !remote_->isReady()) {
     emit this->message(QStringLiteral("小车主机尚未连接，编码器标定未保存"), true);
     return;
   }
+  const QJsonObject payload{
+      {QStringLiteral("wheelDiameterMm"), wheelDiameterMm},
+      {QStringLiteral("resolution"), resolution},
+      {QStringLiteral("calibrationMode"), calibrationMode},
+      {QStringLiteral("countsPerMmA"), countsPerMmA},
+      {QStringLiteral("countsPerMmB"), countsPerMmB}};
   const quint64 requestId = remote_->request(
-      QStringLiteral("ultrasound.encoder.calibration.set"),
-      QJsonObject{{QStringLiteral("wheelDiameterMm"), wheelDiameterMm},
-                  {QStringLiteral("resolution"), resolution}});
+      QStringLiteral("ultrasound.encoder.calibration.set"), payload);
   if (requestId == 0) {
     emit this->message(QStringLiteral("编码器标定保存请求发送失败"), true);
     return;
   }
-  encoderCalibrationRequests_.insert(
-      requestId, qMakePair(wheelDiameterMm, resolution));
+  encoderCalibrationRequests_.insert(requestId, payload);
 }
 
 void UltrasoundParameterService::requestEncoderCalibration() {
@@ -312,7 +322,10 @@ void UltrasoundParameterService::applyPresetState(const QJsonObject& state,
       state.contains(QStringLiteral("encoderResolution"))) {
     emit encoderCalibrationReady(
         state.value(QStringLiteral("wheelDiameterMm")).toDouble(500.0),
-        state.value(QStringLiteral("encoderResolution")).toInt(4096));
+        state.value(QStringLiteral("encoderResolution")).toInt(4096),
+        state.value(QStringLiteral("calibrationMode")).toInt(0),
+        state.value(QStringLiteral("countsPerMmA")).toDouble(0.0),
+        state.value(QStringLiteral("countsPerMmB")).toDouble(0.0));
   }
   if (emitSnapshot) {
     const QByteArray config = QByteArray::fromBase64(
@@ -1372,7 +1385,10 @@ void UltrasoundParameterService::onResponse(const QString& operation,
     if (ok) {
       emit encoderCalibrationReady(
           data.value(QStringLiteral("wheelDiameterMm")).toDouble(500.0),
-          data.value(QStringLiteral("resolution")).toInt(4096));
+          data.value(QStringLiteral("resolution")).toInt(4096),
+          data.value(QStringLiteral("calibrationMode")).toInt(0),
+          data.value(QStringLiteral("countsPerMmA")).toDouble(0.0),
+          data.value(QStringLiteral("countsPerMmB")).toDouble(0.0));
     } else {
       const QString msg = QStringLiteral("读取主机编码器标定失败 [%1]：%2")
                               .arg(errorCode, errorText);
@@ -1434,6 +1450,12 @@ void UltrasoundParameterService::onResponse(const QString& operation,
       }
     }
     pendingApplyBatches_ = qMax(0, pendingApplyBatches_ - 1);
+    if (!ok && errorCode == QStringLiteral("timeout")) {
+      // 主机超时等于本轮已经失败，再发 commit 只会让停采窗口翻倍（再等一个
+      // 5 秒超时）。立即结束本轮，让界面和采集尽快恢复。
+      finishRemoteApply(false, QStringLiteral("主机响应超时，本轮参数下发已中止"));
+      return;
+    }
     if (applyCommitPending_) {
       if (pendingApplyBatches_ == 0 && pendingSetOrder_.isEmpty() &&
           !commitRequested_) {
@@ -1461,7 +1483,9 @@ void UltrasoundParameterService::onResponse(const QString& operation,
     if (applyFailureCount_ > 0)
       detail << QStringLiteral("%1 项参数写入失败").arg(applyFailureCount_);
     finishRemoteApply(ok, detail.join(QStringLiteral("；")));
-    requestSnapshot();
+    // 不再补一次全量快照：commit 响应已带回 presetState/configBase64，
+    // apply 响应已带回每个变更字段的回读值。多出的这次全量 getter 扫描
+    // 只是把停采时间拉长，是“改完参数要等半天”的主要来源之一。
     return;
   }
 

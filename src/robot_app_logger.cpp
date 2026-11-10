@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QRegularExpression>
 #include <QThread>
 #include <QVector>
 
@@ -25,15 +26,9 @@
 
 namespace crawling {
 namespace {
-// Raw-image correction diagnostics are intentionally detailed enough to
-// replay the laser profile. Retain a complete correction run instead of
-// rotating away its initial survey after only a few minutes.
-constexpr qint64 kMaximumBytes = 16 * 1024 * 1024;
-constexpr qint64 kRetainedBytes = 12 * 1024 * 1024;
-constexpr qint64 kProfileDetectionMaximumBytes = 64 * 1024 * 1024;
-constexpr qint64 kProfileDetectionRetainedBytes = 48 * 1024 * 1024;
-constexpr qint64 kCameraConnectionMaximumBytes = 8 * 1024 * 1024;
-constexpr qint64 kCameraConnectionRetainedBytes = 6 * 1024 * 1024;
+// Retention limits live in AppLogger::Retention. The previous byte-based
+// rotation let robot_console.log reach 16 MiB and the profile log 64 MiB, which
+// is unusable on an unattended machine with a small disk.
 constexpr std::size_t kMaximumNormalRecords = 32768;
 constexpr std::size_t kFlushThreshold = 256;
 constexpr std::size_t kMaximumDrainBatch = 4096;
@@ -108,6 +103,33 @@ qint64 nowMs() {
   return QDateTime::currentMSecsSinceEpoch();
 }
 
+// Trims an already-open (ReadWrite) file in place. Declared here instead of the
+// public API so the logging thread can reuse the same buffer it just wrote.
+void trimOpenFileToLines(QFile& file, int maxLines) {
+  if (maxLines <= 0 || !file.isOpen()) return;
+  file.flush();
+  if (!file.seek(0)) return;
+  const QByteArray all = file.readAll();
+  int totalLines = 0;
+  for (char ch : all) {
+    if (ch == '\n') ++totalLines;
+  }
+  if (totalLines <= maxLines) return;
+  int cut = 0;
+  int seen = 0;
+  for (int index = all.size() - 1; index >= 0; --index) {
+    if (all.at(index) != '\n') continue;
+    if (++seen == maxLines) {
+      cut = index + 1;
+      break;
+    }
+  }
+  if (cut <= 0) return;
+  if (!file.resize(0) || !file.seek(0)) return;
+  file.write(all.mid(cut));
+  file.flush();
+}
+
 quintptr currentThreadId() {
   return reinterpret_cast<quintptr>(QThread::currentThreadId());
 }
@@ -121,6 +143,8 @@ class LoggerEngine final {
                         .filePath(CRAWLING_TEXT("logs/camera_connection.log"))),
         profilePath_(QDir(QCoreApplication::applicationDirPath())
                          .filePath(CRAWLING_TEXT("logs/profile_weld_detection.log"))),
+        errorPath_(QDir(QCoreApplication::applicationDirPath())
+                       .filePath(CRAWLING_TEXT("logs/errors.log"))),
         processId_(QCoreApplication::applicationPid()) {
     QDir().mkpath(QFileInfo(consolePath_).dir().absolutePath());
     worker_ = std::thread(&LoggerEngine::run, this);
@@ -331,8 +355,13 @@ class LoggerEngine final {
     QVector<const QueuedLogRecord*> mainRecords;
     QVector<const QueuedLogRecord*> cameraRecords;
     QVector<const QueuedLogRecord*> profileRecords;
+    QVector<const QueuedLogRecord*> errorRecords;
     QHash<QString, QVector<const QueuedLogRecord*>> commRecords;
     for (const QueuedLogRecord& record : records) {
+      // Errors survive independently of their channel: the console file rotates
+      // away the first failure long before an operator looks at it.
+      if (record.critical)
+        errorRecords.push_back(&record);
       if (record.channel == LogChannel::Profile) {
         profileRecords.push_back(&record);
       } else if (record.category.startsWith(QLatin1String("COMM."))) {
@@ -345,12 +374,14 @@ class LoggerEngine final {
           cameraRecords.push_back(&record);
       }
     }
-    writeRecords(consolePath_, mainRecords, kMaximumBytes, kRetainedBytes,
+    writeRecords(consolePath_, mainRecords, AppLogger::Retention::Console,
                  mainSequence_);
-    writeRecords(cameraPath_, cameraRecords, kCameraConnectionMaximumBytes,
-                 kCameraConnectionRetainedBytes, cameraSequence_);
-    writeRecords(profilePath_, profileRecords, kProfileDetectionMaximumBytes,
-                 kProfileDetectionRetainedBytes, profileSequence_);
+    writeRecords(cameraPath_, cameraRecords, AppLogger::Retention::Camera,
+                 cameraSequence_);
+    writeRecords(profilePath_, profileRecords, AppLogger::Retention::Profile,
+                 profileSequence_);
+    writeRecords(errorPath_, errorRecords, AppLogger::Retention::Errors,
+                 errorSequence_);
     for (auto it = commRecords.begin(); it != commRecords.end(); ++it) {
       CommSink& sink = commSinks_[it.key()];
       if (sink.path.isEmpty()) {
@@ -363,30 +394,20 @@ class LoggerEngine final {
         sink.path = QDir(QCoreApplication::applicationDirPath())
                         .filePath(QStringLiteral("logs/comm/%1.log").arg(name));
       }
-      writeRecords(sink.path, it.value(), kMaximumBytes, kRetainedBytes,
+      writeRecords(sink.path, it.value(), AppLogger::Retention::Comm,
                    sink.sequence);
     }
   }
 
   void writeRecords(const QString& path,
                     const QVector<const QueuedLogRecord*>& records,
-                    qint64 maximumBytes, qint64 retainedBytes,
-                    quint64& sequence) {
+                    int maxLines, quint64& sequence) {
     if (records.isEmpty())
       return;
     QDir().mkpath(QFileInfo(path).dir().absolutePath());
     QFile file(path);
     if (!file.open(QIODevice::ReadWrite | QIODevice::Text))
       return;
-    if (file.size() >= maximumBytes) {
-      file.seek(qMax<qint64>(0, file.size() - retainedBytes));
-      QByteArray retained = file.readAll();
-      const int firstLine = retained.indexOf('\n');
-      if (firstLine >= 0)
-        retained.remove(0, firstLine + 1);
-      file.resize(0);
-      file.write(retained);
-    }
     file.seek(file.size());
     QByteArray lines;
     lines.reserve(int(std::min<std::size_t>(records.size() * 160,
@@ -403,11 +424,16 @@ class LoggerEngine final {
     }
     file.write(lines);
     file.flush();
+    // Bound the file to the retention policy after every flush. The file holds
+    // at most maxLines lines here, so this stays a small in-memory rewrite
+    // instead of repeated large copies.
+    trimOpenFileToLines(file, maxLines);
   }
 
   const QString consolePath_;
   const QString cameraPath_;
   const QString profilePath_;
+  const QString errorPath_;
   const qint64 processId_;
 
   std::mutex lifecycleMutex_;
@@ -424,6 +450,7 @@ class LoggerEngine final {
   quint64 mainSequence_ = 0;
   quint64 cameraSequence_ = 0;
   quint64 profileSequence_ = 0;
+  quint64 errorSequence_ = 0;
   struct CommSink {
     QString path;
     quint64 sequence = 0;
@@ -450,6 +477,48 @@ QString AppLogger::cameraConnectionFilePath() {
 QString AppLogger::profileDetectionFilePath() {
   return QDir(QCoreApplication::applicationDirPath())
       .filePath(CRAWLING_TEXT("logs/profile_weld_detection.log"));
+}
+
+QString AppLogger::errorFilePath() {
+  return QDir(QCoreApplication::applicationDirPath())
+      .filePath(CRAWLING_TEXT("logs/errors.log"));
+}
+
+bool AppLogger::trimToLastLines(const QString& path, int maxLines) {
+  if (path.isEmpty() || maxLines <= 0) return false;
+  QFile file(path);
+  if (!file.open(QIODevice::ReadWrite | QIODevice::Text)) return false;
+  trimOpenFileToLines(file, maxLines);
+  return true;
+}
+
+int AppLogger::removeOldSessionLogs(const QString& directory,
+                                    const QString& namePattern,
+                                    int keepNewest) {
+  QDir dir(directory);
+  if (!dir.exists()) return 0;
+  const QRegularExpression pattern(namePattern,
+                                   QRegularExpression::CaseInsensitiveOption);
+  if (!pattern.isValid()) return 0;
+
+  QFileInfoList matches;
+  const QFileInfoList entries = dir.entryInfoList(QDir::Files);
+  for (const QFileInfo& info : entries) {
+    if (pattern.match(info.fileName()).hasMatch()) matches.append(info);
+  }
+  if (matches.isEmpty()) return 0;
+
+  std::sort(matches.begin(), matches.end(),
+            [](const QFileInfo& left, const QFileInfo& right) {
+              return left.lastModified() > right.lastModified();
+            });
+
+  int removed = 0;
+  const int firstToRemove = qMax(0, keepNewest);
+  for (int index = firstToRemove; index < matches.size(); ++index) {
+    if (QFile::remove(matches.at(index).absoluteFilePath())) ++removed;
+  }
+  return removed;
 }
 
 void AppLogger::initialize() {

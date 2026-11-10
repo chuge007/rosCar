@@ -92,6 +92,9 @@ class ClampMotorController final : public QObject {
   QHash<int, double> positions_;
   QHash<int, int> movingPercent_;
   QHash<int, int> pendingSpeedPercent_;
+  // 等待位置反馈后再下发的速度指令凭据：用于超时放弃，
+  // 避免位置反馈不来时每 50 ms 一直轮询、指令永远挂着。
+  QHash<int, int> pendingSpeedTickets_;
   QHash<int, double> moveTargets_;
   QHash<int, qint64> moveDeadlines_;
   QTimer* pollTimer_ = nullptr;

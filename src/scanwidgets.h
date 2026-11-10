@@ -35,6 +35,7 @@ public:
                             double thresholdPercent, bool holdMissing,
                             const QVector<bool> &trackedGates);
     void setReviewCursor(double range, bool visible);
+    void setDepthCursor(double depth, bool visible);
     quint64 paintCount() const { return m_paintCount; }
 
 signals:
@@ -44,6 +45,7 @@ signals:
     void surfaceWindowEdited(double start, double end);
     void surfaceTrackingUpdated(bool valid, double reference, double current);
     void interactionHint(const QString &text);
+    void depthHovered(double depth, bool visible);
 
 protected:
     void paintEvent(QPaintEvent *) override;
@@ -98,27 +100,44 @@ private:
     double m_surfaceLast = 0.0;
     double m_reviewCursor = 0.0;
     bool m_reviewCursorVisible = false;
+    double m_depthCursor = 0.0;
+    bool m_depthCursorVisible = false;
 };
 
 class EScanWidget : public QWidget
 {
     Q_OBJECT
 public:
+    enum PaletteMode { HeatPalette = 0, GrayscalePalette = 1, RfPalette = 2 };
+
     explicit EScanWidget(QWidget *parent = nullptr);
     void setFrame(const DecodedFrame &frame, double scale);
     void setImagingGate(bool enabled, double start, double end,
                         double rangeStart, double rangeEnd);
+    void setPaletteMode(int mode);
+    void setDepthCursor(double depth, bool visible);
+
+signals:
+    void depthHovered(double depth, bool visible);
 
 protected:
     void paintEvent(QPaintEvent *) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
 
 private:
+    QRectF imageTargetRect() const;
+    void rebuildColorTable();
+
     QImage m_image;
     bool m_gateEnabled = true;
     double m_gateStart = 0.0;
     double m_gateEnd = 50.0;
     double m_rangeStart = 0.0;
     double m_rangeEnd = 50.0;
+    int m_paletteMode = GrayscalePalette;
+    double m_depthCursor = 0.0;
+    bool m_depthCursorVisible = false;
 };
 
 class BScanWidget : public QWidget
@@ -153,6 +172,8 @@ public:
     void setDisplayLevels(double lowerPercent, double upperPercent, double gamma);
     void setDisplayReject(double percent);
     void setInterpolateMissing(bool enabled);
+    void setDepthCursor(double depth, bool visible);
+    void showEncoderCell(int encoderCellA);
     void resetView();
     void clear();
     void saveTo(QDataStream &out) const;
@@ -160,6 +181,7 @@ public:
 
 signals:
     void columnClicked(int column, double depth);
+    void depthHovered(double depth, bool visible);
 
 protected:
     void showEvent(QShowEvent *) override;
@@ -226,7 +248,7 @@ private:
     bool m_surfaceReferenceValid = false;
     bool m_surfaceLastValid = false;
     int m_viewMode = AmplitudeView;
-    int m_paletteMode = HeatPalette;
+    int m_paletteMode = GrayscalePalette;
     int m_scaleMode = FixedFullScale;
     double m_displayLower = 0.0;
     double m_displayUpper = 1.0;
@@ -239,9 +261,13 @@ private:
     int m_gapColumns = 0;
     int m_largestGap = 0;
     double m_zoom = 1.0;
-    double m_viewCenter = 0.5;
+    int m_viewLeft = 0;
+    bool m_followLatest = true;
+    int m_focusColumn = -1;
     QPointF m_mousePosition;
     bool m_hovering = false;
+    double m_depthCursor = 0.0;
+    bool m_depthCursorVisible = false;
     int m_batchUpdateDepth = 0;
     bool m_fullImageRebuildPending = false;
 };
@@ -258,13 +284,14 @@ public:
                              int sourceBeam, int gateMask);
     void appendFrames(const QVector<DecodedFrame> &frames, double scale,
                       int sourceBeam = 0);
-    void setEncoderPrecision(int countsPerCell);
-    void setMmPerCount(double mmPerCount);
+    void setCompactOverview(bool compact);
+    void setEncoderPrecision(int countsPerCellA, int countsPerCellB);
+    void setMmPerCount(double mmPerCountA, double mmPerCountB);
     void setImagingGate(int gateIndex, bool enabled, double thresholdPercent);
     int imagingGate() const { return m_imagingGate; }
     void clear();
     void saveTo(QDataStream &out) const;
-    bool loadFrom(QDataStream &in);
+    bool loadFrom(QDataStream &in, bool dualAxisCalibration = false);
 
 signals:
     void cellClicked(int x, int y);
@@ -290,8 +317,11 @@ private:
     bool m_imagingGateEnabled = true;
     double m_imagingGateThreshold = 0.0;
     double m_amplitudeScale = 4096.0;
-    int m_encoderPrecision = 10;
-    double m_mmPerCount = 0.0;
+    int m_encoderPrecisionA = 10;
+    int m_encoderPrecisionB = 10;
+    double m_mmPerCountA = 0.0;
+    double m_mmPerCountB = 0.0;
+    bool m_compactOverview = false;
     qint64 m_originEncoderA = 0;
     qint64 m_originEncoderB = 0;
     qint64 m_currentEncoderA = 0;

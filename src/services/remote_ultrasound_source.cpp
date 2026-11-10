@@ -19,8 +19,12 @@ QJsonObject groupToJson(const GroupScanSettings& group) {
                      {QStringLiteral("scanModes"), group.scanModes},
                      {QStringLiteral("selectedBeam"), group.selectedBeam},
                      {QStringLiteral("amplitudeScale"), group.amplitudeScale},
-                     {QStringLiteral("encoderPrecision"),
-                      group.encoderPrecision},
+                     {QStringLiteral("encoderPrecisionA"),
+                      group.encoderPrecisionA},
+                     {QStringLiteral("encoderPrecisionB"),
+                      group.encoderPrecisionB},
+                     {QStringLiteral("encoderGeometryRevision"),
+                      qint64(group.encoderGeometryRevision)},
                      {QStringLiteral("rangeStart"), group.rangeStart},
                      {QStringLiteral("rangeEnd"), group.rangeEnd}};
 }

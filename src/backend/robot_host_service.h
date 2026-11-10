@@ -41,6 +41,9 @@ class RobotHostService final : public QObject {
   // Host-internal auto-correction command. It is deliberately not an operator
   // RPC and is ignored unless the chassis is connected and enabled.
   void setCorrectionCommand(double linearMps, double angularRadps);
+  // 夹子配置的权威副本在外设服务里。整车连接会整体保存 settings_，
+  // 不同步过来就会用启动时的旧值把刚清掉的限位又写回去。
+  void adoptClampSettings(const crawling::DriveSettings& settings);
 
  signals:
   void responseReady(quint64 sessionId, quint64 requestId, bool ok,

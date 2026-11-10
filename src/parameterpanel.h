@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QWidget>
 #include <QVariant>
 #include <QStringList>
@@ -8,6 +9,8 @@
 class QComboBox;
 class QCheckBox;
 class QDoubleSpinBox;
+class QGroupBox;
+class QPushButton;
 class QSpinBox;
 class QFormLayout;
 class QLabel;
@@ -33,6 +36,9 @@ public:
     int currentPresetId() const { return m_currentPresetId; }
     double wheelDiameter() const;
     int encoderResolution() const;
+    int encoderCalibrationMode() const;
+    double measuredEncoderCountsPerMmA() const;
+    double measuredEncoderCountsPerMmB() const;
 
 public slots:
     bool activatePreset(int presetId) { return switchPreset(presetId); }
@@ -44,6 +50,7 @@ public slots:
     void setSurfaceWindowFromPlot(double start, double end);
     void selectGate(int gateIndex);
     void updateSurfaceStatus(bool valid, double reference, double current);
+    void setLiveEncoderCounts(qint64 encoderA, qint64 encoderB);
 
 signals:
     void configurationChanged();
@@ -58,6 +65,7 @@ signals:
     void gateVisualizationChanged();
     void surfaceTrackingChanged();
     void encoderCalibrationChanged();
+    void encoderDebugActiveChanged(bool active);
 
 private:
     struct Field {
@@ -98,6 +106,11 @@ private:
     void refreshGateTree();
     int selectedGroupId() const;
     void scheduleAutoApply();
+    void updateLongitudinalAngleFromWedgeInput();
+    void updateWedgeAngleFromLongitudinalInput(double longitudinalAngle);
+    void updateEncoderCalibrationSummary();
+    void resetEncoderDebugSession();
+    bool hasFreshEncoderCounts() const;
     void recomputeTofdPcs();
     bool switchPreset(int presetId);
     bool remoteMode() const;
@@ -118,6 +131,34 @@ private:
     QLabel *m_surfaceStatus = nullptr;
     QDoubleSpinBox *m_wheelDiameter = nullptr;
     QSpinBox *m_encoderResolution = nullptr;
+    QComboBox *m_encoderCalibrationMode = nullptr;
+    QLabel *m_encoderTheorySummary = nullptr;
+    QLabel *m_encoderActiveSummary = nullptr;
+    QPushButton *m_encoderDebugToggle = nullptr;
+    QGroupBox *m_encoderDebugGroup = nullptr;
+    QLabel *m_encoderLiveCounts = nullptr;
+    QComboBox *m_encoderDebugAxis = nullptr;
+    QDoubleSpinBox *m_encoderDebugDistance = nullptr;
+    QLabel *m_encoderDebugStartLabel = nullptr;
+    QLabel *m_encoderDebugResult = nullptr;
+    QPushButton *m_encoderRecordStart = nullptr;
+    QPushButton *m_encoderRecordEnd = nullptr;
+    QPushButton *m_encoderApplyMeasured = nullptr;
+    qint64 m_encoderDebugStartCount = 0;
+    bool m_hasEncoderDebugStart = false;
+    double m_pendingCountsPerMmA = 0.0;
+    double m_pendingCountsPerMmB = 0.0;
+    double m_measuredCountsPerMmA = 0.0;
+    double m_measuredCountsPerMmB = 0.0;
+    qint64 m_liveEncoderA = 0;
+    qint64 m_liveEncoderB = 0;
+    bool m_hasLiveEncoderCounts = false;
+    QElapsedTimer m_encoderLiveClock;
+    QDoubleSpinBox *m_workpieceVelocityInput = nullptr;
+    QDoubleSpinBox *m_wedgeAngleInput = nullptr;
+    QDoubleSpinBox *m_wedgeVelocityInput = nullptr;
+    QDoubleSpinBox *m_longitudinalAngleInput = nullptr;
+    QLabel *m_wedgeAngleStatus = nullptr;
     QDoubleSpinBox *m_tofdDepthFraction = nullptr;
     QLabel *m_tofdAngleLabel = nullptr;
     QLabel *m_tofdDepthLabel = nullptr;
@@ -127,6 +168,8 @@ private:
     bool m_switchingPreset = false;
     QTimer *m_autoApplyTimer = nullptr;
     bool m_applying = false;
+    // 下发进行中收到的参数修改不能丢：标记后在本轮结束立即补发一次。
+    bool m_applyDeferred = false;
     int m_remoteRemoveAfterSwitch = -1;
     int m_remoteApplyLocalFailures = 0;
     QStringList m_remoteApplyLocalErrors;

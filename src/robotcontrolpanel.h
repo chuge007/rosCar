@@ -14,6 +14,7 @@
 #include <QImage>
 #include <QList>
 #include <QPointer>
+#include <QSize>
 #include <QVector>
 #include <QVector3D>
 #include <QStringList>
@@ -68,7 +69,9 @@ public slots:
     void setLaserProfileImage(const QImage &image);
     void setLaserProfilePoints(const QVector<QVector3D> &points);
     void setUsbCameraImage(int slot, const QImage &image);
-    void pushUsbDisplaySize(int slot);
+    // force=true 用在连接/重连之后：采集端会把目标尺寸重置为默认预览值，
+    // 此时即使标签尺寸没变也必须重新下发一次。
+    void pushUsbDisplaySize(int slot, bool force = false);
     void startAutoCorrection();
     void stopAutoCorrection();
     void setAutoCorrectionPaused(bool paused);
@@ -77,6 +80,10 @@ protected:
     void showEvent(QShowEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void changeEvent(QEvent *event) override;
+    bool event(QEvent *event) override;
+    // 摄像头预览标签的尺寸不会触发面板自身的 resizeEvent，单独拦截它的 Resize，
+    // 把新尺寸同步给采集端并按新尺寸重绘当前帧。
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
     void refreshPorts();
@@ -170,12 +177,18 @@ private:
     void settingsToUi(const crawling::DriveSettings &settings);
     void setMotion(bool &flag, bool active);
     void clearJogLatch();
+    void releaseAllJog(const QString &reason);
     void requestEnable(bool enabled);
     void emergencyStop();
     void stopMotion();
     void setStateStyle(crawling::DriveState state);
     void updateInformationDialog();
     void displayUsbCameraImage(int slot, const QImage &image);
+    // 把一帧按标签当前物理尺寸等比铺满（居中裁掉溢出部分）后显示，避免
+    // 固定小尺寸帧在标签里居中造成四周大片空白。
+    void applyUsbPreviewPixmap(int slot, const QImage &image);
+    // 让预览标签的高度跟随当前画面宽高比：框内不再多出上下空白，画面也不被裁切。
+    void updateUsbPreviewHeight(int slot);
     void flushLogUi();
     void refreshVisibleUi();
     void updateUsbCameraSourceUi(int slot);
@@ -190,6 +203,24 @@ private:
     void applyProfileWeldTuning();
     bool beginProfileDetectionLogSession();
     void finishProfileDetectionLogSession(const QString &reason);
+
+    // 车体控制页的可拖动参数：滑块整数位置按 scale 换算成工程值，数值标签随拖动刷新。
+    struct ParameterSlider
+    {
+        QSlider *slider = nullptr;
+        QLabel *valueLabel = nullptr;
+        double scale = 1.0;
+        int decimals = 1;
+
+        double number() const;
+        void setNumber(double value);
+        void refreshValueText();
+    };
+    static QWidget *createParameterSlider(QWidget *parent, ParameterSlider *param,
+                                          const QString &title, const QString &hint,
+                                          int minimum, int maximum, int decimals,
+                                          double scale);
+    void applyConfigurationSettings();
 
     crawling::SynchronizedDriveController *m_controller = nullptr;
     pa1664::remote::RemoteWorkbenchSession *m_remoteSession = nullptr;
@@ -254,10 +285,10 @@ private:
     QLabel *m_laserStatus = nullptr;
     QLabel *m_usbStatus = nullptr;
     QLabel *m_correctionStatus = nullptr;
-    QDoubleSpinBox *m_correctionSpeed = nullptr;
-    QDoubleSpinBox *m_correctionSegment = nullptr;
-    QDoubleSpinBox *m_correctionKp = nullptr;
-    QDoubleSpinBox *m_correctionKd = nullptr;
+    ParameterSlider m_correctionSpeed;
+    ParameterSlider m_correctionSegment;
+    ParameterSlider m_correctionKp;
+    ParameterSlider m_correctionKd;
     QPushButton *m_autoCorrectionStart = nullptr;
     QPushButton *m_autoCorrectionStop = nullptr;
 
@@ -283,7 +314,7 @@ private:
     QDoubleSpinBox *m_maxAngularSpeed = nullptr;
     QDoubleSpinBox *m_maxLinearAcceleration = nullptr;
     QDoubleSpinBox *m_maxAngularAcceleration = nullptr;
-    QDoubleSpinBox *m_minimumInnerRatio = nullptr;
+    ParameterSlider m_minimumInnerRatio;
     QSpinBox *m_commandTimeout = nullptr;
     QSpinBox *m_feedbackTimeout = nullptr;
     QSpinBox *m_armingTimeout = nullptr;
@@ -349,6 +380,9 @@ private:
     QString m_usbText = QStringLiteral("未连接");
     QImage m_laserImage;
     QImage m_usbImages[crawling::kUsbCameraChannelCount];
+    // 已下发给采集端的显示尺寸（物理像素）。标签尺寸变化会触发 Resize 事件，
+    // 用它去重，避免布局期间的重复请求。
+    QSize m_usbPushedSizes[crawling::kUsbCameraChannelCount];
     QVector<QVector3D> m_laserPoints;
     crawling::ProfileWeldTuning m_profileWeldTuning;
     QVector<crawling::ProfileWeldTemplate> m_profileTemplates;

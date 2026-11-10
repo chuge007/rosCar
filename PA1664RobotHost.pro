@@ -38,6 +38,7 @@ SOURCES += \
     src/packetdecoder.cpp \
     src/parameterpresetstore.cpp \
     src/pulseloadguard.cpp \
+    src/ultrasoundconfigsanitizer.cpp \
     src/usbbootstrap.cpp \
     src/common/protocol/control_codec.cpp \
     src/common/protocol/realtime_codec.cpp \
@@ -89,6 +90,7 @@ HEADERS += \
     src/packetdecoder.h \
     src/parameterpresetstore.h \
     src/pulseloadguard.h \
+    src/ultrasoundconfigsanitizer.h \
     src/rawpacket.h \
     src/usbbootstrap.h \
     src/common/protocol/protocol_types.h \

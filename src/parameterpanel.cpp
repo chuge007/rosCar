@@ -27,6 +27,55 @@
 #include <QStringList>
 #include <exception>
 
+namespace {
+
+constexpr double kAngleTolerance = 1.0e-9;
+
+bool longitudinalAngleFromWedge(double wedgeAngle, double wedgeVelocity,
+                                double workpieceVelocity, double *longitudinalAngle)
+{
+    if (!longitudinalAngle || !qIsFinite(wedgeAngle) || wedgeVelocity <= 0.0
+        || workpieceVelocity <= 0.0) {
+        return false;
+    }
+
+    const double ratio = qSin(qDegreesToRadians(qAbs(wedgeAngle)))
+                         * workpieceVelocity / wedgeVelocity;
+    if (!qIsFinite(ratio) || ratio > 1.0 + kAngleTolerance)
+        return false;
+
+    *longitudinalAngle = qRadiansToDegrees(qAsin(qBound(0.0, ratio, 1.0)));
+    return qIsFinite(*longitudinalAngle);
+}
+
+bool wedgeAngleFromLongitudinal(double longitudinalAngle, double wedgeVelocity,
+                                double workpieceVelocity, double *wedgeAngle)
+{
+    if (!wedgeAngle || !qIsFinite(longitudinalAngle) || wedgeVelocity <= 0.0
+        || workpieceVelocity <= 0.0) {
+        return false;
+    }
+
+    const double ratio = qSin(qDegreesToRadians(qAbs(longitudinalAngle)))
+                         * wedgeVelocity / workpieceVelocity;
+    if (!qIsFinite(ratio) || ratio > 1.0 + kAngleTolerance)
+        return false;
+
+    *wedgeAngle = qRadiansToDegrees(qAsin(qBound(0.0, ratio, 1.0)));
+    return qIsFinite(*wedgeAngle);
+}
+
+double longitudinalCriticalWedgeAngle(double wedgeVelocity, double workpieceVelocity)
+{
+    if (wedgeVelocity <= 0.0 || workpieceVelocity <= 0.0)
+        return 0.0;
+    if (wedgeVelocity >= workpieceVelocity)
+        return 90.0;
+    return qRadiansToDegrees(qAsin(wedgeVelocity / workpieceVelocity));
+}
+
+} // namespace
+
 ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
 {
     m_autoApplyTimer = new QTimer(this);
@@ -147,6 +196,7 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     addDouble(general, QStringLiteral("工件声速"), 100, 20000, 1,
               [this] { return pa1664::remote::UltrasoundParameterService::instance().getWorkpieceVelocity(selectedGroupId()); },
               [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWorkpieceVelocity(v, selectedGroupId()); }, QStringLiteral(" m/s"));
+    m_workpieceVelocityInput = qobject_cast<QDoubleSpinBox *>(m_fields.back().editor);
     addInt(general, QStringLiteral("PA 电压"), 0, 1000,
            [] { return pa1664::remote::UltrasoundParameterService::instance().getPaVoltage(); },
            [](int v) { return pa1664::remote::UltrasoundParameterService::instance().setPaVoltage(v); }, QStringLiteral(" V"));
@@ -212,18 +262,17 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     tabs->addTab(pageFor(beam), QStringLiteral("相控阵"));
 
     auto *probe = new QFormLayout;
-    // PA-1664 当前 USB SDK 的公开 TX/RX 接口使用 1..8。配置 JSON 中可能
-    // 出现 0，那是未初始化/内部序列化值，不能作为公开 API 的通道编号。
-    // 真机回读已确认：向接口写 0 会被 SDK 修正为 1。
+    // 设备外壳按 1..8 标注，原厂 SDK 和配置 JSON 按 0..7 编号。
+    // 下拉框显示物理编号，但 itemData 始终保存并下发 SDK 编号。
     const QList<QPair<QString, int>> utChannels = {
-        {QStringLiteral("通道 1"), 1}, {QStringLiteral("通道 2"), 2},
-        {QStringLiteral("通道 3"), 3}, {QStringLiteral("通道 4"), 4},
-        {QStringLiteral("通道 5"), 5}, {QStringLiteral("通道 6"), 6},
-        {QStringLiteral("通道 7"), 7}, {QStringLiteral("通道 8"), 8}
+        {QStringLiteral("通道 1"), 0}, {QStringLiteral("通道 2"), 1},
+        {QStringLiteral("通道 3"), 2}, {QStringLiteral("通道 4"), 3},
+        {QStringLiteral("通道 5"), 4}, {QStringLiteral("通道 6"), 5},
+        {QStringLiteral("通道 7"), 6}, {QStringLiteral("通道 8"), 7}
     };
     auto *channelHint = new QLabel(QStringLiteral(
-        "当前工作组的一激一收通道。界面通道与 SDK 公开接口均为 1–8；"
-        "激励与接收可选同一路，也可选不同路。"));
+        "当前工作组的一激一收通道。界面显示设备物理通道 1–8，"
+        "内部自动换算为 SDK 通道 0–7。"));
     channelHint->setWordWrap(true);
     channelHint->setStyleSheet(QStringLiteral("color:#52606d;padding:4px 0 8px 0"));
     probe->addRow(channelHint);
@@ -274,8 +323,55 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
 
     auto *wedge = new QFormLayout;
     addBool(wedge, QStringLiteral("启用楔块"), [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeEnable(selectedGroupId()); }, [this](bool v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeEnable(v, selectedGroupId()); });
-    addDouble(wedge, QStringLiteral("楔块角度"), -90, 90, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeAngle(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeAngle(v, selectedGroupId()); }, QStringLiteral("°"));
     addDouble(wedge, QStringLiteral("楔块声速"), 100, 20000, 1, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeVelocity(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeVelocity(v, selectedGroupId()); }, QStringLiteral(" m/s"));
+    m_wedgeVelocityInput = qobject_cast<QDoubleSpinBox *>(m_fields.back().editor);
+    addDouble(wedge, QStringLiteral("楔块内入射角（相对法线）"), -89.999, 89.999, 3,
+              [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeAngle(selectedGroupId()); },
+              [this](double v) {
+                  // 声速字段排在角度字段之前下发；这里读取 SDK 的真实回读值，
+                  // 避免声速写入被拒绝时仍按界面中的未生效数值放行角度。
+                  const double wedgeVelocity =
+                      pa1664::remote::UltrasoundParameterService::instance().getWedgeVelocity(selectedGroupId());
+                  const double workpieceVelocity =
+                      pa1664::remote::UltrasoundParameterService::instance().getWorkpieceVelocity(selectedGroupId());
+                  double ignoredLongitudinalAngle = 0.0;
+                  if (!longitudinalAngleFromWedge(v, wedgeVelocity, workpieceVelocity,
+                                                  &ignoredLongitudinalAngle)) {
+                      emit message(QStringLiteral(
+                                       "楔块内入射角 %1° 超过当前声速组合的纵波临界角 %2°，已拒绝写入采集卡")
+                                       .arg(qAbs(v), 0, 'f', 3)
+                                       .arg(longitudinalCriticalWedgeAngle(wedgeVelocity,
+                                                                           workpieceVelocity),
+                                            0, 'f', 3),
+                                   true);
+                      return false;
+                  }
+                  return pa1664::remote::UltrasoundParameterService::instance().setWedgeAngle(v, selectedGroupId());
+              },
+              QStringLiteral("°"));
+    m_wedgeAngleInput = qobject_cast<QDoubleSpinBox *>(m_fields.back().editor);
+
+    m_longitudinalAngleInput = new QDoubleSpinBox;
+    m_longitudinalAngleInput->setRange(0.0, 89.999);
+    m_longitudinalAngleInput->setDecimals(3);
+    m_longitudinalAngleInput->setSingleStep(1.0);
+    m_longitudinalAngleInput->setSuffix(QStringLiteral("°"));
+    m_longitudinalAngleInput->setKeyboardTracking(false);
+    m_longitudinalAngleInput->setToolTip(QStringLiteral(
+        "输入楔块标称的钢中纵波折射角；软件会按楔块声速和工件声速反算楔块内入射角。"));
+    wedge->addRow(QStringLiteral("纵波楔块标称角（钢内）"), m_longitudinalAngleInput);
+    m_wedgeAngleStatus = new QLabel;
+    m_wedgeAngleStatus->setWordWrap(true);
+    wedge->addRow(m_wedgeAngleStatus);
+
+    connect(m_longitudinalAngleInput, &QDoubleSpinBox::valueChanged,
+            this, &ParameterPanel::updateWedgeAngleFromLongitudinalInput);
+    connect(m_wedgeAngleInput, &QDoubleSpinBox::valueChanged,
+            this, [this](double) { updateLongitudinalAngleFromWedgeInput(); });
+    connect(m_wedgeVelocityInput, &QDoubleSpinBox::valueChanged,
+            this, [this](double) { updateLongitudinalAngleFromWedgeInput(); });
+    connect(m_workpieceVelocityInput, &QDoubleSpinBox::valueChanged,
+            this, [this](double) { updateLongitudinalAngleFromWedgeInput(); });
     addDouble(wedge, "X", -10000, 10000, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeX(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeX(v, selectedGroupId()); }, QStringLiteral(" mm"));
     addDouble(wedge, "Z", -10000, 10000, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeZ(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeZ(v, selectedGroupId()); }, QStringLiteral(" mm"));
     addDouble(wedge, QStringLiteral("屋顶角"), -90, 90, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeRoofAngle(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeRoofAngle(v, selectedGroupId()); }, QStringLiteral("°"));
@@ -285,12 +381,16 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     addDouble(wedge, QStringLiteral("高度"), 0, 10000, 3, [this] { return pa1664::remote::UltrasoundParameterService::instance().getWedgeHeight(selectedGroupId()); }, [this](double v) { return pa1664::remote::UltrasoundParameterService::instance().setWedgeHeight(v, selectedGroupId()); }, QStringLiteral(" mm"));
     tabs->addTab(pageFor(wedge), QStringLiteral("楔块"));
 
-    addGateTab(tabs);
+    // 闸门页签已移除（Gate A/B/C/I 与表面跟踪不再使用）。
     addTcgTab(tabs);
 
     auto *other = new QFormLayout;
     addEnum(other, QStringLiteral("编码器方向"), {{QStringLiteral("正向"),0},{QStringLiteral("反向"),1}},
             [] { return int(pa1664::remote::UltrasoundParameterService::instance().getScannerDirection()); }, [](int v) { return pa1664::remote::UltrasoundParameterService::instance().setScannerDirection(ScannerDir(v)); });
+    m_encoderCalibrationMode = new QComboBox;
+    m_encoderCalibrationMode->addItem(QStringLiteral("轮径理论计算"), 0);
+    m_encoderCalibrationMode->addItem(QStringLiteral("实际移动标定"), 1);
+    other->addRow(QStringLiteral("距离换算方式"), m_encoderCalibrationMode);
     m_wheelDiameter = new QDoubleSpinBox;
     m_wheelDiameter->setRange(1.0, 100000.0);
     m_wheelDiameter->setDecimals(2);
@@ -299,15 +399,149 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     m_wheelDiameter->setKeyboardTracking(false);
     other->addRow(QStringLiteral("编码器轮子直径"), m_wheelDiameter);
     connect(m_wheelDiameter, &QDoubleSpinBox::valueChanged,
-            this, &ParameterPanel::encoderCalibrationChanged);
+            this, [this] {
+        updateEncoderCalibrationSummary();
+        emit encoderCalibrationChanged();
+    });
     m_encoderResolution = new QSpinBox;
     m_encoderResolution->setRange(1, 1000000);
     m_encoderResolution->setValue(4096);
-    m_encoderResolution->setSuffix(QStringLiteral(" 脉冲/圈"));
+    m_encoderResolution->setSuffix(QStringLiteral(" 计数/圈"));
     m_encoderResolution->setKeyboardTracking(false);
-    other->addRow(QStringLiteral("编码器分辨率"), m_encoderResolution);
+    other->addRow(QStringLiteral("编码器有效计数/圈"), m_encoderResolution);
     connect(m_encoderResolution, &QSpinBox::valueChanged,
-            this, &ParameterPanel::encoderCalibrationChanged);
+            this, [this] {
+        updateEncoderCalibrationSummary();
+        emit encoderCalibrationChanged();
+    });
+
+    m_encoderTheorySummary = new QLabel;
+    m_encoderTheorySummary->setWordWrap(true);
+    other->addRow(QStringLiteral("理论换算结果"), m_encoderTheorySummary);
+    m_encoderActiveSummary = new QLabel;
+    m_encoderActiveSummary->setWordWrap(true);
+    other->addRow(QStringLiteral("当前有效标定"), m_encoderActiveSummary);
+
+    m_encoderDebugToggle = new QPushButton(QStringLiteral("开始编码器调试"));
+    m_encoderDebugToggle->setCheckable(true);
+    other->addRow(m_encoderDebugToggle);
+
+    m_encoderDebugGroup = new QGroupBox(QStringLiteral("实际移动标定"));
+    auto *debugForm = new QFormLayout(m_encoderDebugGroup);
+    m_encoderLiveCounts = new QLabel(QStringLiteral("A -- / B --"));
+    debugForm->addRow(QStringLiteral("实时计数"), m_encoderLiveCounts);
+    m_encoderDebugAxis = new QComboBox;
+    m_encoderDebugAxis->addItem(QStringLiteral("编码器 A"), 0);
+    m_encoderDebugAxis->addItem(QStringLiteral("编码器 B"), 1);
+    debugForm->addRow(QStringLiteral("标定轴"), m_encoderDebugAxis);
+    m_encoderDebugDistance = new QDoubleSpinBox;
+    m_encoderDebugDistance->setRange(0.01, 10000000.0);
+    m_encoderDebugDistance->setDecimals(2);
+    m_encoderDebugDistance->setValue(1000.0);
+    m_encoderDebugDistance->setSuffix(QStringLiteral(" mm"));
+    m_encoderDebugDistance->setKeyboardTracking(false);
+    debugForm->addRow(QStringLiteral("实际移动距离"), m_encoderDebugDistance);
+    m_encoderDebugStartLabel = new QLabel(QStringLiteral("--"));
+    debugForm->addRow(QStringLiteral("起点计数"), m_encoderDebugStartLabel);
+    m_encoderDebugResult = new QLabel(QStringLiteral("请先记录起点"));
+    m_encoderDebugResult->setWordWrap(true);
+    debugForm->addRow(QStringLiteral("标定结果"), m_encoderDebugResult);
+
+    auto *debugButtons = new QWidget;
+    auto *debugButtonsLayout = new QHBoxLayout(debugButtons);
+    debugButtonsLayout->setContentsMargins(0, 0, 0, 0);
+    m_encoderRecordStart = new QPushButton(QStringLiteral("记录起点"));
+    m_encoderRecordEnd = new QPushButton(QStringLiteral("记录终点并计算"));
+    debugButtonsLayout->addWidget(m_encoderRecordStart);
+    debugButtonsLayout->addWidget(m_encoderRecordEnd);
+    debugForm->addRow(debugButtons);
+
+    auto *applyButtons = new QWidget;
+    auto *applyButtonsLayout = new QHBoxLayout(applyButtons);
+    applyButtonsLayout->setContentsMargins(0, 0, 0, 0);
+    m_encoderApplyMeasured = new QPushButton(QStringLiteral("应用并保存"));
+    auto *closeDebug = new QPushButton(QStringLiteral("结束调试"));
+    applyButtonsLayout->addWidget(m_encoderApplyMeasured);
+    applyButtonsLayout->addWidget(closeDebug);
+    debugForm->addRow(applyButtons);
+    m_encoderDebugGroup->setVisible(false);
+    other->addRow(m_encoderDebugGroup);
+
+    connect(m_encoderDebugToggle, &QPushButton::toggled, this, [this](bool enabled) {
+        m_encoderDebugToggle->setText(enabled ? QStringLiteral("结束编码器调试")
+                                              : QStringLiteral("开始编码器调试"));
+        m_encoderDebugGroup->setVisible(enabled);
+        resetEncoderDebugSession();
+        emit encoderDebugActiveChanged(enabled);
+    });
+    connect(closeDebug, &QPushButton::clicked, this, [this] {
+        m_encoderDebugToggle->setChecked(false);
+    });
+    connect(m_encoderDebugAxis, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this] { resetEncoderDebugSession(); });
+    connect(m_encoderRecordStart, &QPushButton::clicked, this, [this] {
+        if (!hasFreshEncoderCounts()) {
+            emit message(QStringLiteral("尚未收到编码器数据，请先连接采集卡并开始采集"), true);
+            return;
+        }
+        m_encoderDebugStartCount = m_encoderDebugAxis->currentData().toInt() == 0
+                                       ? m_liveEncoderA : m_liveEncoderB;
+        m_hasEncoderDebugStart = true;
+        m_encoderDebugStartLabel->setText(QString::number(m_encoderDebugStartCount));
+        m_encoderDebugResult->setText(QStringLiteral("起点已记录，请移动后记录终点"));
+        m_encoderRecordEnd->setEnabled(true);
+        m_encoderApplyMeasured->setEnabled(false);
+    });
+    connect(m_encoderRecordEnd, &QPushButton::clicked, this, [this] {
+        if (!m_hasEncoderDebugStart || !hasFreshEncoderCounts()) {
+            emit message(QStringLiteral("编码器数据已停止更新，请检查采集状态"), true);
+            return;
+        }
+        const qint64 endCount = m_encoderDebugAxis->currentData().toInt() == 0
+                                    ? m_liveEncoderA : m_liveEncoderB;
+        const qint64 delta = endCount - m_encoderDebugStartCount;
+        const double distance = m_encoderDebugDistance->value();
+        if (delta == 0 || distance <= 0.0) {
+            emit message(QStringLiteral("编码器计数没有变化，无法计算标定结果"), true);
+            return;
+        }
+        const double countsPerMm = qAbs(double(delta)) / distance;
+        if (!qIsFinite(countsPerMm) || countsPerMm <= 0.0) {
+            emit message(QStringLiteral("编码器标定结果无效"), true);
+            return;
+        }
+        if (m_encoderDebugAxis->currentData().toInt() == 0)
+            m_pendingCountsPerMmA = countsPerMm;
+        else
+            m_pendingCountsPerMmB = countsPerMm;
+        m_encoderDebugResult->setText(
+            QStringLiteral("终点 %1，变化 %2（%3），结果 %4 计数/mm，%5 mm/计数")
+                .arg(endCount).arg(qAbs(delta))
+                .arg(delta > 0 ? QStringLiteral("正向") : QStringLiteral("反向"))
+                .arg(countsPerMm, 0, 'f', 6)
+                .arg(1.0 / countsPerMm, 0, 'f', 6));
+        m_encoderApplyMeasured->setEnabled(true);
+    });
+    connect(m_encoderApplyMeasured, &QPushButton::clicked, this, [this] {
+        if (m_pendingCountsPerMmA > 0.0)
+            m_measuredCountsPerMmA = m_pendingCountsPerMmA;
+        if (m_pendingCountsPerMmB > 0.0)
+            m_measuredCountsPerMmB = m_pendingCountsPerMmB;
+        const int measuredIndex = m_encoderCalibrationMode->findData(1);
+        const bool modeChanged = m_encoderCalibrationMode->currentIndex() != measuredIndex;
+        emit message(QStringLiteral("实测编码器标定已应用"), false);
+        m_encoderCalibrationMode->setCurrentIndex(measuredIndex);
+        updateEncoderCalibrationSummary();
+        if (!modeChanged)
+            emit encoderCalibrationChanged();
+        resetEncoderDebugSession();
+    });
+    connect(m_encoderCalibrationMode,
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this] {
+        updateEncoderCalibrationSummary();
+        emit encoderCalibrationChanged();
+    });
     auto &parameterService =
         pa1664::remote::UltrasoundParameterService::instance();
     if (remoteMode()) {
@@ -316,6 +550,13 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
         connect(&parameterService, &pa1664::remote::UltrasoundParameterService::remoteApplyFinished,
                 this, [this](bool ok, const QString &text) {
                     m_applying = false;
+                    if (m_applyDeferred) {
+                        // 本轮下发期间用户又改了参数：先不回读（回读会把控件
+                        // 拉回旧值），立刻补发这一批，结束后再统一回读。
+                        m_applyDeferred = false;
+                        m_autoApplyTimer->start(0);
+                        return;
+                    }
                     reload();
                     QString finalText = text;
                     if (m_remoteApplyLocalFailures > 0) {
@@ -344,13 +585,23 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
                 this, &ParameterPanel::scanPrecisionChanged);
         connect(&parameterService,
                 &pa1664::remote::UltrasoundParameterService::encoderCalibrationReady,
-                this, [this](double wheelDiameterMm, int resolution) {
+                this, [this](double wheelDiameterMm, int resolution,
+                             int calibrationMode, double countsPerMmA,
+                             double countsPerMmB) {
                     const QSignalBlocker diameterBlocker(m_wheelDiameter);
                     const QSignalBlocker resolutionBlocker(m_encoderResolution);
+                    const QSignalBlocker modeBlocker(m_encoderCalibrationMode);
                     m_updatingEncoderSnapshot = true;
                     m_wheelDiameter->setValue(wheelDiameterMm);
                     m_encoderResolution->setValue(resolution);
+                    m_encoderCalibrationMode->setCurrentIndex(
+                        m_encoderCalibrationMode->findData(calibrationMode));
+                    m_measuredCountsPerMmA = countsPerMmA;
+                    m_measuredCountsPerMmB = countsPerMmB;
+                    m_pendingCountsPerMmA = countsPerMmA;
+                    m_pendingCountsPerMmB = countsPerMmB;
                     m_updatingEncoderSnapshot = false;
+                    updateEncoderCalibrationSummary();
                 });
         QTimer::singleShot(0, this, [service = &parameterService] {
             service->refreshPresets();
@@ -359,10 +610,24 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     } else {
         double savedDiameter = 500.0;
         int savedResolution = 4096;
-        ParameterPresetStore::loadEncoderCalibration(&savedDiameter, &savedResolution);
-        m_wheelDiameter->setValue(savedDiameter);
-        m_encoderResolution->setValue(savedResolution);
+        int savedCalibrationMode = 0;
+        ParameterPresetStore::loadEncoderCalibration(
+            &savedDiameter, &savedResolution, &savedCalibrationMode,
+            &m_measuredCountsPerMmA, &m_measuredCountsPerMmB);
+        {
+            const QSignalBlocker diameterBlocker(m_wheelDiameter);
+            const QSignalBlocker resolutionBlocker(m_encoderResolution);
+            const QSignalBlocker modeBlocker(m_encoderCalibrationMode);
+            m_wheelDiameter->setValue(savedDiameter);
+            m_encoderResolution->setValue(savedResolution);
+            m_encoderCalibrationMode->setCurrentIndex(
+                m_encoderCalibrationMode->findData(savedCalibrationMode));
+        }
+        m_pendingCountsPerMmA = m_measuredCountsPerMmA;
+        m_pendingCountsPerMmB = m_measuredCountsPerMmB;
     }
+    updateEncoderCalibrationSummary();
+    resetEncoderDebugSession();
     tabs->addTab(pageFor(other), QStringLiteral("编码器"));
 
     QTimer::singleShot(0, this, &ParameterPanel::refreshGroups);
@@ -430,8 +695,14 @@ void ParameterPanel::addEnum(QFormLayout *form, const QString &name,
 
 void ParameterPanel::scheduleAutoApply()
 {
-    if (!m_applying)
-        m_autoApplyTimer->start();
+    if (m_applying) {
+        // 远程下发要经过 apply → commit → 快照多个往返，期间用户继续调参
+        // 是常态。直接忽略会让这批输入永远不落到硬件，只能靠下一次编辑
+        // 才补上，表现为“参数改了没反应”。这里只记标记，本轮结束立即补发。
+        m_applyDeferred = true;
+        return;
+    }
+    m_autoApplyTimer->start();
 }
 
 void ParameterPanel::addGateTab(QTabWidget *tabs)
@@ -655,6 +926,83 @@ int ParameterPanel::encoderResolution() const
     return m_encoderResolution ? m_encoderResolution->value() : 4096;
 }
 
+int ParameterPanel::encoderCalibrationMode() const
+{
+    return m_encoderCalibrationMode
+               ? m_encoderCalibrationMode->currentData().toInt() : 0;
+}
+
+double ParameterPanel::measuredEncoderCountsPerMmA() const
+{
+    return m_measuredCountsPerMmA;
+}
+
+double ParameterPanel::measuredEncoderCountsPerMmB() const
+{
+    return m_measuredCountsPerMmB;
+}
+
+void ParameterPanel::setLiveEncoderCounts(qint64 encoderA, qint64 encoderB)
+{
+    m_liveEncoderA = encoderA;
+    m_liveEncoderB = encoderB;
+    m_hasLiveEncoderCounts = true;
+    m_encoderLiveClock.restart();
+    if (m_encoderLiveCounts) {
+        m_encoderLiveCounts->setText(
+            QStringLiteral("A %1 / B %2").arg(encoderA).arg(encoderB));
+    }
+}
+
+void ParameterPanel::updateEncoderCalibrationSummary()
+{
+    if (!m_wheelDiameter || !m_encoderResolution)
+        return;
+    const double circumference = 3.14159265358979323846
+                                 * qMax(0.001, m_wheelDiameter->value());
+    const double theoreticalCountsPerMm = m_encoderResolution->value()
+                                          / circumference;
+    if (m_encoderTheorySummary) {
+        m_encoderTheorySummary->setText(
+            QStringLiteral("%1 计数/mm，%2 mm/计数")
+                .arg(theoreticalCountsPerMm, 0, 'f', 6)
+                .arg(1.0 / theoreticalCountsPerMm, 0, 'f', 6));
+    }
+    if (!m_encoderActiveSummary || !m_encoderCalibrationMode)
+        return;
+    const bool measured = encoderCalibrationMode() == 1;
+    const double countsA = measured && m_measuredCountsPerMmA > 0.0
+                               ? m_measuredCountsPerMmA : theoreticalCountsPerMm;
+    const double countsB = measured && m_measuredCountsPerMmB > 0.0
+                               ? m_measuredCountsPerMmB : theoreticalCountsPerMm;
+    m_encoderActiveSummary->setText(
+        QStringLiteral("%1；A %2 计数/mm，B %3 计数/mm")
+            .arg(measured ? QStringLiteral("实际移动标定")
+                          : QStringLiteral("轮径理论计算"))
+            .arg(countsA, 0, 'f', 6).arg(countsB, 0, 'f', 6));
+}
+
+void ParameterPanel::resetEncoderDebugSession()
+{
+    m_hasEncoderDebugStart = false;
+    m_pendingCountsPerMmA = m_measuredCountsPerMmA;
+    m_pendingCountsPerMmB = m_measuredCountsPerMmB;
+    if (m_encoderDebugStartLabel)
+        m_encoderDebugStartLabel->setText(QStringLiteral("--"));
+    if (m_encoderDebugResult)
+        m_encoderDebugResult->setText(QStringLiteral("请先记录起点"));
+    if (m_encoderRecordEnd)
+        m_encoderRecordEnd->setEnabled(false);
+    if (m_encoderApplyMeasured)
+        m_encoderApplyMeasured->setEnabled(false);
+}
+
+bool ParameterPanel::hasFreshEncoderCounts() const
+{
+    return m_hasLiveEncoderCounts && m_encoderLiveClock.isValid()
+           && m_encoderLiveClock.elapsed() <= 2000;
+}
+
 bool ParameterPanel::remoteMode() const
 {
     return pa1664::remote::UltrasoundParameterService::instance().isRemote();
@@ -820,6 +1168,10 @@ void ParameterPanel::finishRemotePresetOperation(const QString &operation,
 
 void ParameterPanel::reload()
 {
+    // 下发进行中或还有未下发的用户输入时，回读会用旧值覆盖控件，表现为
+    // “刚调好的参数自己跳回去”。此时跳过回读，等下一轮 apply 结束再同步。
+    if (m_applying || m_applyDeferred)
+        return;
     for (auto &field : m_fields) {
         const QSignalBlocker blocker(field.editor);
         const QVariant value = field.getter();
@@ -844,6 +1196,7 @@ void ParameterPanel::recomputeTofdPcs()
 {
     if (!m_tofdAngleLabel || !m_tofdDepthLabel || !m_tofdPcsLabel)
         return;
+    updateLongitudinalAngleFromWedgeInput();
     double thickness = 0.0;
     double wedgeAngle = 0.0;
     double wedgeVelocity = 0.0;
@@ -862,22 +1215,85 @@ void ParameterPanel::recomputeTofdPcs()
     const double fraction = m_tofdDepthFraction ? m_tofdDepthFraction->value()
                                                 : (2.0 / 3.0);
 
-    // 斯涅尔定律：楔块入射角 → 钢内折射角。sinθ_钢 = sinθ_楔 × c_钢 / c_楔。
-    const double ratio = qSin(qDegreesToRadians(wedgeAngle))
-                         * workpieceVelocity / qMax(1.0, wedgeVelocity);
-    if (ratio > 1.0) {
+    // 斯涅尔定律：楔块入射角 → 钢内折射角。角度取绝对值，PCS 是距离。
+    double longitudinalAngle = 0.0;
+    if (!longitudinalAngleFromWedge(wedgeAngle, wedgeVelocity, workpieceVelocity,
+                                    &longitudinalAngle)) {
         m_tofdAngleLabel->setText(QStringLiteral("全反射（无折射角）"));
         m_tofdDepthLabel->setText(QStringLiteral("--"));
         m_tofdPcsLabel->setText(QStringLiteral("--"));
         return;
     }
-    const double thetaSteel = qAsin(ratio);
+    const double thetaSteel = qDegreesToRadians(longitudinalAngle);
     const double depth = fraction * thickness;
     const double pcs = 2.0 * depth * qTan(thetaSteel);
 
-    m_tofdAngleLabel->setText(QStringLiteral("%1°").arg(qRadiansToDegrees(thetaSteel), 0, 'f', 1));
+    m_tofdAngleLabel->setText(QStringLiteral("%1°").arg(longitudinalAngle, 0, 'f', 1));
     m_tofdDepthLabel->setText(QStringLiteral("%1 mm").arg(depth, 0, 'f', 1));
     m_tofdPcsLabel->setText(QStringLiteral("%1 mm").arg(pcs, 0, 'f', 1));
+}
+
+void ParameterPanel::updateLongitudinalAngleFromWedgeInput()
+{
+    if (!m_wedgeAngleInput || !m_wedgeVelocityInput || !m_workpieceVelocityInput
+        || !m_longitudinalAngleInput || !m_wedgeAngleStatus) {
+        return;
+    }
+
+    const double wedgeAngle = m_wedgeAngleInput->value();
+    const double wedgeVelocity = m_wedgeVelocityInput->value();
+    const double workpieceVelocity = m_workpieceVelocityInput->value();
+    const double criticalAngle = longitudinalCriticalWedgeAngle(wedgeVelocity,
+                                                                 workpieceVelocity);
+    double longitudinalAngle = 0.0;
+    if (!longitudinalAngleFromWedge(wedgeAngle, wedgeVelocity, workpieceVelocity,
+                                    &longitudinalAngle)) {
+        m_wedgeAngleStatus->setText(QStringLiteral(
+            "当前入射角超过纵波临界角 %1°，不能形成钢中折射纵波，也不会写入采集卡。")
+                                        .arg(criticalAngle, 0, 'f', 3));
+        m_wedgeAngleStatus->setStyleSheet(QStringLiteral("color:#b42318;"));
+        return;
+    }
+
+    {
+        const QSignalBlocker blocker(m_longitudinalAngleInput);
+        m_longitudinalAngleInput->setValue(longitudinalAngle);
+    }
+    m_wedgeAngleStatus->setText(QStringLiteral(
+        "当前声速下纵波临界入射角为 %1°；PCS 使用钢内折射角 %2°。")
+                                    .arg(criticalAngle, 0, 'f', 3)
+                                    .arg(longitudinalAngle, 0, 'f', 3));
+    m_wedgeAngleStatus->setStyleSheet(QStringLiteral("color:#52606d;"));
+}
+
+void ParameterPanel::updateWedgeAngleFromLongitudinalInput(double longitudinalAngle)
+{
+    if (!m_wedgeAngleInput || !m_wedgeVelocityInput || !m_workpieceVelocityInput)
+        return;
+
+    double wedgeAngle = 0.0;
+    if (!wedgeAngleFromLongitudinal(longitudinalAngle,
+                                    m_wedgeVelocityInput->value(),
+                                    m_workpieceVelocityInput->value(),
+                                    &wedgeAngle)) {
+        if (m_wedgeAngleStatus) {
+            m_wedgeAngleStatus->setText(QStringLiteral(
+                "当前楔块声速和工件声速无法形成 %1° 钢中纵波。")
+                                            .arg(longitudinalAngle, 0, 'f', 3));
+            m_wedgeAngleStatus->setStyleSheet(QStringLiteral("color:#b42318;"));
+        }
+        return;
+    }
+
+    // 保留现有声束方向；标称角输入只改变角度大小。
+    if (m_wedgeAngleInput->value() < 0.0)
+        wedgeAngle = -wedgeAngle;
+    {
+        const QSignalBlocker blocker(m_wedgeAngleInput);
+        m_wedgeAngleInput->setValue(wedgeAngle);
+    }
+    updateLongitudinalAngleFromWedgeInput();
+    scheduleAutoApply();
 }
 
 void ParameterPanel::apply()
@@ -901,8 +1317,12 @@ void ParameterPanel::apply()
             changes.push_back({&field, value});
     }
 
-    if (changes.isEmpty())
+    if (changes.isEmpty()) {
+        // 补发时发现控件已经回到硬件值（用户撤回或本轮已写入），标记到此结束，
+        // 否则 reload() 会一直被跳过。
+        m_applyDeferred = false;
         return;
+    }
 
     m_applying = true;
     emit applyStarted();
@@ -927,7 +1347,7 @@ void ParameterPanel::apply()
                 if (readBack != value.toInt()) {
                     ok = false;
                     errors << QStringLiteral("%1：写入通道 %2 后回读为通道 %3")
-                                  .arg(field.name).arg(value.toInt()).arg(readBack);
+                                  .arg(field.name).arg(value.toInt() + 1).arg(readBack + 1);
                 }
             }
         } catch (const std::exception &e) {
@@ -954,6 +1374,10 @@ void ParameterPanel::apply()
                                      .arg(errors.join(QStringLiteral("；")));
             emit applyFinished(false, text);
             emit message(text, true);
+            if (m_applyDeferred) {
+                m_applyDeferred = false;
+                m_autoApplyTimer->start(0);
+            }
             return;
         }
         // Host is the sole safety authority.  It performs PRF limiting,
@@ -1004,6 +1428,12 @@ void ParameterPanel::apply()
     QString persistenceError;
     const bool persisted = persistConfiguration(&persistenceError);
     m_applying = false;
+    if (m_applyDeferred) {
+        // 本地模式同理：本轮写 SDK 期间的用户输入要补发，且不能被回读覆盖。
+        m_applyDeferred = false;
+        m_autoApplyTimer->start(0);
+        return;
+    }
     // 每次只下发实际改变的字段，随后立即以 SDK 的真实值覆盖界面，
     // 避免设备端限幅或修正后界面仍显示旧输入值。
     reload();

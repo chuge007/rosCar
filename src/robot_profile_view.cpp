@@ -4,13 +4,20 @@
 #include "utf8_compat.h"
 
 #include <QDateTime>
+#include <QFontMetrics>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QShowEvent>
+#include <QStringList>
 #include <QTimer>
 
 #include <algorithm>
 #include <cmath>
+
+namespace {
+// 底部状态行的行高：宽度不够时把「X/Z 范围」与「SDK 帧号/点数/耗时」分成两行。
+constexpr int kStatusLineHeight = 14;
+}
 
 RobotProfileView::RobotProfileView(QWidget *parent) : QWidget(parent)
 {
@@ -382,7 +389,31 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
                          QStringLiteral("等待激光 SDK 轮廓数据"));
         return;
     }
-    const QRect plot = area;
+    // 窄宽度下把底部状态行拆成两行，保证 X/Z 范围与帧号信息都完整可见。
+    const QFontMetrics metrics(painter.font());
+    const QString rangeText =
+        QStringLiteral("%1 %2 .. %3    %4 %5 .. %6")
+            .arg(horizontalName)
+            .arg(minHorizontal, 0, 'f', 2)
+            .arg(maxHorizontal, 0, 'f', 2)
+            .arg(verticalName)
+            .arg(minVertical, 0, 'f', 2)
+            .arg(maxVertical, 0, 'f', 2);
+    const QString frameText =
+        QStringLiteral("SDK #%1 | %2/%3 | %4 ms")
+            .arg(m_frameNumber)
+            .arg(valid.size())
+            .arg(m_points.size())
+            .arg(age);
+    QStringList statusLines;
+    if (metrics.horizontalAdvance(rangeText + QStringLiteral("    ") + frameText) + 16 <= width())
+        statusLines << (rangeText + QStringLiteral("    ") + frameText);
+    else
+        statusLines << rangeText << frameText;
+
+    QRect plot = area;
+    if (statusLines.size() > 1)
+        plot.adjust(0, 0, 0, -kStatusLineHeight * static_cast<int>(statusLines.size() - 1));
     m_lastPlotArea = plot;
     m_lastPlotMinimumX = minHorizontal;
     m_lastPlotMaximumX = maxHorizontal;
@@ -500,18 +531,12 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
                                          : QStringLiteral("本帧未确认焊道"));
     painter.drawText(plot.left() + 6, plot.top() + 18, algorithm + QStringLiteral("：") + state);
     painter.drawText(8, 18, viewTitle);
-    painter.drawText(plot.left(), height() - 8,
-                     QStringLiteral("%1 %2 .. %3    %4 %5 .. %6    SDK #%7 | %8/%9 | %10 ms")
-                         .arg(horizontalName)
-                         .arg(minHorizontal, 0, 'f', 2)
-                         .arg(maxHorizontal, 0, 'f', 2)
-                         .arg(verticalName)
-                         .arg(minVertical, 0, 'f', 2)
-                         .arg(maxVertical, 0, 'f', 2)
-                         .arg(m_frameNumber)
-                         .arg(valid.size())
-                         .arg(m_points.size())
-                         .arg(age));
+    int statusY = height() - 8 -
+                  kStatusLineHeight * static_cast<int>(statusLines.size() - 1);
+    for (const QString &line : statusLines) {
+        painter.drawText(plot.left(), statusY, line);
+        statusY += kStatusLineHeight;
+    }
 }
 
 void RobotProfileView::showEvent(QShowEvent *event)

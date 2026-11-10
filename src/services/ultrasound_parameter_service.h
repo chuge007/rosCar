@@ -41,7 +41,10 @@ class UltrasoundParameterService final : public QObject {
   void exportPresetFile(const QString& path);
   void saveScanPrecisionMmPerCell(int presetId, double mmPerCell);
   void requestScanPrecision(int presetId);
-  void saveEncoderCalibration(double wheelDiameterMm, int resolution);
+  void saveEncoderCalibration(double wheelDiameterMm, int resolution,
+                              int calibrationMode = 0,
+                              double countsPerMmA = 0.0,
+                              double countsPerMmB = 0.0);
   void requestEncoderCalibration();
   void commitPendingChanges(int presetId);
 
@@ -58,7 +61,9 @@ class UltrasoundParameterService final : public QObject {
   void remotePresetOperationFinished(const QString& operation, bool ok,
                                      int presetId, const QString& message);
   void scanPrecisionChanged(int presetId, double mmPerCell);
-  void encoderCalibrationReady(double wheelDiameterMm, int resolution);
+  void encoderCalibrationReady(double wheelDiameterMm, int resolution,
+                               int calibrationMode, double countsPerMmA,
+                               double countsPerMmB);
 
  public:
   double getBeamAngleLinear(int groupId = -1);
@@ -279,7 +284,7 @@ class UltrasoundParameterService final : public QObject {
   int activePresetId_ = -1;
   QString activeExportPath_;
   QHash<quint64, QPair<int, double>> scanPrecisionRequests_;
-  QHash<quint64, QPair<double, int>> encoderCalibrationRequests_;
+  QHash<quint64, QJsonObject> encoderCalibrationRequests_;
   bool applyCommitPending_ = false;
   int pendingApplyBatches_ = 0;
   int applyFailureCount_ = 0;

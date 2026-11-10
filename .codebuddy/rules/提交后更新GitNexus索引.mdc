@@ -1,0 +1,56 @@
+---
+description: 每次 git 提交后必须重建 GitNexus 索引；查找与分析代码默认走 GitNexus（query/context/impact/process），全文搜索仅作兜底
+alwaysApply: true
+enabled: true
+updatedAt: 2026-11-10T00:00:00.000Z
+provider:
+---
+
+# 提交后必须更新 GitNexus 索引
+
+每次 `git commit` 完成后（同一轮对话内，不要留到下次），立即重建索引，把新提交的符号、调用关系、执行流写进图谱。索引不更新，后续用 GitNexus 查到的就是过期结果，比不用更糟。
+
+## 命令
+
+按顺序取第一个可用的：
+
+1. `node .gitnexus/run.cjs analyze` — 仓库内有该脚本时优先用它（自动选择 runner）
+2. `npx gitnexus analyze` — 无 `run.cjs` 时用（当前仓库 `.gitnexus/` 为空，走这条）
+3. `npx gitnexus` 崩溃时：`npm i -g gitnexus` 后执行 `gitnexus analyze`
+
+提交后的完整顺序：`detect_changes()` 确认改动范围 → `git commit` → `analyze` → 报告索引结果（成功/失败、新增或变更的符号数量）。
+
+- 索引失败必须明确告知失败原因，不允许静默跳过，也不允许声称"已更新"。
+- 索引耗时长时可放到后台执行，但要在回复里说明"正在重建"，并在结束前回报结果。
+
+# 查找与分析代码：默认走 GitNexus
+
+不要求"想起来才用"，**默认工作方式就是先问图谱，再读文件**。拿到任务后第一步用 GitNexus 定位和看清楚，不要一上来就 `search_content` 大海捞针。
+
+## 查找
+
+| 场景 | 用法 |
+|------|------|
+| 不知道实现在哪、按概念找 | `query({search_query: "概念"})`，返回按执行流分组的结果 |
+| 要某符号的完整上下文（调用者/被调用者/所属流程） | `context({name: "符号名"})` |
+| 改函数/类前的影响面 | `impact({target: "符号名", direction: "upstream"})`，HIGH/CRITICAL 必须先告警 |
+| 提交前确认改动范围 | `detect_changes()`；回归对比 `detect_changes({scope: "compare", base_ref: "main"})` |
+| 重命名符号 | `rename`，禁止 find-and-replace |
+| 代码库总览 / 功能分区 / 执行流清单 | 资源 `gitnexus://repo/rosCar/context`、`/clusters`、`/processes` |
+
+## 分析
+
+| 要回答的问题 | 用法 |
+|---|---|
+| 「X 是怎么跑起来的」 | 先 `query` 找执行流，再读 `gitnexus://repo/rosCar/process/{name}` 逐步跟踪，最后才读关键文件确认细节 |
+| 「这两个模块怎么衔接的」 | `context` 取交界符号的调用者/被调用者，比对流程成员关系，而不是逐个文件猜 |
+| 「改这里会波及什么」 | `impact` 看直接与传递调用者、受影响流程、风险等级，把结论写进回复再动手 |
+| 「这个功能涉及哪些符号」 | `query` + `clusters` 得到功能分区，再按 U/R/L/S 归类（见 `[.codebuddy/rules/超声与小车代码分工.mdc](mdc:.codebuddy/rules/超声与小车代码分工.mdc)`） |
+| 缺陷溯源 | `query`/`context` 顺着执行流从现象入口往回找，读到可疑符号再用 `read_file` 精读单个函数 |
+
+## 兜底与纪律
+
+- 结果不可信或明显缺失时，先怀疑索引过期：重跑 `analyze` 再查，不要直接跳到全文搜索。
+- 只有 GitNexus 覆盖不到时才退回 `search_content` / `read_file`：新文件尚未索引、非代码资源、配置文本、纯字符串常量匹配。退回时在回复里说明原因。
+- 改任何函数、类、方法前先做影响面分析这一条，不因 GitNexus 不可用而放弃，改用 `search_content` 找全调用点。
+- 用 GitNexus 得出的结论要能落到具体符号与文件上，不接受"大概在这一块"。

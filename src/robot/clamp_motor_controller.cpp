@@ -39,6 +39,9 @@ QByteArray slcanBitrate(int rate) {
 QString axisName(int axis) {
   return QString::fromLatin1(axis == 0 ? "X" : axis == 1 ? "Y" : "Z");
 }
+
+// 限位启用时，速度指令要先等到一次位置反馈才下发；等不到就放弃。
+constexpr int kPositionWaitTimeoutMs = 600;
 }
 
 ClampMotorController::ClampMotorController(QObject* parent) : QObject(parent) {
@@ -61,6 +64,13 @@ bool sameRouting(const ClampMotorAxes& left, const ClampMotorAxes& right) {
       b.lowerLimit = a.lowerLimit;
       b.upperLimitEnabled = a.upperLimitEnabled;
       b.lowerLimitEnabled = a.lowerLimitEnabled;
+      // 原生 CAN（PCAN / candleLight）只按 canBitrate 通信，串口波特率不参与路由。
+      // 操作端与主机保存的该字段历史值不同（如 500000 与 115200）时，若当成路由变化
+      // 会关闭并重开适配器，表现就是每次下配置后夹子电机要等数秒才恢复响应。
+      if (PcanCanAdapter::isPcanPort(b.serialPort) ||
+          CandleCanAdapter::isCandlePort(b.serialPort)) {
+        b.serialBaudRate = a.serialBaudRate;
+      }
       if (!(a == b)) return false;
     }
   }
@@ -112,6 +122,7 @@ void ClampMotorController::setSettings(const DriveSettings& settings) {
     positions_.clear();
     movingPercent_.clear();
     pendingSpeedPercent_.clear();
+    pendingSpeedTickets_.clear();
     moveTargets_.clear();
     moveDeadlines_.clear();
   }
@@ -141,6 +152,7 @@ void ClampMotorController::closePorts() {
   mwdBrakeConfirmed_.clear();
   mwdBrakeQueryTickets_.clear();
   speedLogTime_.clear();
+  pendingSpeedTickets_.clear();
   ++zdtSession_;
 }
 
@@ -168,6 +180,7 @@ void ClampMotorController::connectDevice() {
   mwdBrakeReleased_.clear();
   mwdBrakeConfirmed_.clear();
   mwdBrakeQueryTickets_.clear();
+  pendingSpeedTickets_.clear();
   ++zdtSession_;
   int configured = 0;
   bool success = true;
@@ -1023,13 +1036,46 @@ void ClampMotorController::setMotorSpeed(int axis, int index, int percent) {
       pendingSpeedPercent_.insert(key, percent);
       requestPosition(axis, index);
       if (!pollTimer_->isActive()) pollTimer_->start();
+      // 位置反馈可能永远不来：超时后放弃这条指令并在界面说明，
+      // 否则命令会一直挂着、每 50 ms 轮询一次，操作端看着就是“没反应”。
+      const int ticket = ++nextSpeedTicket_;
+      pendingSpeedTickets_.insert(key, ticket);
+      QTimer::singleShot(kPositionWaitTimeoutMs, this,
+                         [this, key, ticket, context] {
+        if (pendingSpeedTickets_.value(key) != ticket) return;
+        pendingSpeedTickets_.remove(key);
+        if (!pendingSpeedPercent_.remove(key)) return;
+        AppLogger::warning(QStringLiteral("CLAMP.POSITION"),
+            QStringLiteral("event=speed_position_timeout %1 timeout_ms=%2")
+                .arg(context).arg(kPositionWaitTimeoutMs));
+        emit statusChanged(
+            QStringLiteral("%1：限位已启用但读不到当前位置，速度指令未下发")
+                .arg(context));
+      });
       return;
     } else {
       const int blocked = limitBlockedDirection(motor, axis, index, percent);
       if (blocked != 0) {
+        AppLogger::warning(QStringLiteral("CLAMP.LIMIT"),
+            QStringLiteral("event=limit_block %1 slider_percent=%2 direction=%3 "
+                           "position=%4 upper=%5@%6 lower=%7@%8")
+                .arg(context).arg(percent)
+                .arg(blocked > 0 ? QStringLiteral("upper")
+                                 : QStringLiteral("lower"))
+                .arg(positions_.value(key), 0, 'f', 2)
+                .arg(motor.upperLimitEnabled ? 1 : 0)
+                .arg(motor.upperLimit, 0, 'f', 2)
+                .arg(motor.lowerLimitEnabled ? 1 : 0)
+                .arg(motor.lowerLimit, 0, 'f', 2));
         pendingSpeedPercent_.remove(key);
+        pendingSpeedTickets_.remove(key);
         movingPercent_.remove(key);
+        // 上一档速度可能仍在执行，必须显式停住，否则电机继续朝限位方向走。
+        sendMotorCommand(motor, 0, axis, index);
         emit limitReached(axis, index, blocked > 0);
+        emit statusChanged(QStringLiteral("%1：已到%2限位，电机已停止")
+            .arg(context, blocked > 0 ? QStringLiteral("上")
+                                      : QStringLiteral("下")));
         return;
       }
     }
@@ -1095,6 +1141,7 @@ void ClampMotorController::stopMotor(int axis, int index) {
   const auto& motor = settings_.clampMotors[axis][index];
   movingPercent_.remove(slot(axis, index));
   pendingSpeedPercent_.remove(slot(axis, index));
+  pendingSpeedTickets_.remove(slot(axis, index));
   moveTargets_.remove(slot(axis, index));
   moveDeadlines_.remove(slot(axis, index));
   auto* port = ports_.value(portKey(motor.serialPort), nullptr);
@@ -1222,6 +1269,7 @@ void ClampMotorController::handlePosition(int axis, int index, double degrees) {
   emit positionReceived(axis, index, degrees);
   const auto& motor = settings_.clampMotors[axis][index];
   if (pendingSpeedPercent_.contains(key)) {
+    pendingSpeedTickets_.remove(key);
     setMotorSpeed(axis, index, pendingSpeedPercent_.take(key));
     return;
   }

@@ -382,6 +382,23 @@ bool RobotHostService::acceptOwner(quint64 sessionId, quint64 requestId) {
   return false;
 }
 
+void RobotHostService::adoptClampSettings(
+    const crawling::DriveSettings& settings) {
+  settings_.clampCommunicationMode = settings.clampCommunicationMode;
+  settings_.clampSerialPort = settings.clampSerialPort;
+  settings_.clampSerialBaudRate = settings.clampSerialBaudRate;
+  settings_.clampCanBitrate = settings.clampCanBitrate;
+  settings_.clampNodeId = settings.clampNodeId;
+  settings_.clampXMotorId = settings.clampXMotorId;
+  settings_.clampYMotorId = settings.clampYMotorId;
+  settings_.clampZMotorId = settings.clampZMotorId;
+  settings_.clampXMotorSign = settings.clampXMotorSign;
+  settings_.clampYMotorSign = settings.clampYMotorSign;
+  settings_.clampZMotorSign = settings.clampZMotorSign;
+  settings_.clampMotors = settings.clampMotors;
+  settings_.clampMotorSyncEnabled = settings.clampMotorSyncEnabled;
+}
+
 void RobotHostService::loadPersistentSettings() {
   QSettings persistent(crawling::DriveSettings::persistentFilePath(),
                        QSettings::IniFormat);

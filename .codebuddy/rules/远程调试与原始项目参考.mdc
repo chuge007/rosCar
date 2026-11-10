@@ -1,0 +1,30 @@
+---
+description: 查看日志/更换 EXE 时直接 SSH 连小车端 a@192.168.1.20（目录 C:\Users\a\Desktop\robot_host），同时读本地日志；实现或功能逻辑有问题时只读原始项目 PA1664WorkbenchTmp2，禁止修改
+alwaysApply: true
+enabled: true
+updatedAt: 2026-11-10T00:00:00.000Z
+provider:
+---
+
+# 远程调试（小车端）
+
+查看日志、更换 EXE 时，直接用 SSH 操作小车端目标目录 `C:\Users\a\Desktop\robot_host`，不要再询问地址和凭据。
+
+```
+ssh a@192.168.1.20                 # 交互式登录
+ssh a@192.168.1.20 "命令"          # 远程执行单条命令
+scp 本地文件 a@192.168.1.20:C:/路径/  # 传文件
+scp -r a@192.168.1.20:C:/某个目录 .    # 拉目录
+```
+
+- 主程序：`C:\Users\a\Desktop\robot_host\app\PA1664RobotHost.exe`
+- 远程日志：`app\logs\`（robot_host.log、robot_console.log、camera_connection.log、log_YYYYMMDD_HHMMSS.txt）、`app\Mv3dLpLog\`、`app\RobotControl\logs\`
+- 远程原生命令输出为 GBK，需前置 `chcp 65001 >nul`，否则中文乱码。
+
+# 本地日志
+
+本地目录的日志也要主动去读：`bin\logs\`、`bin\RobotControl\logs\`、`bin\Mv3dLpLog\`、`startup_deploy\robot_host\app\logs\`。
+
+# 原始项目参考（只读）
+
+实现逻辑、功能逻辑出现问题时，去读取原始项目 `D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmp2` 作为参照，**但绝对不要更改该目录下的任何文件**，只做读取与比对。

@@ -39,7 +39,13 @@ public:
 
     // 编码器外接轮径/分辨率是应用级标定，不是硬件参数，单独存到
     // default_config.json 顶层 "encoder" 对象里，随软件重启保持。
-    static void loadEncoderCalibration(double *wheelDiameterMm, int *resolution);
+    static void loadEncoderCalibration(double *wheelDiameterMm, int *resolution,
+                                       int *calibrationMode = nullptr,
+                                       double *countsPerMmA = nullptr,
+                                       double *countsPerMmB = nullptr);
     static bool saveEncoderCalibration(double wheelDiameterMm, int resolution,
+                                       int calibrationMode,
+                                       double countsPerMmA,
+                                       double countsPerMmB,
                                        QString *error = nullptr);
 };

@@ -2,6 +2,7 @@
 #include "clamp_motor_controller.h"
 #include "candle_can_adapter.h"
 #include "pcan_can_adapter.h"
+#include "robot_app_logger.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -268,6 +269,12 @@ void ClampMotorSettingsWidget::updateLimitStatus(MotorForm* f) {
 void ClampMotorSettingsWidget::applyLimitsNow(int axis, int index, MotorForm* f) {
   // Limits only change travel checks, so apply and persist them immediately
   // without emitting edited(): that would stop motors and disable controls.
+  AppLogger::write(QStringLiteral("CLAMP.SETTINGS"),
+      QStringLiteral("event=limits_apply axis=%1 index=%2 remote=%3 "
+                     "upper_enabled=%4 upper=%5 lower_enabled=%6 lower=%7")
+          .arg(axis).arg(index).arg(remote_ ? 1 : 0)
+          .arg(f->upperLimitEnabled ? 1 : 0).arg(f->upperLimit, 0, 'f', 2)
+          .arg(f->lowerLimitEnabled ? 1 : 0).arg(f->lowerLimit, 0, 'f', 2));
   if (remote_) {
     emit limitsChanged();
     return;
@@ -384,7 +391,11 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
     updateLimitStatus(f);
     for (int a = 0; a < 3; ++a) {
       const int i = forms_[a].indexOf(f);
-      if (i >= 0) { applyLimitsNow(a, i, f); break; }
+      if (i < 0) continue;
+      // 先取消还没回来的“记录限位”请求：迟到的位置回包会把刚清掉的限位重新打开。
+      pendingLimitRecords_.remove(a * 1000 + i);
+      applyLimitsNow(a, i, f);
+      break;
     }
   });
   limitRow->addWidget(f->limitStatus);

@@ -24,6 +24,7 @@
 #include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFormLayout>
+#include <QGuiApplication>
 #include <QMetaObject>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -216,6 +217,78 @@ void applyHostPortsToClampSettings(const QJsonObject &data,
 }
 
 } // namespace
+
+double RobotControlPanel::ParameterSlider::number() const
+{
+    return slider ? static_cast<double>(slider->value()) / scale : 0.0;
+}
+
+void RobotControlPanel::ParameterSlider::setNumber(double value)
+{
+    if (!slider)
+        return;
+    const int position = static_cast<int>(std::lround(value * scale));
+    const QSignalBlocker blocker(slider);
+    slider->setValue(std::clamp(position, slider->minimum(), slider->maximum()));
+    refreshValueText();
+}
+
+void RobotControlPanel::ParameterSlider::refreshValueText()
+{
+    if (valueLabel)
+        valueLabel->setText(QString::number(number(), 'f', decimals));
+}
+
+QWidget *RobotControlPanel::createParameterSlider(QWidget *parent,
+                                                  ParameterSlider *param,
+                                                  const QString &title,
+                                                  const QString &hint,
+                                                  int minimum, int maximum,
+                                                  int decimals, double scale)
+{
+    auto *container = new QWidget(parent);
+    auto *layout = new QVBoxLayout(container);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(2);
+
+    auto *titleRow = new QHBoxLayout;
+    titleRow->setContentsMargins(0, 0, 0, 0);
+    titleRow->setSpacing(6);
+    auto *titleLabel = new QLabel(title, container);
+    titleLabel->setObjectName(QStringLiteral("robotParamTitle"));
+    auto *valueLabel = new QLabel(container);
+    valueLabel->setObjectName(QStringLiteral("robotParamValue"));
+    valueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    valueLabel->setMinimumWidth(52);
+    titleRow->addWidget(titleLabel, 1);
+    titleRow->addWidget(valueLabel);
+    layout->addLayout(titleRow);
+
+    auto *slider = new QSlider(Qt::Horizontal, container);
+    slider->setObjectName(QStringLiteral("robotParamSlider"));
+    slider->setRange(minimum, maximum);
+    slider->setPageStep(std::max(1, (maximum - minimum) / 10));
+    slider->setMinimumHeight(20);
+    layout->addWidget(slider);
+
+    const QString range = QStringLiteral("范围 %1~%2；%3")
+                              .arg(minimum / scale, 0, 'f', decimals)
+                              .arg(maximum / scale, 0, 'f', decimals)
+                              .arg(hint);
+    auto *hintLabel = new QLabel(range, container);
+    hintLabel->setObjectName(QStringLiteral("robotParamHint"));
+    hintLabel->setWordWrap(true);
+    layout->addWidget(hintLabel);
+
+    param->slider = slider;
+    param->valueLabel = valueLabel;
+    param->scale = scale;
+    param->decimals = decimals;
+    QObject::connect(slider, &QSlider::valueChanged, container,
+                     [param](int) { param->refreshValueText(); });
+    param->refreshValueText();
+    return container;
+}
 
 RobotControlPanel::RobotControlPanel(QWidget *parent)
     : RobotControlPanel(nullptr, nullptr, parent)
@@ -529,6 +602,17 @@ RobotControlPanel::RobotControlPanel(
     connect(m_commandTimer, &QTimer::timeout, this, &RobotControlPanel::sendMotionCommand);
     m_commandTimer->start();
 
+    // Qt 6 不再投递 QEvent::ApplicationDeactivate，退到后台（平板切走、锁屏、
+    // Alt+Tab）只能通过 applicationStateChanged 感知。平板触摸一旦被系统抢走就
+    // 收不到按键 release，而 80 ms 心跳会把“正在运动”一直重发，所以这里补上。
+    if (auto *guiApp = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
+        connect(guiApp, &QGuiApplication::applicationStateChanged, this,
+                [this](Qt::ApplicationState state) {
+                    if (state != Qt::ApplicationActive)
+                        releaseAllJog(QStringLiteral("application_inactive"));
+                });
+    }
+
     m_mediaDrainTimer = new QTimer(this);
     m_mediaDrainTimer->setInterval(30);
     connect(m_mediaDrainTimer, &QTimer::timeout, this,
@@ -546,10 +630,7 @@ RobotControlPanel::RobotControlPanel(
             QLabel* view = m_usbViews[slot];
             if (!view || !view->isVisible() || m_usbImages[slot].isNull())
                 continue;
-            view->setText(QString());
-            QPixmap pix = QPixmap::fromImage(m_usbImages[slot]);
-            pix.setDevicePixelRatio(view->devicePixelRatioF());
-            view->setPixmap(pix);
+            applyUsbPreviewPixmap(slot, m_usbImages[slot]);
             view->update();
             ++m_mediaRepaints[slot];
         }
@@ -1566,6 +1647,18 @@ void RobotControlPanel::buildUi()
                                                       background: #1769aa; border-radius: 7px;
                                                       border: 1px solid #0e4d7c; }
         QSlider#clampMotorSpeed::handle:horizontal:hover { background: #2586c8; }
+        QSlider#robotParamSlider::groove:horizontal { height: 6px; background: #d7e2ee;
+                                                     border-radius: 3px; }
+        QSlider#robotParamSlider::sub-page:horizontal { height: 6px; background: #9dc3e6;
+                                                       border-radius: 3px; }
+        QSlider#robotParamSlider::handle:horizontal { width: 14px; margin: -5px 0;
+                                                      background: #1769aa; border-radius: 7px;
+                                                      border: 1px solid #0e4d7c; }
+        QSlider#robotParamSlider::handle:horizontal:hover { background: #2586c8; }
+        QLabel#robotParamTitle { color: #203247; font-weight: 600; }
+        QLabel#robotParamValue { color: #0b4f6c; font-family: Consolas, monospace;
+                                 font-weight: 700; }
+        QLabel#robotParamHint { color: #8a94a6; font-size: 11px; }
         QPushButton:disabled { color: #607286; background: #e7edf3; border-color: #cbd5df; }
         QLabel#robotMetric { color: #0b4f6c; font-family: Consolas, monospace; }
         QPlainTextEdit { background: #101a26; color: #c7d4e3; border: 1px solid #26384d;
@@ -1695,8 +1788,10 @@ void RobotControlPanel::buildUi()
 
     auto *correctionControls = new QGroupBox(QStringLiteral("激光自动纠偏"));
     auto *correctionControlsLayout = new QVBoxLayout(correctionControls);
-    auto *correctionHint = new QLabel(QStringLiteral("纠偏参数请在“小车配置”中设置。"));
+    auto *correctionHint = new QLabel(
+        QStringLiteral("纠偏速度/分段长度/Kp/Kd 在下方“车体控制”中拖动滑块调整。"));
     correctionHint->setWordWrap(true);
+    correctionHint->setStyleSheet(QStringLiteral("color:#8a94a6;font-size:11px;"));
     correctionControlsLayout->addWidget(correctionHint);
     auto *correctionButtons = new QHBoxLayout;
     m_autoCorrectionStart = actionButton(QStringLiteral("启动自动纠偏"), "primary");
@@ -1710,6 +1805,53 @@ void RobotControlPanel::buildUi()
     correctionControlsLayout->addWidget(m_correctionStatus);
     manualLayout->addWidget(correctionControls);
     manualLayout->addWidget(clampGroup);
+
+    // 车体控制：滑块参数紧接「夹子电机手动控制」下方。
+    // 纠偏四项在「启动自动纠偏」时下发，内侧轮最小比例随「保存并应用参数」写入底盘配置。
+    auto *vehicleControl = new QGroupBox(QStringLiteral("车体控制"));
+    auto *vehicleControlLayout = new QVBoxLayout(vehicleControl);
+    auto *vehicleControlHint = new QLabel(
+        QStringLiteral("拖动滑块调整参数；"
+                       "内侧轮最小比例需点“保存并应用参数”后生效。"),
+        vehicleControl);
+    vehicleControlHint->setObjectName(QStringLiteral("robotParamHint"));
+    vehicleControlHint->setWordWrap(true);
+    vehicleControlLayout->addWidget(vehicleControlHint);
+    vehicleControlLayout->addWidget(
+        createParameterSlider(vehicleControl, &m_correctionSpeed,
+                              QStringLiteral("纠偏速度 (mm/s)"),
+                              QStringLiteral("调大行走纠偏更快；调小更慢更稳"),
+                              10, 1500, 1, 10.0));
+    vehicleControlLayout->addWidget(
+        createParameterSlider(vehicleControl, &m_correctionSegment,
+                              QStringLiteral("分段长度 (mm)"),
+                              QStringLiteral("调大拟合窗口更长更平滑；调小局部跟随更细"),
+                              10, 300, 1, 10.0));
+    vehicleControlLayout->addWidget(
+        createParameterSlider(vehicleControl, &m_correctionKp, QStringLiteral("Kp"),
+                              QStringLiteral("调大偏差修正更强但易振荡；调小更柔和"),
+                              0, 2000, 2, 100.0));
+    vehicleControlLayout->addWidget(
+        createParameterSlider(vehicleControl, &m_correctionKd, QStringLiteral("Kd"),
+                              QStringLiteral("调大抑制摆动更稳；调小响应更灵但易振荡"),
+                              0, 500, 2, 100.0));
+    vehicleControlLayout->addWidget(
+        createParameterSlider(vehicleControl, &m_minimumInnerRatio,
+                              QStringLiteral("内侧轮最小比例"),
+                              QStringLiteral("调大转弯更稳；调小转弯更急"),
+                              0, 1000, 3, 1000.0));
+    auto *applyParams = actionButton(QStringLiteral("保存并应用参数"), "primary");
+    applyParams->setMinimumHeight(30);
+    applyParams->setMaximumHeight(32);
+    applyParams->setToolTip(QStringLiteral(
+        "保存当前滑块参数；纠偏参数在启动自动纠偏时生效，底盘参数立即下发"));
+    connect(applyParams, &QPushButton::clicked,
+            this, &RobotControlPanel::applyConfigurationSettings);
+    auto *applyRow = new QHBoxLayout;
+    applyRow->addStretch();
+    applyRow->addWidget(applyParams);
+    vehicleControlLayout->addLayout(applyRow);
+    manualLayout->addWidget(vehicleControl);
     manualLayout->addStretch();
 
     auto *profileGroup = new QGroupBox(QStringLiteral("SDK 实时轮廓与焊道定位"));
@@ -1726,13 +1868,11 @@ void RobotControlPanel::buildUi()
     auto *templateButton = actionButton(QStringLiteral("建立/管理模板"));
     templateButton->setMinimumHeight(30);
     profileModeRow->addWidget(templateButton);
-    m_profileDetectionLogCheck = new QCheckBox(
-        QStringLiteral("记录检测计算日志"), profileGroup);
-    m_profileDetectionLogCheck->setToolTip(
-        QStringLiteral("勾选后，每次点击开始都会覆盖旧日志，只记录本次自动纠偏"
-                       "从开始到结束的轮廓点、基线、阈值、候选区域和淘汰原因。"));
-    profileModeRow->addWidget(m_profileDetectionLogCheck);
-    profileModeRow->addWidget(new QLabel(QStringLiteral("定位算法"), profileGroup));
+    profileModeRow->addStretch();
+
+    // 右列收窄后单行放不下，把「定位算法 + 检测日志」拆到第二行，保证控件都完整可见。
+    auto *profileTuningRow = new QHBoxLayout;
+    profileTuningRow->addWidget(new QLabel(QStringLiteral("定位算法"), profileGroup));
     m_profileDetectionMode = new QComboBox(profileGroup);
     m_profileDetectionMode->addItem(QStringLiteral("基线+肩部（默认）"),
                                     static_cast<int>(crawling::ProfileDetectionMode::BaselineShoulder));
@@ -1742,7 +1882,14 @@ void RobotControlPanel::buildUi()
                                     static_cast<int>(crawling::ProfileDetectionMode::Hybrid));
     m_profileDetectionMode->setToolTip(
         QStringLiteral("选择 SDK X/Z 焊道定位方式；纯模板和混合模式需要至少一个已启用模板。"));
-    profileModeRow->addWidget(m_profileDetectionMode);
+    profileTuningRow->addWidget(m_profileDetectionMode);
+    m_profileDetectionLogCheck = new QCheckBox(
+        QStringLiteral("记录检测计算日志"), profileGroup);
+    m_profileDetectionLogCheck->setToolTip(
+        QStringLiteral("勾选后，每次点击开始都会覆盖旧日志，只记录本次自动纠偏"
+                       "从开始到结束的轮廓点、基线、阈值、候选区域和淘汰原因。"));
+    profileTuningRow->addWidget(m_profileDetectionLogCheck);
+    profileTuningRow->addStretch();
     connect(m_profileDetectionMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) {
                 if (!m_profileDetectionMode) return;
@@ -1774,26 +1921,30 @@ void RobotControlPanel::buildUi()
                               ? QStringLiteral("已启用焊道检测计算日志；下次点击开始时覆盖旧日志")
                               : QStringLiteral("已关闭焊道检测计算日志；自动纠偏时不记录"));
             });
-    profileModeRow->addStretch();
     profileLayout->addLayout(profileModeRow);
+    profileLayout->addLayout(profileTuningRow);
     m_laserView = new RobotProfileView;
-    m_laserView->setMinimumSize(220, 100);
+    // 焊道显示框固定为原来一半高度（约 200 px），宽度随列宽不变；
+    // 曲线、坐标范围和帧号信息照常完整绘制。
+    m_laserView->setMinimumWidth(220);
+    m_laserView->setMinimumHeight(200);
+    m_laserView->setMaximumHeight(200);
     connect(profileMode,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
             m_laserView, &RobotProfileView::setViewMode);
     connect(templateButton, &QPushButton::clicked,
             this, &RobotControlPanel::showProfileTemplateDialog);
-    profileLayout->addWidget(m_laserView, 1);
+    profileLayout->addWidget(m_laserView);
     columns->addWidget(manual, 1);
 
     auto *rightColumn = new QVBoxLayout;
-    rightColumn->addWidget(profileGroup, 1);
+    rightColumn->addWidget(profileGroup);
     auto *status = new QGroupBox(QStringLiteral("车体状态"));
     auto *statusGrid = new QGridLayout(status);
     statusGrid->setColumnStretch(1, 1);
     statusGrid->setColumnStretch(3, 1);
     auto addMetric = [statusGrid, status](int row, int column, const QString &name) {
-        statusGrid->addWidget(new QLabel(name), row, column);
+        statusGrid->addWidget(new QLabel(name, status), row, column);
         auto *value = metricLabel(status);
         statusGrid->addWidget(value, row, column + 1);
         return value;
@@ -1809,10 +1960,14 @@ void RobotControlPanel::buildUi()
     m_imuStatus = addMetric(0, 2, QStringLiteral("RIM302 IMU"));
     m_laserStatus = addMetric(1, 2, QStringLiteral("MV3DLP 激光"));
     m_usbStatus = addMetric(2, 2, QStringLiteral("USB 摄像头"));
-    statusGrid->addWidget(new QLabel(QStringLiteral("辅助设备")), 3, 2);
+    statusGrid->addWidget(new QLabel(QStringLiteral("辅助设备"), status), 3, 2);
     auto *aux = metricLabel(status);
     aux->setText(QStringLiteral("外部编码器未接入；夹子 CANopen 仅显示检测状态"));
     statusGrid->addWidget(aux, 3, 3, 2, 1);
+    // 预览框改成按画面比例定高后，右列会多出一截高度留给状态面板；用末尾的
+    // 占位行吸收，别让 8 行状态被均摊得行距发虚。
+    statusGrid->addWidget(new QWidget(status), 8, 0, 1, 4);
+    statusGrid->setRowStretch(8, 1);
 
     auto *usbGroup = new QGroupBox(QStringLiteral("USB 摄像头画面"));
     auto *usbLayout = new QVBoxLayout(usbGroup);
@@ -1826,14 +1981,17 @@ void RobotControlPanel::buildUi()
         auto *label = new QLabel(QStringLiteral("USB 摄像头 %1 未连接").arg(slot + 1));
         label->setAlignment(Qt::AlignCenter);
         label->setMinimumSize(180, 110);
-        label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        // 高度由 updateUsbPreviewHeight() 按画面宽高比固定，宽度始终跟随分组宽度，
+        // 这样预览框不会再把剩余竖直空间全吃掉、留下上下大片空白。
+        label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        label->installEventFilter(this);
         cellLayout->addWidget(label);
         usbViewRowLayout->addWidget(cell, 1);
         m_usbViews[slot] = label;
     }
     usbLayout->addWidget(usbViewRow);
-    rightColumn->addWidget(usbGroup, 1);
-    rightColumn->addWidget(status);
+    rightColumn->addWidget(usbGroup);
+    rightColumn->addWidget(status, 1);
     columns->addLayout(rightColumn, 2);
     controlScroll->setWidget(body);
     m_tabs->addTab(controlScroll, QStringLiteral("底盘控制"));
@@ -1993,34 +2151,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
         return lock;
     };
 
-    auto *correctionGroup = new QGroupBox(QStringLiteral("激光自动纠偏"), page);
-    auto *correctionLayout = new QVBoxLayout(correctionGroup);
-    auto *correctionForm = new QFormLayout;
-    m_correctionSpeed = makeDouble(1.0, 150.0, 1.0, 1, correctionGroup);
-    m_correctionSpeed->setValue(5.0);
-    m_correctionSegment = makeDouble(1.0, 30.0, 1.0, 1, correctionGroup);
-    m_correctionSegment->setValue(30.0);
-    m_correctionKp = makeDouble(0.0, 20.0, 0.1, 2, correctionGroup);
-    m_correctionKp->setValue(3.0);
-    m_correctionKd = makeDouble(0.0, 5.0, 0.01, 2, correctionGroup);
-    m_correctionKd->setValue(0.12);
-    correctionForm->addRow(QStringLiteral("纠偏速度 (mm/s)"),
-                           wrapWithHint(m_correctionSpeed,
-                                        QStringLiteral("调大行走纠偏更快；调小更慢更稳")));
-    correctionForm->addRow(QStringLiteral("分段长度 (mm)"),
-                           wrapWithHint(m_correctionSegment,
-                                        QStringLiteral("调大拟合窗口更长更平滑；调小局部跟随更细")));
-    correctionForm->addRow(QStringLiteral("Kp"),
-                           wrapWithHint(m_correctionKp,
-                                        QStringLiteral("调大偏差修正更强但易振荡；调小更柔和")));
-    correctionForm->addRow(QStringLiteral("Kd"),
-                           wrapWithHint(m_correctionKd,
-                                        QStringLiteral("调大抑制摆动更稳；调小响应更灵但易振荡")));
-    correctionLayout->addLayout(correctionForm);
-    addConfigurationLock(correctionGroup);
-    compactGroup(correctionGroup);
-    rightColumn->addWidget(correctionGroup);
-
+    // 纠偏速度/分段长度/Kp/Kd 与内侧轮最小比例已移到「底盘控制 → 车体控制」
+    // 的滑块上，这里只保留与通信、限幅、看门狗相关的配置项。
     auto *adapter = new QGroupBox(QStringLiteral("MWD RS485 适配器"), page);
     auto *adapterForm = new QFormLayout(adapter);
     m_wheelCommunicationMode = new QComboBox(adapter);
@@ -2386,7 +2518,6 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     m_maxAngularSpeed = makeDouble(0.5, 573.0, 0.5, 1, limits);
     m_maxLinearAcceleration = makeDouble(10.0, 10000.0, 10.0, 1, limits);
     m_maxAngularAcceleration = makeDouble(0.5, 1146.0, 0.5, 1, limits);
-    m_minimumInnerRatio = makeDouble(0.0, 1.0, 0.01, 3, limits);
     m_syncP = makeDouble(0.0, 5.0, 0.01, 3, limits);
     m_syncI = makeDouble(0.0, 5.0, 0.01, 3, limits);
     m_syncMaxCorrection = makeDouble(1.0, 300.0, 1.0, 1, limits);
@@ -2406,9 +2537,6 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     limitsForm->addRow(QStringLiteral("角加速度 (deg/s²)"),
                        wrapWithHint(m_maxAngularAcceleration,
                                     QStringLiteral("调大转向响应更快；调小转向更平顺")));
-    limitsForm->addRow(QStringLiteral("内侧轮最小比例"),
-                       wrapWithHint(m_minimumInnerRatio,
-                                    QStringLiteral("调大转弯更稳；调小转弯更急")));
     limitsForm->addRow(QStringLiteral("同步比例增益 P"),
                        wrapWithHint(m_syncP,
                                     QStringLiteral("调大响应快易抖；调小平滑但滞后")));
@@ -2469,31 +2597,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     rightColumn->addWidget(logGroup);
 
     connect(save, &QPushButton::clicked, this, [this, configurationLocks] {
-        const crawling::DriveSettings edited = settingsFromUi();
-        const bool remoteMode = m_remoteSession && m_remoteLinkReady;
-        const QString error = remoteMode ? edited.nonPortValidationError()
-                                         : edited.validationError();
-        if (!error.isEmpty()) {
-            appendLog(error);
-            QMessageBox::warning(this, QStringLiteral("配置无效"), error);
-            return;
-        }
-        saveSettings();
-        if (m_remoteSession && m_remoteLinkReady &&
-            m_remoteSession->hasCapability(QString::fromLatin1(
-                pa1664::remote::kCapabilityRobotControlV1))) {
-            // Remote mode: "保存并应用" used to write only the operator-side
-            // ini, so watchdog changes never reached the host unless the drive
-            // happened to reconnect. robot.connect carries the settings and the
-            // host applies them to its controller.
-            m_remoteSession->request(
-                QStringLiteral("robot.connect"),
-                QJsonObject{{QStringLiteral("settings"),
-                             pa1664::remote::driveSettingsToJson(m_settings)}});
-            appendLog(QStringLiteral("已把底盘参数下发到小车主机"));
-        } else if (m_connected) {
-            connectConfiguredDevices();
-        }
+        applyConfigurationSettings();
         for (QCheckBox *lock : configurationLocks)
             lock->setChecked(true);
     });
@@ -2504,9 +2608,15 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     for (QDoubleSpinBox *box : {m_wheelRadius, m_trackWidth, m_ratio, m_maxWheelSpeed,
                                 m_maxLinearSpeed, m_maxAngularSpeed,
                                 m_maxLinearAcceleration, m_maxAngularAcceleration,
-                                m_minimumInnerRatio, m_syncP, m_syncI,
+                                m_syncP, m_syncI,
                                 m_syncMaxCorrection, m_syncMinSpeed})
         connect(box, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, markDirty);
+    for (ParameterSlider *param : {&m_correctionSpeed, &m_correctionSegment,
+                                   &m_correctionKp, &m_correctionKd,
+                                   &m_minimumInnerRatio}) {
+        if (param->slider)
+            connect(param->slider, &QSlider::valueChanged, this, markDirty);
+    }
     for (QSpinBox *box : {m_leftId, m_rightId, m_commandTimeout, m_feedbackTimeout,
                           m_armingTimeout, m_laserInputTimeout})
         connect(box, QOverload<int>::of(&QSpinBox::valueChanged), this, markDirty);
@@ -3017,6 +3127,35 @@ void RobotControlPanel::showProfileTemplateDialog()
     dialog->activateWindow();
 }
 
+void RobotControlPanel::applyConfigurationSettings()
+{
+    const crawling::DriveSettings edited = settingsFromUi();
+    const bool remoteMode = m_remoteSession && m_remoteLinkReady;
+    const QString error = remoteMode ? edited.nonPortValidationError()
+                                     : edited.validationError();
+    if (!error.isEmpty()) {
+        appendLog(error);
+        QMessageBox::warning(this, QStringLiteral("配置无效"), error);
+        return;
+    }
+    saveSettings();
+    if (m_remoteSession && m_remoteLinkReady &&
+        m_remoteSession->hasCapability(QString::fromLatin1(
+            pa1664::remote::kCapabilityRobotControlV1))) {
+        // Remote mode: "保存并应用" used to write only the operator-side
+        // ini, so watchdog changes never reached the host unless the drive
+        // happened to reconnect. robot.connect carries the settings and the
+        // host applies them to its controller.
+        m_remoteSession->request(
+            QStringLiteral("robot.connect"),
+            QJsonObject{{QStringLiteral("settings"),
+                         pa1664::remote::driveSettingsToJson(m_settings)}});
+        appendLog(QStringLiteral("已把底盘参数下发到小车主机"));
+    } else if (m_connected) {
+        connectConfiguredDevices();
+    }
+}
+
 void RobotControlPanel::saveSettings()
 {
     const crawling::DriveSettings current = settingsFromUi();
@@ -3034,13 +3173,13 @@ void RobotControlPanel::saveSettings()
                          QSettings::IniFormat);
     current.save(persistent);
     persistent.setValue(QStringLiteral("laserCorrection/speed"),
-                        m_correctionSpeed->value() / kMillimetersPerMeter);
+                        m_correctionSpeed.number() / kMillimetersPerMeter);
     persistent.setValue(QStringLiteral("laserCorrection/segmentLength"),
-                        m_correctionSegment->value() / kMillimetersPerMeter);
+                        m_correctionSegment.number() / kMillimetersPerMeter);
     persistent.setValue(QStringLiteral("laserCorrection/kp"),
-                        m_correctionKp->value());
+                        m_correctionKp.number());
     persistent.setValue(QStringLiteral("laserCorrection/kd"),
-                        m_correctionKd->value());
+                        m_correctionKd.number());
     persistent.setValue(QStringLiteral("laserCorrection/imageTimeoutMs"),
                         m_laserInputTimeout->value());
     persistent.sync();
@@ -3127,7 +3266,7 @@ crawling::DriveSettings RobotControlPanel::settingsFromUi() const
     value.maximumAngularSpeedRadps = m_maxAngularSpeed->value() * kRadiansPerDegree;
     value.maximumLinearAccelerationMps2 = m_maxLinearAcceleration->value() / kMillimetersPerMeter;
     value.maximumAngularAccelerationRadps2 = m_maxAngularAcceleration->value() * kRadiansPerDegree;
-    value.minimumInnerWheelRatio = m_minimumInnerRatio->value();
+    value.minimumInnerWheelRatio = m_minimumInnerRatio.number();
     value.commandTimeoutMs = m_commandTimeout->value();
     value.feedbackTimeoutMs = m_feedbackTimeout->value();
     value.armingTimeoutMs = m_armingTimeout->value();
@@ -3191,15 +3330,15 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
     m_speedSlider->setValue(settings.manualJogPercent);
     QSettings persistent(crawling::DriveSettings::persistentFilePath(),
                          QSettings::IniFormat);
-    m_correctionSpeed->setValue(
+    m_correctionSpeed.setNumber(
         persistent.value(QStringLiteral("laserCorrection/speed"), 0.005)
             .toDouble() * kMillimetersPerMeter);
-    m_correctionSegment->setValue(
+    m_correctionSegment.setNumber(
         persistent.value(QStringLiteral("laserCorrection/segmentLength"), 0.03)
             .toDouble() * kMillimetersPerMeter);
-    m_correctionKp->setValue(
+    m_correctionKp.setNumber(
         persistent.value(QStringLiteral("laserCorrection/kp"), 3.0).toDouble());
-    m_correctionKd->setValue(
+    m_correctionKd.setNumber(
         persistent.value(QStringLiteral("laserCorrection/kd"), 0.12).toDouble());
     m_laserInputTimeout->setValue(
         persistent.value(QStringLiteral("laserCorrection/imageTimeoutMs"), 500)
@@ -3220,7 +3359,7 @@ void RobotControlPanel::settingsToUi(const crawling::DriveSettings &settings)
     m_maxAngularSpeed->setValue(settings.maximumAngularSpeedRadps * kDegreesPerRadian);
     m_maxLinearAcceleration->setValue(settings.maximumLinearAccelerationMps2 * kMillimetersPerMeter);
     m_maxAngularAcceleration->setValue(settings.maximumAngularAccelerationRadps2 * kDegreesPerRadian);
-    m_minimumInnerRatio->setValue(settings.minimumInnerWheelRatio);
+    m_minimumInnerRatio.setNumber(settings.minimumInnerWheelRatio);
     m_commandTimeout->setValue(settings.commandTimeoutMs);
     m_feedbackTimeout->setValue(settings.feedbackTimeoutMs);
     m_armingTimeout->setValue(settings.armingTimeoutMs);
@@ -3433,7 +3572,7 @@ void RobotControlPanel::connectConfiguredUsbCameraSlot(int slot)
                              cam.usbCameraFlipHorizontal},
                             {QStringLiteral("flipVertical"),
                              cam.usbCameraFlipVertical}});
-            pushUsbDisplaySize(slot);
+            pushUsbDisplaySize(slot, true);
             return;
         }
         if (m_usbCameraController)
@@ -3443,7 +3582,7 @@ void RobotControlPanel::connectConfiguredUsbCameraSlot(int slot)
                                       Q_ARG(QString, cam.networkCameraUrl),
                                       Q_ARG(bool, cam.usbCameraFlipHorizontal),
                                       Q_ARG(bool, cam.usbCameraFlipVertical));
-        pushUsbDisplaySize(slot);
+        pushUsbDisplaySize(slot, true);
         return;
     }
     if (cam.usbCameraDeviceIndex < 0) {
@@ -3462,7 +3601,7 @@ void RobotControlPanel::connectConfiguredUsbCameraSlot(int slot)
                          cam.usbCameraFlipHorizontal},
                         {QStringLiteral("flipVertical"),
                          cam.usbCameraFlipVertical}});
-        pushUsbDisplaySize(slot);
+        pushUsbDisplaySize(slot, true);
         return;
     }
     if (m_usbCameraController)
@@ -3473,7 +3612,7 @@ void RobotControlPanel::connectConfiguredUsbCameraSlot(int slot)
                                   Q_ARG(int, cam.usbCameraFps),
                                   Q_ARG(bool, cam.usbCameraFlipHorizontal),
                                   Q_ARG(bool, cam.usbCameraFlipVertical));
-    pushUsbDisplaySize(slot);
+    pushUsbDisplaySize(slot, true);
 }
 
 bool RobotControlPanel::saveClampSettings()
@@ -3502,6 +3641,7 @@ bool RobotControlPanel::saveClampSettings()
             QStringLiteral("robot.clamp.settings.update"),
             QJsonObject{{QStringLiteral("settings"),
                          pa1664::remote::driveSettingsToJson(m_settings)}});
+        appendLog(QStringLiteral("夹子配置已下发到主机（含限位设置）"));
         m_clampConfigState->setText(QStringLiteral("正在保存远程夹子配置"));
         return true;
     }
@@ -4011,11 +4151,11 @@ void RobotControlPanel::startAutoCorrection()
 
         crawling::LaserCorrectionSettings settings;
         settings.targetSpeedMps =
-            m_correctionSpeed->value() / kMillimetersPerMeter;
+            m_correctionSpeed.number() / kMillimetersPerMeter;
         settings.segmentLengthM =
-            m_correctionSegment->value() / kMillimetersPerMeter;
-        settings.proportionalGain = m_correctionKp->value();
-        settings.derivativeGain = m_correctionKd->value();
+            m_correctionSegment.number() / kMillimetersPerMeter;
+        settings.proportionalGain = m_correctionKp.number();
+        settings.derivativeGain = m_correctionKd.number();
         settings.imageTimeoutMs = m_laserInputTimeout->value();
         settings.wheelRadiusM = m_settings.wheelRadiusM;
         settings.trackWidthM = m_settings.trackWidthM;
@@ -4040,7 +4180,7 @@ void RobotControlPanel::startAutoCorrection()
             QJsonObject{{QStringLiteral("settings"),
                          pa1664::remote::laserCorrectionSettingsToJson(settings)}});
         appendLog(QStringLiteral("已请求小车主机启动自动纠偏（速度 %1 mm/s）")
-                      .arg(m_correctionSpeed->value(), 0, 'f', 1));
+                      .arg(m_correctionSpeed.number(), 0, 'f', 1));
         return;
     }
     if (!m_correctionController || !m_sensorController)
@@ -4083,10 +4223,10 @@ void RobotControlPanel::startAutoCorrection()
     }
 
     crawling::LaserCorrectionSettings settings;
-    settings.targetSpeedMps = m_correctionSpeed->value() / kMillimetersPerMeter;
-    settings.segmentLengthM = m_correctionSegment->value() / kMillimetersPerMeter;
-    settings.proportionalGain = m_correctionKp->value();
-    settings.derivativeGain = m_correctionKd->value();
+    settings.targetSpeedMps = m_correctionSpeed.number() / kMillimetersPerMeter;
+    settings.segmentLengthM = m_correctionSegment.number() / kMillimetersPerMeter;
+    settings.proportionalGain = m_correctionKp.number();
+    settings.derivativeGain = m_correctionKd.number();
     settings.imageTimeoutMs = m_laserInputTimeout->value();
     settings.wheelRadiusM = m_settings.wheelRadiusM;
     settings.trackWidthM = m_settings.trackWidthM;
@@ -4120,9 +4260,9 @@ void RobotControlPanel::startAutoCorrection()
              "drive_linear_accel_mps2=%9 image_timeout_ms=%10 profile_detection_mode=%11 executable=%12")
             .arg(crawling::driveStateText(m_state))
             .arg(m_laserConnected ? 1 : 0)
-            .arg(m_correctionSpeed->value(), 0, 'f', 1)
+            .arg(m_correctionSpeed.number(), 0, 'f', 1)
             .arg(settings.targetSpeedMps, 0, 'f', 6)
-            .arg(m_correctionSegment->value(), 0, 'f', 1)
+            .arg(m_correctionSegment.number(), 0, 'f', 1)
             .arg(settings.proportionalGain, 0, 'f', 3)
             .arg(settings.derivativeGain, 0, 'f', 3)
             .arg(speedLimit, 0, 'f', 6)
@@ -4167,7 +4307,7 @@ void RobotControlPanel::startAutoCorrection()
     QMetaObject::invokeMethod(m_sensorController, "prepareCorrectionProfile",
                               Qt::QueuedConnection);
     appendLog(QStringLiteral("已请求启动自动纠偏（速度 %1 mm/s，A2 速度闭环），等待激光轮廓流")
-                  .arg(m_correctionSpeed->value(), 0, 'f', 1));
+                  .arg(m_correctionSpeed.number(), 0, 'f', 1));
 }
 
 void RobotControlPanel::stopAutoCorrection()
@@ -4472,14 +4612,47 @@ void RobotControlPanel::displayUsbCameraImage(int slot, const QImage &image)
     // the newest frame is already there when the tab becomes visible.
     if (!m_usbViews[slot]->isVisible())
         ++m_mediaViewHidden[slot];
-    m_usbViews[slot]->setText(QString());
-    const qreal dpr = m_usbViews[slot]->devicePixelRatioF();
-    // Image is already scaled in worker thread, just convert to pixmap.
-    QPixmap pix = QPixmap::fromImage(image);
-    pix.setDevicePixelRatio(dpr);
-    m_usbViews[slot]->setPixmap(pix);
+    // 分辨率/宽高比可能随分屏或重连变化，先按新画面比例校正预览框高度。
+    updateUsbPreviewHeight(slot);
+    applyUsbPreviewPixmap(slot, image);
     ++m_mediaPixmapSet[slot];
     m_usbViews[slot]->update();
+}
+
+void RobotControlPanel::applyUsbPreviewPixmap(int slot, const QImage &image)
+{
+    QLabel *view = m_usbViews[slot];
+    if (!view || image.isNull())
+        return;
+    const qreal dpr = view->devicePixelRatioF();
+    const QSize target(qRound(view->width() * dpr), qRound(view->height() * dpr));
+    QImage shown = image;
+    if (target.width() > 0 && target.height() > 0 && shown.size() != target) {
+        // 短边先铺满标签、长边溢出部分由 QLabel 居中裁掉：画面不留白也不变形。
+        // 采集端已按标签尺寸出图时两边尺寸一致，这里直接跳过缩放。
+        shown = shown.scaled(target, Qt::KeepAspectRatioByExpanding,
+                             Qt::SmoothTransformation);
+    }
+    QPixmap pix = QPixmap::fromImage(shown);
+    pix.setDevicePixelRatio(dpr);
+    view->setText(QString());
+    view->setPixmap(pix);
+}
+
+void RobotControlPanel::updateUsbPreviewHeight(int slot)
+{
+    QLabel *view = m_usbViews[slot];
+    if (!view || view->width() <= 0)
+        return;
+    const QImage &image = m_usbImages[slot];
+    // 无画面时按 USB 摄像头常见的 4:3 估高；有画面后用真实宽高比，
+    // 让预览框与画面同比例，框内自然没有上下空白。
+    const qreal aspect = (image.isNull() || image.height() <= 0)
+                             ? (4.0 / 3.0)
+                             : qreal(image.width()) / qreal(image.height());
+    const int height = qMax(90, qRound(qreal(view->width()) / aspect));
+    if (view->minimumHeight() != height || view->maximumHeight() != height)
+        view->setFixedHeight(height);
 }
 
 void RobotControlPanel::setUsbCameraImage(int slot, const QImage &image)
@@ -4495,7 +4668,7 @@ void RobotControlPanel::setUsbCameraImage(int slot, const QImage &image)
     }
 }
 
-void RobotControlPanel::pushUsbDisplaySize(int slot)
+void RobotControlPanel::pushUsbDisplaySize(int slot, bool force)
 {
     if (slot < 0 || slot >= crawling::kUsbCameraChannelCount ||
         !m_usbViews[slot]) {
@@ -4506,6 +4679,12 @@ void RobotControlPanel::pushUsbDisplaySize(int slot)
     const qreal dpr = view->devicePixelRatioF();
     const int physicalWidth = qRound(logicalSize.width() * dpr);
     const int physicalHeight = qRound(logicalSize.height() * dpr);
+    // 标签尺寸变化会多次触发 Resize，尺寸没变就不要重复下发；连接/重连后
+    // 采集端的目标尺寸被重置，必须 force 一次。
+    const QSize physicalSize(physicalWidth, physicalHeight);
+    if (!force && physicalSize == m_usbPushedSizes[slot])
+        return;
+    m_usbPushedSizes[slot] = physicalSize;
     if (m_remoteSession) {
         m_remoteSession->request(
             QStringLiteral("robot.camera.displaySize"),
@@ -4638,6 +4817,25 @@ void RobotControlPanel::showConfigurationPage()
     }
 }
 
+bool RobotControlPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event && event->type() == QEvent::Resize) {
+        for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
+            if (!m_usbViews[slot] || watched != m_usbViews[slot])
+                continue;
+            // 预览标签宽度变化时重新按画面比例定高，再按新尺寸重绘当前帧并把
+            // 尺寸同步给采集端（隐藏状态下不推送，避免把尺寸退化成最小值）。
+            updateUsbPreviewHeight(slot);
+            if (!m_usbImages[slot].isNull())
+                applyUsbPreviewPixmap(slot, m_usbImages[slot]);
+            if (m_usbViews[slot]->isVisible())
+                pushUsbDisplaySize(slot);
+            break;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 void RobotControlPanel::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
@@ -4657,27 +4855,60 @@ void RobotControlPanel::showEvent(QShowEvent *event)
 void RobotControlPanel::changeEvent(QEvent *event)
 {
     QWidget::changeEvent(event);
-    if (event == nullptr ||
-        (event->type() != QEvent::WindowDeactivate &&
-         event->type() != QEvent::ApplicationDeactivate)) {
+    if (event == nullptr)
         return;
+    if (event->type() == QEvent::WindowDeactivate)
+        releaseAllJog(QStringLiteral("window_deactivate"));
+    else if (event->type() == QEvent::ApplicationDeactivate)
+        releaseAllJog(QStringLiteral("application_deactivate"));
+}
+
+// 方向键是“按下即走、松开即停”的心跳式控制（sendMotionCommand 每 80 ms 重发
+// 当前标志）。只要是按下状态被外部打断——窗口失焦、退到后台、页签切走、触摸
+// 被系统抢走——就必须主动把标志清零并补发一次停车，否则车会一直朝原方向走。
+bool RobotControlPanel::event(QEvent *event)
+{
+    const bool handled = QWidget::event(event);
+    if (event == nullptr)
+        return handled;
+    switch (event->type()) {
+    case QEvent::UngrabMouse:
+    case QEvent::TouchCancel:
+        releaseAllJog(QStringLiteral("pointer_grab_lost"));
+        break;
+    case QEvent::Hide:
+        // 切到「超声检测」页签或折叠面板时按钮直接隐藏，不会再收到 release。
+        releaseAllJog(QStringLiteral("panel_hidden"));
+        break;
+    case QEvent::WindowStateChange:
+        if (isMinimized())
+            releaseAllJog(QStringLiteral("window_minimized"));
+        break;
+    default:
+        break;
     }
+    return handled;
+}
+
+void RobotControlPanel::releaseAllJog(const QString &reason)
+{
     if (m_autoCorrectionActive) {
-        const QString source = event->type() == QEvent::WindowDeactivate
-                                   ? QStringLiteral("window_deactivate")
-                                   : QStringLiteral("application_deactivate");
         crawling::AppLogger::write(
             QStringLiteral("CORRECTION.STOP"),
             QStringLiteral("event=correction_stop_requested source=%1 active=1 pending=%2")
-                .arg(source)
+                .arg(reason)
                 .arg(m_autoCorrectionStartPending ? 1 : 0));
         stopAutoCorrection();
     }
     clearJogLatch();
     const bool wasJogging = m_forward || m_reverse || m_left || m_right;
     m_forward = m_reverse = m_left = m_right = false;
-    if (wasJogging)
+    m_pressedJogButton = nullptr;
+    m_pressedJogFlag = nullptr;
+    if (wasJogging) {
         sendMotionCommand();
+        appendLog(QStringLiteral("方向键按下状态丢失（%1），已停止行进").arg(reason));
+    }
     for (QSlider *slider : findChildren<QSlider *>(QStringLiteral("clampMotorSpeed"))) {
         const QSignalBlocker blocker(slider);
         slider->setValue(0);

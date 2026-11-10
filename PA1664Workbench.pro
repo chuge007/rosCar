@@ -38,6 +38,7 @@ SOURCES += \
     src/mainwindow.cpp \
     src/devicecontroller.cpp \
     src/pulseloadguard.cpp \
+    src/ultrasoundconfigsanitizer.cpp \
     src/parameterpresetstore.cpp \
     src/framedecoderworker.cpp \
     src/scanwaveformcache.cpp \
@@ -101,6 +102,7 @@ HEADERS += \
     src/mainwindow.h \
     src/devicecontroller.h \
     src/pulseloadguard.h \
+    src/ultrasoundconfigsanitizer.h \
     src/parameterpresetstore.h \
     src/framedecoderworker.h \
     src/scanwaveformcache.h \

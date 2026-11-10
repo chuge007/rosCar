@@ -13,12 +13,15 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkProxy>
+#include <QPalette>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QStyleHints>
 #include <QUrl>
 #include <QSet>
 #include <QTimer>
@@ -36,23 +39,41 @@ void prepareSessionLogs()
     if (!logDirectory.exists())
         return;
 
-    const QRegularExpression sdkLogPattern(
-        QStringLiteral("^log_\\d{8}_\\d{6}\\.txt$"),
-        QRegularExpression::CaseInsensitiveOption);
-    for (const QString &fileName : logDirectory.entryList(QDir::Files)) {
-        if (sdkLogPattern.match(fileName).hasMatch()
-            && !QFile::remove(logDirectory.filePath(fileName)))
-            qWarning() << "SESSION_LOG_CLEANUP: failed" << fileName;
+    // The ultrasound SDK creates one log_YYYYMMDD_HHMMSS.txt per run and never
+    // cleans up after itself. Remove the previous runs' files so the directory
+    // never accumulates more than the current session's single file.
+    const int removed = crawling::AppLogger::removeOldSessionLogs(
+        logDirectory.absolutePath(), QStringLiteral("^log_\\d{8}_\\d{6}\\.txt$"),
+        0);
+    if (removed > 0)
+        qInfo() << "SESSION_LOG_CLEANUP: removed" << removed
+                << "old ultrasound log files";
+
+    // Keep the tail of the previous run instead of wiping it: an operator often
+    // restarts right after a failure and still needs that context. AppLogger
+    // enforces the same per-file line budget while the session is running.
+    struct RetainedLog {
+        QString name;
+        int lines;
+    };
+    const RetainedLog retainedLogs[] = {
+        {QStringLiteral("robot_console.log"),
+         crawling::AppLogger::Retention::Console},
+        {QStringLiteral("camera_connection.log"),
+         crawling::AppLogger::Retention::Camera},
+        {QStringLiteral("profile_weld_detection.log"),
+         crawling::AppLogger::Retention::Profile},
+        {QStringLiteral("errors.log"),
+         crawling::AppLogger::Retention::Errors}};
+    for (const RetainedLog &entry : retainedLogs) {
+        const QString path = logDirectory.filePath(entry.name);
+        if (!QFileInfo::exists(path))
+            continue;
+        if (!crawling::AppLogger::trimToLastLines(path, entry.lines))
+            qWarning() << "SESSION_LOG_CLEANUP: failed" << path;
     }
-
-    QFile robotLog(logDirectory.filePath(QStringLiteral("robot_console.log")));
-    if (robotLog.exists() && !robotLog.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        qWarning() << "SESSION_LOG_CLEANUP: failed" << robotLog.fileName();
-
-    QFile cameraLog(logDirectory.filePath(QStringLiteral("camera_connection.log")));
-    if (cameraLog.exists() && !cameraLog.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        qWarning() << "SESSION_LOG_CLEANUP: failed" << cameraLog.fileName();
-    qInfo().noquote() << "CAMERA_CONNECTION_LOG:" << cameraLog.fileName();
+    qInfo().noquote() << "CAMERA_CONNECTION_LOG:"
+                      << logDirectory.filePath(QStringLiteral("camera_connection.log"));
 }
 
 void pruneInactiveServiceGroups()
@@ -253,11 +274,38 @@ void installDiagnosticHooks(QApplication *app)
             QStringLiteral("event=app_quit reason=about_to_quit"));
     });
 }
+
+// Workbench 的界面按浅色设计（见 MainWindow::buildUi 的样式表）。Windows 处于
+// 深色模式时 Qt 6.8 会跟随系统给出深色调色板：只有被样式表显式指定背景色的
+// 控件才变浅，其余容器、页签、输入框仍按深色绘制，输入框会出现深底 + 深字或
+// 白底 + 白字，参数值完全看不见。这里把应用配色固定为浅色，界面不再随系统
+// 主题漂移。
+void applyLightColorScheme()
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Light);
+#endif
+    QPalette palette = QGuiApplication::palette();
+    palette.setColor(QPalette::Window, QColor(0xf4, 0xf8, 0xfc));
+    palette.setColor(QPalette::WindowText, QColor(0x1f, 0x29, 0x37));
+    palette.setColor(QPalette::Base, QColor(0xff, 0xff, 0xff));
+    palette.setColor(QPalette::AlternateBase, QColor(0xf2, 0xf6, 0xfa));
+    palette.setColor(QPalette::Text, QColor(0x1f, 0x29, 0x37));
+    palette.setColor(QPalette::PlaceholderText, QColor(0x8a, 0x94, 0xa0));
+    palette.setColor(QPalette::Button, QColor(0xf8, 0xfa, 0xfc));
+    palette.setColor(QPalette::ButtonText, QColor(0x1f, 0x29, 0x37));
+    palette.setColor(QPalette::ToolTipBase, QColor(0xff, 0xff, 0xff));
+    palette.setColor(QPalette::ToolTipText, QColor(0x1f, 0x29, 0x37));
+    palette.setColor(QPalette::Highlight, QColor(0x16, 0x77, 0xff));
+    palette.setColor(QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
+    QGuiApplication::setPalette(palette);
+}
 }
 
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+    applyLightColorScheme();
     AppLoggerShutdownGuard loggerShutdownGuard;
     // Windows machines in the field may have a system HTTP proxy configured
     // (Clash/VPN tools, corporate policy). Qt would then try to tunnel our raw
@@ -435,13 +483,17 @@ int main(int argc, char *argv[])
     }
     app.setStyleSheet(R"(
         QWidget { font-family: "Microsoft YaHei UI"; font-size: 13px; }
-        QPushButton { min-height: 30px; padding: 2px 10px; border: 1px solid #b9c5d0; border-radius: 5px; background: #f8fafc; }
+        QPushButton { min-height: 30px; padding: 2px 10px; border: 1px solid #b9c5d0; border-radius: 5px; background: #f8fafc; color: #1f2937; }
         QPushButton:hover { background: #eaf4ff; border-color: #2684c7; }
         QPushButton:disabled { color: #9aa5af; background: #eef1f4; }
-        QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { min-height: 28px; border: 1px solid #b9c5d0; border-radius: 4px; background: white; }
-        QTabWidget::pane { border: 1px solid #cbd5df; }
-        QTabBar::tab { padding: 8px 14px; }
-        QTabBar::tab:selected { color: #087dcc; font-weight: 600; }
+        QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { min-height: 28px; border: 1px solid #b9c5d0; border-radius: 4px; background: white; color: #1f2937; }
+        QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled { background: #eef1f4; color: #6b7683; border-color: #d5dde5; }
+        QComboBox QAbstractItemView { background: white; color: #1f2937; selection-background-color: #1677ff; selection-color: white; }
+        QTabWidget::pane { border: 1px solid #cbd5df; background: white; }
+        QTabBar::tab { padding: 8px 14px; background: #eef2f6; color: #33475b; }
+        QTabBar::tab:selected { background: white; color: #087dcc; font-weight: 600; }
+        QScrollArea { background: white; }
+        QScrollArea > QWidget > QWidget { background: white; }
     )");
     if (app.arguments().contains("--channel-ui-test")) {
         ParameterPanel panel;

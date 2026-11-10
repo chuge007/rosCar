@@ -87,9 +87,13 @@ private:
     void renderCurrentFrame(bool newlyAcquired);
     void updateDecoderSettings();
     void updateImagingGates();
+    void setScanView(int index);
+    void synchronizeDepthCursor(double depth, bool visible);
     void showPanelSection(int index);
     int currentGroupId() const;
-    int encoderCountsPerCell(int groupId) const;
+    int encoderCountsPerCellA(int groupId) const;
+    int encoderCountsPerCellB(int groupId) const;
+    void updateEncoderPrecisionDisplay();
     BScanWidget *ensureBScan(int groupId);
     CScanWidget *ensureCScan(int groupId);
     void selectCurrentGroupViews();
@@ -149,13 +153,11 @@ private:
     QStackedWidget *m_cScanStack = nullptr;
     QHash<int, BScanWidget *> m_bScans;
     QHash<int, CScanWidget *> m_cScans;
-    QTabWidget *m_mapTabs = nullptr;
+    QStackedWidget *m_mapTabs = nullptr;
     QLineEdit *m_address = nullptr;
     QSpinBox *m_deviceId = nullptr;
     QSpinBox *m_beam = nullptr;
     QDoubleSpinBox *m_cPrecision = nullptr;
-    QComboBox *m_eImagingGate = nullptr;
-    QComboBox *m_bImagingGate = nullptr;
     QComboBox *m_bViewMode = nullptr;
     QComboBox *m_bPaletteMode = nullptr;
     QComboBox *m_bScaleMode = nullptr;
@@ -164,7 +166,6 @@ private:
     QDoubleSpinBox *m_bDisplayUpper = nullptr;
     QDoubleSpinBox *m_bGamma = nullptr;
     QCheckBox *m_bInterpolateMissing = nullptr;
-    QComboBox *m_cImagingGate = nullptr;
     QLabel *m_serviceStatus = nullptr;
     QLabel *m_hardwareStatus = nullptr;
     QLabel *m_groupStatus = nullptr;
@@ -181,9 +182,8 @@ private:
     QVector<QLabel *> m_vehicleMetrics;
     QPushButton *m_connect = nullptr;
     QPushButton *m_record = nullptr;
-    QPushButton *m_eScanToggle = nullptr;
-    QPushButton *m_bScanToggle = nullptr;
-    QPushButton *m_cScanToggle = nullptr;
+    QPushButton *m_eViewButton = nullptr;
+    QPushButton *m_bViewButton = nullptr;
     QToolBar *m_actionRail = nullptr;
     QDockWidget *m_panelDock = nullptr;
     QStackedWidget *m_panelPages = nullptr;
@@ -198,21 +198,24 @@ private:
     QHash<int, int> m_groupScanModes;
     QHash<int, int> m_groupSelectedBeam;
     QHash<int, double> m_groupEncoderPrecision;
-    QHash<int, int> m_groupEImagingGate;
-    QHash<int, int> m_groupBImagingGate;
-    QHash<int, int> m_groupCImagingGate;
     QElapsedTimer m_auxUiClock;
     double m_rangeStart = 0;
     double m_rangeEnd = 50;
-    double m_encoderMmPerCount = 3.14159265358979323846 * 500.0 / 4096.0;
+    double m_encoderMmPerCountA = 3.14159265358979323846 * 500.0 / 4096.0;
+    double m_encoderMmPerCountB = 3.14159265358979323846 * 500.0 / 4096.0;
+    quint64 m_encoderGeometryRevision = 0;
     bool m_restoringGroupControls = false;
     bool m_reviewingScanWaveform = false;
     bool m_decoderSdkReady = false;
     bool m_parameterPresetsLoaded = false;
     bool m_scanSessionActive = false;
     bool m_scanCachingPaused = false;
+    bool m_encoderDebugPausedScan = false;
     bool m_waitingForTrackingStart = false;
     bool m_captureWasActiveBeforeApply = false;
+    // 一次参数下发可能被连续补发（applyStarted/applyFinished 成对重复），
+    // 只有首个 applyStarted 停采集、末个 applyFinished 恢复采集。
+    bool m_applyTransactionActive = false;
     QMutex m_pendingScanMutex;
     QHash<GroupScanFrameKey, GroupScanFrame> m_pendingScanFrames;
     QHash<GroupScanFrameKey, int> m_pendingScanScores;

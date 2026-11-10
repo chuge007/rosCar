@@ -95,8 +95,13 @@ QVector<GroupScanSettings> decoderSettingsFromJson(const QJsonObject& data,
         item.value(QStringLiteral("selectedBeam")).toInt();
     settings.amplitudeScale =
         item.value(QStringLiteral("amplitudeScale")).toInt(4096);
-    settings.encoderPrecision =
-        item.value(QStringLiteral("encoderPrecision")).toInt(10);
+    settings.encoderPrecisionA =
+        item.value(QStringLiteral("encoderPrecisionA")).toInt(10);
+    settings.encoderPrecisionB =
+        item.value(QStringLiteral("encoderPrecisionB")).toInt(10);
+    settings.encoderGeometryRevision =
+        static_cast<quint64>(item.value(QStringLiteral("encoderGeometryRevision"))
+                                 .toDouble(0));
     settings.rangeStart =
         item.value(QStringLiteral("rangeStart")).toDouble();
     settings.rangeEnd = item.value(QStringLiteral("rangeEnd")).toDouble(50.0);
@@ -104,7 +109,8 @@ QVector<GroupScanSettings> decoderSettingsFromJson(const QJsonObject& data,
         settings.beamCount <= 0 || settings.beamCount > 8192 ||
         settings.pointCount <= 0 || settings.pointCount > 65536 ||
         settings.selectedBeam < 0 || settings.selectedBeam >= settings.beamCount ||
-        settings.encoderPrecision <= 0 || settings.rangeEnd <= settings.rangeStart) {
+        settings.encoderPrecisionA <= 0 || settings.encoderPrecisionB <= 0 ||
+        settings.rangeEnd <= settings.rangeStart) {
       if (error)
         *error = QStringLiteral("解码工作组 %1 的几何配置无效")
                      .arg(settings.groupId);
@@ -699,8 +705,13 @@ void UltrasoundHostService::handlePresetRequest(
     readConfigBase64(&config);
     double wheelDiameterMm = 500.0;
     int encoderResolution = 4096;
+    int calibrationMode = 0;
+    double countsPerMmA = 0.0;
+    double countsPerMmB = 0.0;
     ParameterPresetStore::loadEncoderCalibration(&wheelDiameterMm,
-                                                  &encoderResolution);
+                                                  &encoderResolution,
+                                                  &calibrationMode,
+                                                  &countsPerMmA, &countsPerMmB);
     return QJsonObject{
         {QStringLiteral("presets"), presetArray(presets)},
         {QStringLiteral("currentPreset"), current},
@@ -708,6 +719,9 @@ void UltrasoundHostService::handlePresetRequest(
          ParameterPresetStore::scanPrecisionMmPerCell(current)},
         {QStringLiteral("wheelDiameterMm"), wheelDiameterMm},
         {QStringLiteral("encoderResolution"), encoderResolution},
+        {QStringLiteral("calibrationMode"), calibrationMode},
+        {QStringLiteral("countsPerMmA"), countsPerMmA},
+        {QStringLiteral("countsPerMmB"), countsPerMmB},
         {QStringLiteral("configBase64"), QString::fromLatin1(config.toBase64())},
         {QStringLiteral("error"), error},
         {QStringLiteral("status"), statusSnapshot()}};
@@ -907,10 +921,18 @@ void UltrasoundHostService::handlePresetRequest(
   if (operation == QStringLiteral("ultrasound.encoder.calibration.get")) {
     double diameterMm = 500.0;
     int resolution = 4096;
-    ParameterPresetStore::loadEncoderCalibration(&diameterMm, &resolution);
+    int calibrationMode = 0;
+    double countsPerMmA = 0.0;
+    double countsPerMmB = 0.0;
+    ParameterPresetStore::loadEncoderCalibration(&diameterMm, &resolution,
+                                                 &calibrationMode,
+                                                 &countsPerMmA, &countsPerMmB);
     respond(sessionId, requestId, true,
             QJsonObject{{QStringLiteral("wheelDiameterMm"), diameterMm},
-                        {QStringLiteral("resolution"), resolution}});
+                        {QStringLiteral("resolution"), resolution},
+                        {QStringLiteral("calibrationMode"), calibrationMode},
+                        {QStringLiteral("countsPerMmA"), countsPerMmA},
+                        {QStringLiteral("countsPerMmB"), countsPerMmB}});
     return;
   }
   if (operation == QStringLiteral("ultrasound.encoder.calibration.set")) {
@@ -918,6 +940,12 @@ void UltrasoundHostService::handlePresetRequest(
         data.value(QStringLiteral("wheelDiameterMm")).toDouble(0.0);
     const int resolution =
         data.value(QStringLiteral("resolution")).toInt(0);
+    const int calibrationMode =
+        data.value(QStringLiteral("calibrationMode")).toInt(0);
+    const double countsPerMmA =
+        data.value(QStringLiteral("countsPerMmA")).toDouble(0.0);
+    const double countsPerMmB =
+        data.value(QStringLiteral("countsPerMmB")).toDouble(0.0);
     if (!std::isfinite(diameterMm) || diameterMm <= 0.0 || resolution <= 0) {
       fail(QStringLiteral("invalid_encoder_calibration"),
            QStringLiteral("编码器轮径或分辨率无效"));
@@ -925,7 +953,10 @@ void UltrasoundHostService::handlePresetRequest(
     }
     QString error;
     if (!ParameterPresetStore::saveEncoderCalibration(
-            diameterMm, resolution, &error)) {
+            diameterMm, resolution, calibrationMode == 1 ? 1 : 0,
+            std::isfinite(countsPerMmA) && countsPerMmA > 0.0 ? countsPerMmA : 0.0,
+            std::isfinite(countsPerMmB) && countsPerMmB > 0.0 ? countsPerMmB : 0.0,
+            &error)) {
       fail(QStringLiteral("encoder_calibration_failed"), error);
       return;
     }
