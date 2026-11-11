@@ -394,7 +394,13 @@ MainWindow::MainWindow(pa1664::remote::RemoteWorkbenchSession *remoteSession,
                 this, [] {});
         connect(m_remoteUltrasound,
                 &pa1664::remote::RemoteUltrasoundSource::parametersInvalidated,
-                this, [](const QJsonObject &) {
+                this, [](const QJsonObject &event) {
+                    // 本机发起 commit 后，响应里的 presetState 已带回完整
+                    // configBase64，apply 响应也已带回每个变更字段的回读值；
+                    // 再补一次全量快照只会让同一次修改把 84 个 getter 跑两遍。
+                    if (event.value(QStringLiteral("reason")).toString() ==
+                        QStringLiteral("parameters_committed"))
+                        return;
                     pa1664::remote::UltrasoundParameterService::instance()
                         .requestSnapshot();
                 });
@@ -505,11 +511,13 @@ MainWindow::MainWindow(pa1664::remote::RemoteWorkbenchSession *remoteSession,
             m_remoteUltrasound->refreshGeometry();
             updateDecoderSettings();
             if (resume) {
-                // The commit response is the synchronization point.  Queue
-                // acquisition after the current response/UI call stack, not
-                // after an arbitrary fixed delay.
+                // 参数写完不能立刻 start：SDK 正在重新映射 USB 端点，立即启动
+                // 会撞上重配窗口，采集起不来又被断流看门狗判成故障（2.5 s
+                // 无帧 → stop → 1.5 s 重试 → USB 恢复退避），画面就卡死。
+                // 改为通知主机进入它自己的配置稳定期（停 → 800 ms → 自动启动）。
                 QTimer::singleShot(0, this, [this] {
-                    if (m_remoteUltrasound) m_remoteUltrasound->startAcquisition();
+                    if (m_remoteUltrasound)
+                        m_remoteUltrasound->requestParameterSettled(true);
                 });
             }
             return;

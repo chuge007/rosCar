@@ -30,6 +30,9 @@ class RemoteUltrasoundSource final : public QObject {
   void disconnectDevice();
   void startAcquisition();
   void stopAcquisition();
+  // 参数事务结束：不直接 start，而是让主机走它自己的配置稳定期
+  // （真停 → 800 ms → 自动启动），避免启动命令撞上 SDK 的 USB 重配窗口。
+  void requestParameterSettled(bool resumeCapture);
   void resetEncoder();
   void refreshGeometry();
   void updateDecoderSettings(QVector<GroupScanSettings> groups,

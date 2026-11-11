@@ -491,6 +491,19 @@ void UltrasoundHostService::dispatchRequest(quint64 sessionId,
     respond(sessionId, requestId, true, statusSnapshot());
     return;
   }
+  if (operation == QStringLiteral("ultrasound.parameters.settled")) {
+    // 参数写入会让 SDK 重新映射 USB 端点并重发硬件配置。工作台在这次参数
+    // 事务里已先停采，若这里直接 start，启动命令会撞上 SDK 的重配窗口，
+    // 起不来的采集随后被断流看门狗当成故障（2.5 s 无帧 → 强制 stop →
+    // 1.5 s 重试 → USB 恢复退避），表现就是"改完参数画面卡死"。
+    // 因此交给设备控制器自己的配置稳定期：真停 → 800 ms → 自动启动，
+    // 期间 m_capturing/m_captureReady 都是 false，看门狗不会误判断流。
+    const bool resumeCapture =
+        data.value(QStringLiteral("resumeCapture")).toBool(true);
+    device_->resumeAfterConfigurationChange(resumeCapture);
+    respond(sessionId, requestId, true, statusSnapshot());
+    return;
+  }
   if (operation == QStringLiteral("ultrasound.encoder.reset")) {
     device_->resetEncoder();
     respond(sessionId, requestId, true);

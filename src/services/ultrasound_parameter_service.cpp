@@ -333,8 +333,20 @@ void UltrasoundParameterService::applyPresetState(const QJsonObject& state,
     if (!config.isEmpty()) {
       QJsonParseError parseError;
       const QJsonDocument document = QJsonDocument::fromJson(config, &parseError);
-      if (parseError.error == QJsonParseError::NoError && document.isObject())
+      if (parseError.error == QJsonParseError::NoError && document.isObject()) {
+        // PRF 安全限幅发生在 commit 内部，早于此刻的 apply 回读，所以这批
+        // 回读携带的是限幅前的帧率。用响应自带的整份配置就地补齐缓存，
+        // 否则面板会继续显示旧帧率并在下一次编辑时再次触发限幅。
+        const QJsonValue frameRate = document.object()
+                                         .value(QStringLiteral("global"))
+                                         .toObject()
+                                         .value(QStringLiteral("frame_rate"));
+        if (frameRate.isDouble())
+          values_.insert(
+              parameterCacheKey(QStringLiteral("getFrameRate"), QJsonArray{}),
+              frameRate.toInt());
         emit hardwareSnapshotReady(document);
+      }
     }
   }
   emit presetsChanged();

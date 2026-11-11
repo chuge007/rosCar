@@ -166,7 +166,10 @@ bool snapshotSdk(QJsonDocument *snapshot, QString *error)
         // Some SDK builds finish the file just after saveConfig() returns and
         // can report false even though a complete snapshot was produced.  The
         // JSON itself is the source of truth; accept it only after parsing.
-        for (int poll = 0; poll < 12; ++poll) {
+        // 厂商 SDK 大多几毫秒就写完，原来首个步长就是 20 ms，等于给每次
+        // 参数提交强加 20 ms 延迟。先用 2 ms 短步长快速命中，文件确实慢时
+        // 再退回 20 ms 长步长，总等待上限与原来基本一致。
+        for (int poll = 0; poll < 16; ++poll) {
             if (QFileInfo(path).size() > 0) {
                 QJsonDocument candidate;
                 QString parseFailure;
@@ -184,7 +187,7 @@ bool snapshotSdk(QJsonDocument *snapshot, QString *error)
                     lastFailure = parseFailure;
                 }
             }
-            QThread::msleep(20);
+            QThread::msleep(poll < 6 ? 2 : 20);
         }
         QFile::remove(path);
         if (!sdkReportedSaved && lastFailure.isEmpty())

@@ -123,6 +123,12 @@ void RemoteUltrasoundSource::stopAcquisition() {
     remote_->request(QStringLiteral("ultrasound.acquisition.stop"));
 }
 
+void RemoteUltrasoundSource::requestParameterSettled(bool resumeCapture) {
+  if (isReady())
+    remote_->request(QStringLiteral("ultrasound.parameters.settled"),
+                     QJsonObject{{QStringLiteral("resumeCapture"), resumeCapture}});
+}
+
 void RemoteUltrasoundSource::resetEncoder() {
   if (isReady())
     remote_->request(QStringLiteral("ultrasound.encoder.reset"));
@@ -175,7 +181,8 @@ void RemoteUltrasoundSource::onResponseReceived(
       operation == QStringLiteral("ultrasound.device.connect") ||
       operation == QStringLiteral("ultrasound.device.disconnect") ||
       operation == QStringLiteral("ultrasound.acquisition.start") ||
-      operation == QStringLiteral("ultrasound.acquisition.stop")) {
+      operation == QStringLiteral("ultrasound.acquisition.stop") ||
+      operation == QStringLiteral("ultrasound.parameters.settled")) {
     if (data.contains(QStringLiteral("device"))) applyStatus(data);
   } else if (operation == QStringLiteral("ultrasound.decoder.settings")) {
     emit decoderSettingsApplied();
@@ -186,7 +193,10 @@ void RemoteUltrasoundSource::onEventReceived(const QString& eventName,
                                              const QJsonObject& data) {
 
   if (eventName == QStringLiteral("ultrasound.parameters.invalidated")) {
-    emit parametersInvalidated(status_);
+    // 事件载荷带 reason（parameters_committed / preset_switched / ...）。
+    // 以前转发的是缓存的设备状态，reason 被丢掉，控制台因此无法区分
+    // “自己刚提交的这次修改”和真正的硬件变化。
+    emit parametersInvalidated(data);
     return;
   }
   if (eventName == QStringLiteral("ultrasound.status")) {
