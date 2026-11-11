@@ -34,7 +34,13 @@ constexpr int kNetworkFrameTimeoutMs = 6000;
 // a stream that is still silent after 8 s is dead; retrying sooner beats
 // waiting 15 s per attempt.
 constexpr int kNetworkOpenStuckMs = 8000;
-constexpr int kNetworkReconnectMaxDelayMs = 3000;
+// The reader's own FFmpeg socket timeout is 5 s, so a reader blocked inside
+// capture.open() needs that long to fail and close its RTSP session. 400 ms
+// only covered a clean shutdown; anything slower was terminate()d, which
+// leaked the socket and the session until the camera refused new clients.
+constexpr int kNetworkReaderStopGraceMs = 6500;
+// Two cameras retrying every 3 s hammered both IP cameras during a dead link.
+constexpr int kNetworkReconnectMaxDelayMs = 8000;
 
 QString slotLabel(int slot) {
   return CRAWLING_TEXT("USB 摄像头 %1").arg(slot + 1);
@@ -443,7 +449,7 @@ void RobotUsbCameraController::stopNetworkReader(UsbSlot& slot) {
   slot.networkReader = nullptr;
   disconnect(reader, nullptr, this, nullptr);
   reader->requestStop();
-  if (!reader->wait(400)) {
+  if (!reader->wait(kNetworkReaderStopGraceMs)) {
     // Avoid blocking shutdown forever if FFmpeg is stuck in a socket read.
     reader->terminate();
     if (!reader->wait(700)) {

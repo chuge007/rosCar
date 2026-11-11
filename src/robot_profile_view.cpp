@@ -121,6 +121,8 @@ void RobotProfileView::clear()
     m_receivedAtEpochMs = 0;
     m_displayRangeInitialized = false;
     m_displayHalfSpanX = 0.0;
+    m_displayMinHorizontal = 0.0;
+    m_displayMaxHorizontal = 0.0;
     m_profileUpdatePending = false;
     m_profileCacheValid = false;
     m_cachedValidPoints.clear();
@@ -356,23 +358,57 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
             m_displayHalfSpanX = std::max(
                 m_displayHalfSpanX,
                 std::max(std::abs(minHorizontal), std::abs(maxHorizontal)));
-        const double halfSpanX = std::max(m_displayHalfSpanX,
-            std::max(std::abs(minHorizontal), std::abs(maxHorizontal)));
-        minHorizontal = -halfSpanX;
-        maxHorizontal = halfSpanX;
         if (!m_displayRangeInitialized) {
+            m_displayMinHorizontal = minHorizontal;
+            m_displayMaxHorizontal = maxHorizontal;
             m_displayMinVertical = minVertical;
             m_displayMaxVertical = maxVertical;
             m_displayRangeInitialized = true;
         } else {
             constexpr double rangeAlpha = 0.20;
+            m_displayMinHorizontal +=
+                rangeAlpha * (minHorizontal - m_displayMinHorizontal);
+            m_displayMaxHorizontal +=
+                rangeAlpha * (maxHorizontal - m_displayMaxHorizontal);
             m_displayMinVertical +=
                 rangeAlpha * (minVertical - m_displayMinVertical);
             m_displayMaxVertical +=
                 rangeAlpha * (maxVertical - m_displayMaxVertical);
         }
+        // X 轴按真实扫描范围铺满绘图区。旧实现把范围对称成
+        // ±max(|minX|,|maxX|)：轮廓只覆盖视野一侧时另一半全是空白，看起来
+        // 像数据没传全。零点（视野基准）必须留在画面内，否则操作员无法从
+        // 图形判断焊道相对视野中心的偏移。
+        double displayMinX = std::min(m_displayMinHorizontal, 0.0);
+        double displayMaxX = std::max(m_displayMaxHorizontal, 0.0);
+        const double spanX = displayMaxX - displayMinX;
+        if (std::isfinite(spanX) && spanX > 1e-9) {
+            const double padX = spanX * 0.02;
+            displayMinX -= padX;
+            displayMaxX += padX;
+        } else {
+            const double halfSpanX = std::max(
+                m_displayHalfSpanX,
+                std::max(std::abs(minHorizontal), std::abs(maxHorizontal)));
+            displayMinX = -std::max(halfSpanX, 1e-3);
+            displayMaxX = std::max(halfSpanX, 1e-3);
+        }
+        minHorizontal = displayMinX;
+        maxHorizontal = displayMaxX;
         minVertical = std::min(minVertical, m_displayMinVertical);
         maxVertical = std::max(maxVertical, m_displayMaxVertical);
+        if (m_lastPaintDiagnosticMs == diagnosticNow) {
+            crawling::AppLogger::write(QStringLiteral("CAMERA.UI"),
+                QStringLiteral("event=profile_xz_range frame=%1 display_x=%2,%3 "
+                               "data_x=%4,%5 zero_line_ratio=%6")
+                    .arg(m_frameNumber)
+                    .arg(minHorizontal, 0, 'g', 9)
+                    .arg(maxHorizontal, 0, 'g', 9)
+                    .arg(m_cachedMinHorizontal, 0, 'g', 9)
+                    .arg(m_cachedMaxHorizontal, 0, 'g', 9)
+                    .arg(-minHorizontal / std::max(1e-9, maxHorizontal - minHorizontal),
+                         0, 'f', 4));
+        }
     }
 
     const double horizontalPadding = m_viewMode == ViewMode::XZ

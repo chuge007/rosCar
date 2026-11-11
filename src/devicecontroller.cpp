@@ -465,9 +465,10 @@ bool DeviceController::start()
                                                || m_usbRecovery.isActive()
                                                || m_usbRecoveryInProgress;
         if (!initializationTimerActive) {
-            // A previous automatic recovery may have been cancelled/failed.
-            // A deliberate new Start click begins one fresh bounded cycle.
-            m_usbRecoveryAttempts = 0;
+            // A deliberate Start click may retry immediately, but it must not
+            // reset the recovery round counter: repeated clicks used to reset
+            // the old two-round budget and produced an endless
+            // "恢复 1/2 / 2/2" loop without ever reaching a real frame.
             scheduleUsbRecovery(QStringLiteral("用户重新请求采集，硬件尚未就绪"));
             return true;
         }
@@ -923,7 +924,9 @@ void DeviceController::watchdog()
             m_usbRecovery.stop();
             m_usbRecoveryInProgress = false;
             m_usbRecoveryStep = 0;
-            m_usbRecoveryAttempts = 0;
+            // A physical unplug/re-enumeration is a fresh event, so the next
+            // recovery may use the short interval again.
+            m_autoRecoveryRounds = 0;
             m_startRetry.stop();
             m_frameConfirmation.stop();
             m_capturing = false;
@@ -963,7 +966,8 @@ void DeviceController::watchdog()
             m_usbRecoveryInProgress = false;
             m_usbRecoveryStep = 0;
             m_usbNeedsRecovery = false;
-            m_usbRecoveryAttempts = 0;
+            m_autoRecoveryRounds = 0;
+            m_usbRecoveryStep = 0;
             setHardwareOnline(true);
         }
     }
@@ -1073,7 +1077,7 @@ void DeviceController::initializeHotpluggedBootLoader()
     }
 
     m_usbNeedsRecovery = true;
-    m_usbRecoveryAttempts = 0;
+    m_autoRecoveryRounds = 0;
     emit message(QStringLiteral("设备固件和 FPGA 已初始化，正在交接给采集 SDK…"), false);
     if (m_serviceConnected)
         scheduleUsbRecovery(QStringLiteral("USB Streamer 已由 BootLoader 初始化完成"));
@@ -1089,18 +1093,16 @@ void DeviceController::scheduleUsbRecovery(const QString &reason)
         emit message(QStringLiteral("%1，但 USB Streamer 尚未出现").arg(reason), true);
         return;
     }
-    if (m_usbRecoveryAttempts >= 2) {
-        m_startRequested = false;
-        m_captureReady = false;
-        emit message(QStringLiteral("自动恢复两次后仍无硬件帧。请退出软件，确认厂家程序已关闭，再重新打开本软件"), true);
-        emit statusChanged();
-        return;
-    }
-
+    // A stalled USB stream is normal on site: the board can stop after a config
+    // re-map, a bumped cable or a Windows power event. Giving up after two
+    // rounds forced the operator to exit and reopen the software, and on the
+    // remote host that also discards every other service. Keep cycling with a
+    // bounded backoff until real frames return; the watchdog clears the round
+    // counter on the first confirmed frame.
+    ++m_autoRecoveryRounds;
     m_usbNeedsRecovery = true;
     m_groupsSynchronized = false;
     m_usbRecoveryInProgress = true;
-    ++m_usbRecoveryAttempts;
     m_usbRecoveryStep = 0;
     m_connectionSettling.stop();
     m_configurationSettling.stop();
@@ -1112,9 +1114,12 @@ void DeviceController::scheduleUsbRecovery(const QString &reason)
     m_captureReady = false;
     // Board Info is emitted roughly four seconds after the Windows Streamer
     // endpoint appears. Sending DeviceSet before that only targets id -1.
-    m_usbRecovery.start(6000);
-    emit message(QStringLiteral("%1：等待板卡稳定后将自动重新下发配置（恢复 %2/2），无需反复点击开始")
-                     .arg(reason).arg(m_usbRecoveryAttempts), false);
+    // Later rounds wait longer so a board that is genuinely offline is not
+    // hammered every few seconds for hours.
+    const int backoffShift = qMin(m_autoRecoveryRounds - 1, 2);
+    m_usbRecovery.start(qMin(6000 << backoffShift, 15000));
+    emit message(QStringLiteral("%1：等待板卡稳定后将自动重新下发配置（自动恢复第 %2 轮），无需重开软件")
+                     .arg(reason).arg(m_autoRecoveryRounds), false);
     emit statusChanged();
 }
 

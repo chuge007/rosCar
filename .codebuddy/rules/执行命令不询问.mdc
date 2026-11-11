@@ -1,0 +1,44 @@
+---
+description: 执行命令（编译、结束进程、ssh/scp 部署、启动软件、读日志、git 查询、生成编译数据库）直接做完再报告，禁止输出"要不要/是否需要/如果愿意我可以"类确认问句；只有越界与破坏性操作才停下
+alwaysApply: true
+enabled: true
+updatedAt: 2026-11-11T00:00:00.000Z
+provider:
+---
+
+# 执行命令不询问，直接做完再报告
+
+需要命令动作的任务（编译、验证、部署、重启、查日志、看进程、跑脚本、生成 `compile_commands.json`、git 查询），**直接执行到底，再一次性报告结果**。不要先问"要不要执行"、不要中途停下来征求同意、不要只给出命令让用户自己跑。
+
+## 禁止的问句（说出来就是没执行本规则）
+
+- 「要我现在编译吗」「要不要我编一下」
+- 「要我现在 scp 新 exe 上去吗」「需要我推送到小车端吗」
+- 「要不要重启主机进程」「要不要先关掉旧进程」
+- 「要不要打开软件」「需要我启动 Workbench 吗」
+- 「如果需要，我可以帮你部署 / 我可以继续」
+- 「要我生成 compile_commands.json 吗」
+
+## 直接做，不问
+
+| 动作 | 说明 |
+|---|---|
+| 结束本项目进程 | `taskkill /IM PA1664Workbench.exe|PA1664RobotHost.exe|PA1664CameraServer.exe /F` |
+| 编译 | `build_workbench.bat` / `build_host.bat` / `build_all.bat`，按 U/R/L/S 归属选目标 |
+| 生成 / 刷新编译数据库 | `gen_compile_commands.py`，再用 clangd 校验 |
+| 部署 Host | `copy` 到 `startup_deploy\robot_host\app\` → 远程 `taskkill` + 删 `robot_host.lock` → 备份 → `scp` → `dir` 校验 |
+| 启动 | 远程 `StartRobotHost.cmd`、本地 `bin\PA1664Workbench.exe` / `PA1664RobotHost.exe` |
+| 排查 | `ssh a@192.168.1.20` 看日志、`Get-Process` / `tasklist` 看存活、读本地 `bin\logs\` |
+| 只读 git | `git status` / `log` / `diff` / `show` |
+
+## 仍然要停下的例外（仅这些）
+
+1. 操作会修改 `D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmpSeparate` 以外的任何文件（含 `PA1664WorkbenchTmp2`）。
+2. 破坏性操作：删除源码/目录、`git reset --hard`、`git push --force`、改 git config、`--no-verify` 跳过钩子、`git commit`（用户未要求提交时）。
+3. 清理不在本仓库范围内的系统进程或系统目录。
+
+这三类之外，一律先执行，失败就贴原始报错并给出下一步，不允许用问句代替动作。
+
+## 报告格式
+
+一次讲全：结束了哪些进程 → 执行了哪些命令、结果（成功/失败与关键输出）→ 产物落到了哪里（`bin\`、`startup_deploy\`、小车端 `app\`）→ 进程是否存活 → 日志位置（本地 `bin\logs\`，小车端 `C:\Users\a\Desktop\robot_host\app\logs\`）。

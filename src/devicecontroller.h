@@ -142,7 +142,10 @@ private:
     bool m_firmwareBootstrapInProgress = false;
     bool m_groupsSynchronized = false;
     int m_usbRecoveryStep = 0;
-    int m_usbRecoveryAttempts = 0;
+    // Consecutive automatic-recovery rounds since the last confirmed hardware
+    // frame. Cleared by the watchdog on the first real frame, so a healthy
+    // stream always restarts the backoff from the short interval.
+    int m_autoRecoveryRounds = 0;
     int m_lastUsbMode = -1;
     int m_startAttempts = 0;
     int m_deviceId = 0;

@@ -45,15 +45,20 @@ void ensureLowLatencyFfmpegOptions() {
   // Read by OpenCV's FFmpeg backend at open time. Respect a user override.
   if (!qgetenv("OPENCV_FFMPEG_CAPTURE_OPTIONS").isEmpty())
     return;
-  // stimeout bounds the RTSP socket read inside avformat_open_input /
-  // avformat_find_stream_info. Without it, cv::CAP_PROP_OPEN_TIMEOUT_MSEC does
-  // not take effect for the FFmpeg backend: a camera that answers DESCRIBE but
-  // stalls before the first frame leaves capture.open() blocked forever, and
-  // the only way out is the 8 s controller watchdog that terminate()s the
-  // reader thread (leaking the half-open RTSP session). stimeout makes open()
-  // fail in ~5 s so the normal failed()/reconnect path runs instead.
+  // timeout bounds every RTSP socket read inside avformat_open_input /
+  // avformat_find_stream_info. FFmpeg renamed this demuxer option from
+  // stimeout to timeout (deprecated in 5.0, removed in 6.0) and the backend
+  // shipped as opencv_videoio_ffmpeg500_64.dll links FFmpeg 7.x, so stimeout
+  // on its own is an unknown key that is silently ignored. Both spellings are
+  // written on purpose: the one the backend does not know is dropped by
+  // av_opt, the other takes effect.
+  // Without an effective timeout a camera that answers DESCRIBE 200 OK but
+  // never sends the first RTP packet leaves capture.open() blocked; the 8 s
+  // controller watchdog then terminate()s the reader thread, which leaks the
+  // half-open RTSP session until the camera refuses every new client.
   qputenv("OPENCV_FFMPEG_CAPTURE_OPTIONS",
-          "rtsp_transport;tcp|stimeout;5000000|fflags;nobuffer|flags;low_delay|max_delay;0|reorder_queue_size;0");
+          "rtsp_transport;tcp|timeout;5000000|stimeout;5000000|fflags;nobuffer|"
+          "flags;low_delay|max_delay;0|reorder_queue_size;0");
 }
 
 struct FfmpegBackendProbe {

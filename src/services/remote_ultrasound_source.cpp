@@ -29,6 +29,24 @@ QJsonObject groupToJson(const GroupScanSettings& group) {
                      {QStringLiteral("rangeEnd"), group.rangeEnd}};
 }
 
+// Only link/device state drives UI decisions, and MainWindow::applyRemoteStatus
+// re-pushes decoder settings whenever it sees a new status. Frame and drop
+// counters change every second, so they must not be used as a change signal or
+// the console would re-configure the decoder once per second for ever.
+QJsonObject stableDeviceState(const QJsonObject& status) {
+  const QJsonObject device = status.value(QStringLiteral("device")).toObject();
+  static const char* const kKeys[] = {
+      "available",     "serviceConnected", "hardwareOnline", "capturing",
+      "captureReady",  "startPending",     "pointCount",     "currentGroup",
+      "maxAmplitudeValue"};
+  QJsonObject stable;
+  for (const char* key : kKeys) {
+    const QString name = QLatin1String(key);
+    stable.insert(name, device.value(name));
+  }
+  return stable;
+}
+
 }  // namespace
 
 RemoteUltrasoundSource::RemoteUltrasoundSource(QObject* parent)
@@ -171,6 +189,18 @@ void RemoteUltrasoundSource::onEventReceived(const QString& eventName,
     emit parametersInvalidated(status_);
     return;
   }
+  if (eventName == QStringLiteral("ultrasound.status")) {
+    // The host pushes this once per second. Ignoring it left the console
+    // showing the snapshot taken when Start was clicked, so an automatic USB
+    // recovery looked like a frozen button with no progress at all.
+    applyStatus(data);
+    return;
+  }
+  if (eventName == QStringLiteral("ultrasound.log")) {
+    emit message(data.value(QStringLiteral("message")).toString(),
+                 data.value(QStringLiteral("error")).toBool());
+    return;
+  }
   if (eventName == QStringLiteral("ultrasound.backlogOverflow")) {
     const qint64 bytes = static_cast<qint64>(
         data.value(QStringLiteral("bytes")).toDouble());
@@ -222,8 +252,14 @@ void RemoteUltrasoundSource::onBulkMessage(BulkStreamKind kind, quint64,
 }
 
 void RemoteUltrasoundSource::applyStatus(const QJsonObject& status) {
+  const QJsonObject previous = stableDeviceState(status_);
   status_ = status;
-  emit statusChanged(status_);
+  // The host pushes ultrasound.status once per second. Emitting it
+  // unconditionally would run MainWindow::applyRemoteStatus (and its decoder
+  // settings RPC) once per second, so only real link/device transitions are
+  // forwarded while the full snapshot is still cached for the next reader.
+  if (previous != stableDeviceState(status_))
+    emit statusChanged(status_);
 }
 
 void RemoteUltrasoundSource::reportFailure(const QString& operation,

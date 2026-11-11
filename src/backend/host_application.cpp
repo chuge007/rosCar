@@ -454,8 +454,15 @@ void HostApplication::startUltrasoundService() {
   connect(ultrasound_, &UltrasoundHostService::scanBatchEncoded, this,
           &HostApplication::onUltrasoundScanBatch, Qt::QueuedConnection);
   connect(ultrasound_, &UltrasoundHostService::logMessage, this,
-          [](quint64 sessionId, const QString& message) {
+          [this](quint64 sessionId, const QString& message) {
             qInfo().noquote() << "ULTRASOUND" << sessionId << message;
+            // The operator can only act on what the host relays. USB recovery
+            // rounds, frame confirmation and stream-loss reasons used to stay
+            // in this log, so the console showed an idle preview with no hint
+            // that the host was still repairing the link.
+            if (sessionId != 0)
+              sendSessionEvent(sessionId, QStringLiteral("ultrasound.log"),
+                               QJsonObject{{QStringLiteral("message"), message}});
           }, Qt::QueuedConnection);
   ultrasoundThread_->start();
 }

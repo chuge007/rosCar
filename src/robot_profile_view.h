@@ -69,6 +69,8 @@ private:
     int m_inputTimeoutMs = 500;
     bool m_displayRangeInitialized = false;
     double m_displayHalfSpanX = 0.0;
+    double m_displayMinHorizontal = 0.0;
+    double m_displayMaxHorizontal = 0.0;
     double m_displayMinVertical = 0.0;
     double m_displayMaxVertical = 1.0;
     bool m_profileUpdatePending = false;
