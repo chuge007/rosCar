@@ -13,6 +13,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <exception>
 #include <QJsonDocument>
@@ -30,6 +31,47 @@ constexpr int kMaximumParameterRequests = 512;
 constexpr qint64 kMaximumEncoderBatchBacklogBytes = 128ll * 1024 * 1024;
 constexpr int kFrameEncodeIntervalMs = 20;
 constexpr int kBatchEncodeIntervalMs = 4;
+
+// 厂商 SDK 的 SharedPreferenceService 在首次实例化时读取
+// configs/ultrasound_device_*/global/prefs.json。强制结束进程（taskkill /F、
+// 任务管理器结束进程）可能把该文件留成 0 字节，之后每次启动 SDK 都抛
+// json parse_error.101，超声服务线程随即退出，此后所有 ultrasound.* 请求都
+// 被主机兜底成"主机不支持操作"，重启进程也照样失败，只能手工修文件。
+// 启动时先修复这类残留，避免空文件变成永久故障。
+void repairSdkPreferences() {
+  const QDir appDir(QCoreApplication::applicationDirPath());
+  const QDir configs(appDir.filePath(QStringLiteral("configs")));
+  if (!configs.exists()) return;
+  const QStringList devices =
+      configs.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+  for (const QString& device : devices) {
+    const QString path =
+        configs.filePath(device + QStringLiteral("/global/prefs.json"));
+    const QFileInfo info(path);
+    if (!info.exists() || !info.isFile()) continue;
+    bool broken = info.size() == 0;
+    if (!broken) {
+      QFile probe(path);
+      if (probe.open(QIODevice::ReadOnly)) {
+        QJsonParseError parseError;
+        QJsonDocument::fromJson(probe.readAll(), &parseError);
+        broken = parseError.error != QJsonParseError::NoError;
+      }
+    }
+    if (!broken) continue;
+    const QString backup = path + QStringLiteral(".broken.bak");
+    QFile::remove(backup);
+    QFile::rename(path, backup);
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+      qWarning().noquote() << "ULTRASOUND_PREFS_REPAIR_FAILED" << path;
+      continue;
+    }
+    file.write("{}");
+    file.close();
+    qWarning().noquote() << "ULTRASOUND_PREFS_REPAIRED" << path;
+  }
+}
 
 QJsonArray presetArray(const QList<ParameterPresetInfo>& presets) {
   QJsonArray result;
@@ -234,6 +276,9 @@ UltrasoundHostService::~UltrasoundHostService() { shutdown(); }
 void UltrasoundHostService::initialize() {
   if (initialized_ || shuttingDown_) return;
   initialized_ = true;
+  // 必须早于任何 Client::getInstance()：SDK 的偏好服务在首次实例化时
+  // 解析 prefs.json，空文件会让整条超声服务线程抛异常退出。
+  repairSdkPreferences();
   QString presetMessage;
   QString presetError;
   if (!ParameterPresetStore::prepare(&presetMessage, &presetError)) {

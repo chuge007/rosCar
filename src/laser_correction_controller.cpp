@@ -33,7 +33,9 @@ constexpr qint64 kRawFrameDiagnosticIntervalMs = 100;
 // The inactive laser page still needs live localization, but full detector
 // work at the camera's 30 FPS is unnecessary before correction is enabled.
 // Raw point-cloud preview keeps its 30 FPS path; only the detector is sampled.
-constexpr qint64 kInactiveProfileProcessIntervalMs = 67;
+// Measured detector cost is 2-3 ms per profile, so sampling at 15 Hz threw away
+// preview freshness for no real saving: match the 33 ms source cadence instead.
+constexpr qint64 kInactiveProfileProcessIntervalMs = 33;
 constexpr int kRawProfileLogBuckets = 128;
 constexpr double kCenterFilterTimeConstantS = 0.20;
 // The weld can move in the image only gradually while the chassis is moving.
@@ -415,8 +417,12 @@ void LaserCorrectionController::setSettings(
       clamp(settings_.laserCenterFeedbackGain, 0.0, 1.5);
   settings_.laserCenterLookaheadM =
       clamp(settings_.laserCenterLookaheadM, 0.05, 1.0);
+  // 0.77 的内侧轮比例把 19 mm/s 巡航时的转向能力压到 0.65 deg/s
+  // （(2*0.019/0.44)*(0.23/1.77)），偏差 40 mm 时完全追不上。
+  // 下限从 0.45 放宽到 0.20，让现场能按工况换更高的转向权限；
+  // 具体数值仍由底盘设置里的"内侧轮最小比例"决定（Host 侧取两者较小值）。
   settings_.minimumInnerWheelRatio =
-      clamp(settings_.minimumInnerWheelRatio, 0.45, 0.90);
+      clamp(settings_.minimumInnerWheelRatio, 0.20, 0.90);
   settings_.maxAngularRadps = std::max(0.01, settings_.maxAngularRadps);
   // This is the hard source-age deadline used by the safety watchdog and by
   // queued-frame rejection. Keep it explicit and bounded at the safety edge.
@@ -660,6 +666,13 @@ void LaserCorrectionController::flushProfileDiagnostics(const QString& reason) {
   setProfileDetectionTraceEnabled(false);
 }
 
+void LaserCorrectionController::requestStop(const QString& reason) {
+  pausedAtMs_ = -1;
+  paused_ = false;
+  status_.paused = false;
+  stop(reason.isEmpty() ? CRAWLING_TEXT("自动纠偏已停止") : reason);
+}
+
 void LaserCorrectionController::setEnabled(bool enabled) {
   if (!enabled) {
     pausedAtMs_ = -1;
@@ -893,9 +906,16 @@ void LaserCorrectionController::processProfileFrame(
   trace.enabled = profileDetectionTraceEnabled_ &&
       (lastProfileDetailCaptureMs_ < 0 || now - lastProfileDetailCaptureMs_ >= 250);
   if (trace.enabled) lastProfileDetailCaptureMs_ = now;
-  if (points.size() < 32 || age < 0 || age > settings_.imageTimeoutMs) {
+  // 控制用帧的时效：图像年龄会直接变成位置滞后（19 mm/s 下 250 ms ≈ 4.8 mm）。
+  // 超过该年龄的帧不再参与纠偏输出，避免用几百毫秒前的位置继续打转向。
+  constexpr qint64 kControlFrameMaximumAgeMs = 250;
+  const bool controlStale = status_.active && age > kControlFrameMaximumAgeMs;
+  if (points.size() < 32 || age < 0 || age > settings_.imageTimeoutMs ||
+      controlStale) {
     const QString reason = points.size() < 32 ? QStringLiteral("too_few_samples")
-        : age < 0 ? QStringLiteral("invalid_timestamp") : QStringLiteral("input_stale");
+        : age < 0 ? QStringLiteral("invalid_timestamp")
+        : age > settings_.imageTimeoutMs ? QStringLiteral("input_stale")
+                                         : QStringLiteral("input_stale_control");
     // Rejected input breaks consecutive confirmation; the next fresh
     // candidate must not inherit votes from before a timeout or dropout.
     initialGapConfirmationCount_ = 0;
@@ -3448,13 +3468,24 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
                                                  adaptiveCurvature)});
       if (!angularLimitLogged_ &&
           std::abs(rawTargetAngular) > safeAngularLimit + 1e-9) {
+        // 指出到底是哪一项在压角速度，避免现场把"比例"和"曲率"混着调。
+        const double curvatureLimit = std::abs(targetLinear) * adaptiveCurvature;
+        const double innerWheelLimit = std::max(0.0, sameDirectionAngularLimit);
+        const char *constraint = std::abs(safeAngularLimit - settings_.maxAngularRadps) <= 1e-9
+            ? "max_angular_rate"
+            : (innerWheelLimit <= curvatureLimit + 1e-9 ? "inner_wheel_ratio"
+                                                        : "curvature");
         emit logMessage(
             CRAWLING_TEXT("柔性转向限幅：原始角速度 %1 deg/s，安全上限 %2 deg/s，"
-                          "前进速度 %3 mm/s，曲率上限 %4 deg/m")
+                          "前进速度 %3 mm/s，曲率上限 %4 deg/m，"
+                          "约束=%5（内侧轮 %6%，曲率项 %7 deg/s）")
                 .arg(rawTargetAngular * 180.0 / kPi, 0, 'f', 1)
                 .arg(safeAngularLimit * 180.0 / kPi, 0, 'f', 1)
                 .arg(targetLinear * 1000.0, 0, 'f', 1)
-                .arg(adaptiveCurvature * 180.0 / kPi, 0, 'f', 1));
+                .arg(adaptiveCurvature * 180.0 / kPi, 0, 'f', 1)
+                .arg(QString::fromLatin1(constraint))
+                .arg(settings_.minimumInnerWheelRatio * 100.0, 0, 'f', 0)
+                .arg(curvatureLimit * 180.0 / kPi, 0, 'f', 2));
         angularLimitLogged_ = true;
       }
       const double targetAngular = clamp(rawTargetAngular, -safeAngularLimit,

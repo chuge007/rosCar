@@ -18,6 +18,7 @@
 #include <QJsonValue>
 #include <QSerialPortInfo>
 #include <QSettings>
+#include <QStringList>
 #include <QThread>
 #include <QTimer>
 
@@ -34,7 +35,11 @@ namespace {
 // stored the frame without any reader), so every byte and every JPEG encode
 // was pure waste on the 100 Mbit link. The contour view consumes the point
 // cloud stream (0x0202) instead.
-constexpr int kLaserPointIntervalMs = 50;
+// SensorController already hands the correction profile over at 33 ms, so a
+// 50 ms publish interval threw away a third of the frames the operator view
+// could have shown. Align the publish cadence with the source: 30 Hz ceiling on
+// a link that is still only ~12% loaded at 100 Mbit.
+constexpr int kLaserPointIntervalMs = 33;
 // The operator panel repaints camera previews on its 100 ms UI clock, so a
 // 66 ms push interval wasted a third of the JPEG encodes and link bytes.
 constexpr int kUsbImageIntervalMs = 100;
@@ -705,6 +710,40 @@ void RobotPeripheralHostService::startSensorThreads() {
     correction_->moveToThread(correctionThread_);
     connect(correctionThread_, &QThread::finished, correction_,
             &QObject::deleteLater);
+    // The separated host ran the weld detector but never routed its diagnostics
+    // to disk, so detector_ms and laser_pipeline_slow were invisible in the
+    // field and a slow detector was indistinguishable from a slow link. Mirror
+    // the integrated panel: localization summaries go to the profile log, and
+    // the high-rate per-frame chatter is sampled to one line per second.
+    connect(correction_,
+            &crawling::LaserCorrectionController::profileDiagnosticBatch, this,
+            [](const QStringList& messages) {
+              crawling::AppLogger::writeProfileDetectionBatch(messages);
+            },
+            Qt::QueuedConnection);
+    connect(correction_,
+            &crawling::LaserCorrectionController::profileDetectionTraceBatch,
+            this,
+            [](const QStringList& messages) {
+              crawling::AppLogger::writeProfileDetectionBatch(messages);
+            },
+            Qt::QueuedConnection);
+    connect(correction_,
+            &crawling::LaserCorrectionController::diagnosticLogMessage, this,
+            [](const QString& message) {
+              const bool keepAll =
+                  message.contains(QLatin1String("event=laser_pipeline_slow")) ||
+                  message.contains(
+                      QLatin1String("event=correction_task_started")) ||
+                  message.contains(QLatin1String("event=laser_source_rejected"));
+              static qint64 lastSampledMs = -1;
+              const qint64 now = QDateTime::currentMSecsSinceEpoch();
+              if (!keepAll && lastSampledMs >= 0 && now - lastSampledMs < 1000)
+                return;
+              lastSampledMs = now;
+              crawling::AppLogger::writeProfileDetection(message);
+            },
+            Qt::QueuedConnection);
     connect(correction_, &crawling::LaserCorrectionController::commandChanged,
             this, [this](double linearMps, double angularRadps) {
               if (!correctionActive_ || correctionPaused_ ||
@@ -1667,11 +1706,41 @@ void RobotPeripheralHostService::startAutoCorrection(
   appendLog(QStringLiteral("收到远程自动纠偏启动请求，正在准备激光轮廓流"));
 }
 
+QString correctionStopDisplayReason(const QString& reason) {
+  if (reason == QStringLiteral("operator_stop"))
+    return QStringLiteral("操作员停止自动纠偏");
+  if (reason == QStringLiteral("control_connection_closed"))
+    return QStringLiteral("操作端控制连接断开，自动纠偏已停止");
+  if (reason == QStringLiteral("operator_timeout"))
+    return QStringLiteral("操作端心跳超时，自动纠偏已停止");
+  if (reason == QStringLiteral("motion_lease_expired"))
+    return QStringLiteral("手动运动租约到期，自动纠偏已停止");
+  if (reason == QStringLiteral("udp_emergency_stop"))
+    return QStringLiteral("操作端急停，自动纠偏已停止");
+  if (reason == QStringLiteral("host_shutdown"))
+    return QStringLiteral("主机退出，自动纠偏已停止");
+  if (reason.startsWith(QStringLiteral("robot.")))
+    return QStringLiteral("操作员停止运动，自动纠偏已停止");
+  return reason;
+}
+
 void RobotPeripheralHostService::stopAutoCorrection(const QString& reason,
                                                      bool notify) {
   const quint64 owner = ownerSessionId_;
   const bool wasPending = correctionStartPending_;
   const bool wasActive = correctionActive_;
+  // 留痕：这条是唯一能区分"谁停的纠偏"的记录，controller 侧的
+  // setEnabled(false) 只会写死文案。
+  crawling::AppLogger::write(
+      QStringLiteral("CORRECTION.STOP"),
+      QStringLiteral("event=correction_stop_request reason=%1 active=%2 "
+                     "pending=%3 owner_session=%4 notify=%5")
+          .arg(reason.isEmpty() ? QStringLiteral("unspecified") : reason)
+          .arg(wasActive ? 1 : 0)
+          .arg(wasPending ? 1 : 0)
+          .arg(owner)
+          .arg(notify ? 1 : 0));
+  const QString displayReason = correctionStopDisplayReason(reason);
   emit driveCorrectionCommand(0.0, 0.0);
   correctionStartPending_ = false;
   correctionActive_ = false;
@@ -1679,8 +1748,8 @@ void RobotPeripheralHostService::stopAutoCorrection(const QString& reason,
   if (correction_ && correctionThread_ && correctionThread_->isRunning()) {
     QMetaObject::invokeMethod(correction_, "setPaused", Qt::QueuedConnection,
                               Q_ARG(bool, false));
-    QMetaObject::invokeMethod(correction_, "setEnabled", Qt::QueuedConnection,
-                              Q_ARG(bool, false));
+    QMetaObject::invokeMethod(correction_, "requestStop", Qt::QueuedConnection,
+                              Q_ARG(QString, displayReason));
   }
   if (sensor_ && sensorThread_ && sensorThread_->isRunning()) {
     QMetaObject::invokeMethod(sensor_, "restoreOriginalPreview",
@@ -1689,7 +1758,7 @@ void RobotPeripheralHostService::stopAutoCorrection(const QString& reason,
   lastCorrectionStatus_.active = false;
   lastCorrectionStatus_.paused = false;
   lastCorrectionStatus_.phase = QStringLiteral("stopped");
-  lastCorrectionStatus_.reason = reason;
+  lastCorrectionStatus_.reason = displayReason;
   publishCorrectionStatus();
   if (notify && owner != 0 && (wasPending || wasActive)) {
     emit eventReady(owner, QStringLiteral("robot.autoCorrection.stopped"),

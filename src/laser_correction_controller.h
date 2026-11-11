@@ -161,6 +161,10 @@ class LaserCorrectionController final : public QObject {
   void setProfileInputTimeout(int timeoutMs);
   void setProfileDetectionTraceEnabled(bool enabled);
   void setEnabled(bool enabled);
+  // 带原因停止：Host 侧必须用这个入口，否则 setEnabled(false) 会把
+  // operator_timeout / operator_stop 等真实原因覆盖成固定文案，
+  // 现场无法区分"谁停的纠偏"。
+  void requestStop(const QString& reason);
   void setPaused(bool paused);
   void shutdown();
   void processCameraImage(const QImage& image);

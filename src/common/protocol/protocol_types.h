@@ -25,7 +25,11 @@ inline constexpr int kRealtimeHeaderBytes = 44;
 inline constexpr int kMotionSendIntervalMs = 50;
 inline constexpr int kMotionLeaseMs = 200;
 inline constexpr int kHeartbeatIntervalMs = 250;
-inline constexpr int kSessionTimeoutMs = 1000;
+// 会话超时只决定"操作端是否还活着"，运动安全仍由 200 ms 租约独立保障。
+// 1 s 的旧值在操作端渲染 2048 点轮廓（约 23 帧/秒）时会被一次界面卡顿打穿，
+// Host 随即 safetyStop(operator_timeout) 掉自动纠偏；3 s 留出一次 GC/重绘余量，
+// 同时不影响急停（走独立 UDP 分支）。
+inline constexpr int kSessionTimeoutMs = 3000;
 
 // Capabilities are negotiated during the control handshake.  The UI must
 // gate optional operations on these values instead of assuming that every

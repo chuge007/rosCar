@@ -193,13 +193,13 @@ void RobotProfileView::requestProfileUpdate()
     m_profileUpdatePending = true;
     if (!isVisible())
         return;
-    if (m_renderThrottle.isValid() && m_renderThrottle.elapsed() < 33) {
+    if (m_renderThrottle.isValid() && m_renderThrottle.elapsed() < 16) {
         // A throttled request used to be dropped entirely, leaving the view
         // stale until the next frame arrived. Queue one retry like the
         // integrated build does.
         if (m_renderRetryTimer && !m_renderRetryTimer->isActive())
             m_renderRetryTimer->start(
-                static_cast<int>(33 - m_renderThrottle.elapsed()) + 1);
+                static_cast<int>(16 - m_renderThrottle.elapsed()) + 1);
         return;
     }
     if (!m_profileCacheValid || m_cachedViewMode != m_viewMode)
