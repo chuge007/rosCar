@@ -104,6 +104,10 @@ class RobotPeripheralHostService final : public QObject {
   void mediaReceptionActive(bool active);
   void interruptAutoCorrection(const QString& reason);
   void safetyStop(quint64 sessionId, const QString& reason);
+  // True while the Host-internal correction loop is running or preparing.
+  // Stale operator motion-lease expiries must not interrupt it.
+  bool correctionRunning() const { return correctionActive_ ||
+                                          correctionStartPending_; }
 
  signals:
   void responseReady(quint64 sessionId, quint64 requestId, bool ok,

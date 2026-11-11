@@ -242,6 +242,12 @@ void HostApplication::wireServices() {
           });
   connect(realtime_, &RealtimeServer::motionLeaseExpired, this,
           [this](quint64 sessionId) {
+            // 手动控制结束后的最后一个零速 MotionSetpoint 包同样会激活
+            // 200 ms 租约。纠偏由 Host 内部闭环驱动、不依赖操作端手动
+            // 租约，且纠偏运行期间手动通道被禁用，此时的租约过期只是
+            // 残留包到期，不得打断纠偏。真正的急停
+            // （udp_emergency_stop）与会话超时走各自独立分支，不受影响。
+            if (peripheral_->correctionRunning()) return;
             peripheral_->safetyStop(sessionId,
                                     QStringLiteral("motion_lease_expired"));
             robot_->stopFromOperator(sessionId,

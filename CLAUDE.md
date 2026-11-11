@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **rosCar** (43473 symbols, 55688 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **rosCar** (43835 symbols, 56177 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -42,3 +42,40 @@ This project is indexed by GitNexus as **rosCar** (43473 symbols, 55688 relation
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+# 仓库认知（本地事实，2026-11-11 按实际文件核对）
+
+本仓库是 **PA1664 爬壁机器人控制系统**，纯 C++（Qt 6.8.3 + MSVC 2022，qmake 工程，C++17），上位机/下位机分离。所有改动只落在本目录内，`PA1664WorkbenchTmp2` 只读。
+
+## 三个可执行目标
+
+| 目标 | 工程文件 | 入口 | 输出 |
+|------|----------|------|------|
+| `PA1664Workbench`（操作端 GUI） | `PA1664Workbench.pro` | `src/main.cpp` | `bin\PA1664Workbench.exe`（bin 即运行目录，无需复制） |
+| `PA1664RobotHost`（小车端后台服务） | `PA1664RobotHost.pro` | `src/backend/main.cpp` | `bin\PA1664RobotHost.exe`，需推到 `startup_deploy\robot_host\app\` 与小车端 `C:\Users\a\Desktop\robot_host\app\` |
+| `PA1664CameraServer`（激光相机独立进程） | `PA1664CameraServer.pro` | `src/camera_server_main.cpp` | `bin\PA1664CameraServer.exe` |
+
+## 构建脚本（真实行为）
+
+| 脚本 | 实际编译内容 | 备注 |
+|---|---|---|
+| `build_workbench.bat` | 仅 Workbench | 显式设 `QTDIR=D:\qt5.15.2\6.8.3\msvc2022_64` + `vcvars64.bat`，shadow build 到 `build\workbench_release` |
+| `build_host.bat` | 仅 RobotHost | 同上，shadow build 到 `build\host_release`；支持参数 `clean` |
+| `build_all.bat` | CameraServer + Workbench | **不含 RobotHost**，且依赖 PATH 里已有 `qmake`；"编全部三个目标"必须 `build_workbench.bat` + `build_host.bat` + `build_all.bat`（或分别执行） |
+
+- 编译前先 `taskkill /IM PA1664Workbench.exe|PA1664RobotHost.exe|PA1664CameraServer.exe /F`，否则 `LNK1104`。
+- 编完用 clangd + 根目录 `compile_commands.json`（由 `gen_compile_commands.py` / `gen_compile_commands.bat` 生成）校验。
+
+## 代码归属（U/R/L/S，详见 `docs/超声与小车代码分工.md`）
+
+- **U 超声**：`src/devicecontroller.*`、`packetdecoder.*`、`framedecoderworker.*`、`scanwidgets.*`、`scanwaveformcache.*`、`parameterpanel.*`、`parameterpresetstore.*`、`pulseloadguard.*`、`usbbootstrap.*`、`framerecorder.*`、`frameplayer.*`、`remotecontrolserver.*`、`src/services/*`、`src/backend/ultrasound_*`。
+- **R 小车**：`src/robot/*`（控制环 `synchronized_drive_controller`，执行层 `wheel_motor_controller` + CAN `candle/pcan/zdt` + 串口 `servo/mwd_rs485/mwd_modbus/rim302`）、`robotcontrolpanel.*`、`robot_sensor_controller.*`、`robot_usb_camera_controller.*`、`network_stream_reader.*`、`camera_frame_processor.*`、`src/backend/robot_*`。
+- **L 激光/焊缝**：`src/laser_*`、`opencv_laser_contour.*`、`seam_state_machine.*`、`*weld_locator.h`、`profile_weld_detector.h`、`camera_server*`、`vendor/mv3dlp_laser_profile/`。
+- **S 共享层**：`src/common/protocol/*`、`src/common/transport/*`、`src/common/services/*`。
+- **交界点**：`mainwindow.cpp`（超声页 + 小车页装配）、`probeadjustmentpanel.cpp`（超声 UI 驱动夹爪电机）、`src/common/*`（双用途协议/编解码）、`robot_hardware_discovery_qt6.cpp`（枚举可能碰到超声 USB）。
+
+## 网络与日志
+
+- 通道：TCP 43100 命令 / UDP 43101 实时 / UDP 43102 媒体 / TCP 43103 批量；实时通道 200 ms 租约，`realtime_codec` 属运动安全路径。
+- 日志落盘在 exe 所在目录：`bin\logs\`（本地）、`C:\Users\a\Desktop\robot_host\app\logs\`（小车端）。`robot_console.log` = Workbench，`robot_host.log` = Host，`comm/<category>.log` = `COMM.*`，`profile_weld_detection.log` = 焊缝诊断。**超声没有专属日志文件**。
+- 小车端直连 `ssh a@192.168.1.20`，部署目录 `C:\Users\a\Desktop\robot_host`，远程原生命令输出 GBK，需前置 `chcp 65001 >nul`；换 EXE 前要删 `app\robot_host.lock`。

@@ -45,8 +45,15 @@ void ensureLowLatencyFfmpegOptions() {
   // Read by OpenCV's FFmpeg backend at open time. Respect a user override.
   if (!qgetenv("OPENCV_FFMPEG_CAPTURE_OPTIONS").isEmpty())
     return;
+  // stimeout bounds the RTSP socket read inside avformat_open_input /
+  // avformat_find_stream_info. Without it, cv::CAP_PROP_OPEN_TIMEOUT_MSEC does
+  // not take effect for the FFmpeg backend: a camera that answers DESCRIBE but
+  // stalls before the first frame leaves capture.open() blocked forever, and
+  // the only way out is the 8 s controller watchdog that terminate()s the
+  // reader thread (leaking the half-open RTSP session). stimeout makes open()
+  // fail in ~5 s so the normal failed()/reconnect path runs instead.
   qputenv("OPENCV_FFMPEG_CAPTURE_OPTIONS",
-          "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|max_delay;0|reorder_queue_size;0");
+          "rtsp_transport;tcp|stimeout;5000000|fflags;nobuffer|flags;low_delay|max_delay;0|reorder_queue_size;0");
 }
 
 struct FfmpegBackendProbe {

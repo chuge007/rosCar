@@ -1851,11 +1851,41 @@ void RobotControlPanel::buildUi()
     applyRow->addStretch();
     applyRow->addWidget(applyParams);
     vehicleControlLayout->addLayout(applyRow);
-    manualLayout->addWidget(vehicleControl);
+    // 「车体控制」滑块组整体迁到主窗口「状态」页展示：这里只构建并存为成员，
+    // 通过 vehicleControlWidget() 暴露给主窗口嵌入，不再加入「手动运动」分组。
+    // reparent 后不再继承本面板样式，故把滑块组需要的样式随身带上，保证外观一致。
+    vehicleControl->setStyleSheet(QStringLiteral(R"(
+        QGroupBox { color: #203247; background: white; border: 1px solid #d8e0ea;
+                    border-radius: 7px; margin-top: 18px; padding-top: 12px;
+                    font-weight: 600; }
+        QGroupBox::title { color: #203247; background: white; subcontrol-origin: margin;
+                           left: 12px; padding: 2px 6px; }
+        QGroupBox QLabel { color: #203247; }
+        QLabel#robotParamTitle { color: #203247; font-weight: 600; }
+        QLabel#robotParamValue { color: #0b4f6c; font-family: Consolas, monospace;
+                                 font-weight: 700; }
+        QLabel#robotParamHint { color: #8a94a6; font-size: 11px; }
+        QSlider#robotParamSlider::groove:horizontal { height: 6px; background: #d7e2ee;
+                                                       border-radius: 3px; }
+        QSlider#robotParamSlider::sub-page:horizontal { height: 6px; background: #9dc3e6;
+                                                         border-radius: 3px; }
+        QSlider#robotParamSlider::handle:horizontal { width: 14px; margin: -5px 0;
+                                                      background: #1769aa; border-radius: 7px;
+                                                      border: 1px solid #0e4d7c; }
+        QSlider#robotParamSlider::handle:horizontal:hover { background: #2586c8; }
+        QPushButton { color: #164568; border: 1px solid #a8c4dc; border-radius: 5px;
+                      padding: 6px 12px; background: #eaf2fb; }
+        QPushButton:hover { background: #dcecfb; border-color: #4f89c7; }
+        QPushButton[kind="primary"] { color: white; background: #1769aa; border-color: #1769aa; }
+        QPushButton[kind="primary"]:hover { background: #12578f; }
+        QPushButton:disabled { color: #607286; background: #e7edf3; border-color: #cbd5df; }
+    )"));
+    m_vehicleControlGroup = vehicleControl;
     manualLayout->addStretch();
 
     auto *profileGroup = new QGroupBox(QStringLiteral("SDK 实时轮廓与焊道定位"));
     auto *profileLayout = new QVBoxLayout(profileGroup);
+    // 四个控件合并为一行水平排列。
     auto *profileModeRow = new QHBoxLayout;
     profileModeRow->addWidget(new QLabel(QStringLiteral("轮廓显示方式")));
     auto *profileMode = new QComboBox(profileGroup);
@@ -1868,11 +1898,8 @@ void RobotControlPanel::buildUi()
     auto *templateButton = actionButton(QStringLiteral("建立/管理模板"));
     templateButton->setMinimumHeight(30);
     profileModeRow->addWidget(templateButton);
-    profileModeRow->addStretch();
 
-    // 右列收窄后单行放不下，把「定位算法 + 检测日志」拆到第二行，保证控件都完整可见。
-    auto *profileTuningRow = new QHBoxLayout;
-    profileTuningRow->addWidget(new QLabel(QStringLiteral("定位算法"), profileGroup));
+    profileModeRow->addWidget(new QLabel(QStringLiteral("定位算法"), profileGroup));
     m_profileDetectionMode = new QComboBox(profileGroup);
     m_profileDetectionMode->addItem(QStringLiteral("基线+肩部（默认）"),
                                     static_cast<int>(crawling::ProfileDetectionMode::BaselineShoulder));
@@ -1882,14 +1909,14 @@ void RobotControlPanel::buildUi()
                                     static_cast<int>(crawling::ProfileDetectionMode::Hybrid));
     m_profileDetectionMode->setToolTip(
         QStringLiteral("选择 SDK X/Z 焊道定位方式；纯模板和混合模式需要至少一个已启用模板。"));
-    profileTuningRow->addWidget(m_profileDetectionMode);
+    profileModeRow->addWidget(m_profileDetectionMode);
     m_profileDetectionLogCheck = new QCheckBox(
         QStringLiteral("记录检测计算日志"), profileGroup);
     m_profileDetectionLogCheck->setToolTip(
         QStringLiteral("勾选后，每次点击开始都会覆盖旧日志，只记录本次自动纠偏"
                        "从开始到结束的轮廓点、基线、阈值、候选区域和淘汰原因。"));
-    profileTuningRow->addWidget(m_profileDetectionLogCheck);
-    profileTuningRow->addStretch();
+    profileModeRow->addWidget(m_profileDetectionLogCheck);
+    profileModeRow->addStretch();
     connect(m_profileDetectionMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) {
                 if (!m_profileDetectionMode) return;
@@ -1922,7 +1949,6 @@ void RobotControlPanel::buildUi()
                               : QStringLiteral("已关闭焊道检测计算日志；自动纠偏时不记录"));
             });
     profileLayout->addLayout(profileModeRow);
-    profileLayout->addLayout(profileTuningRow);
     m_laserView = new RobotProfileView;
     // 焊道显示框固定为原来一半高度（约 200 px），宽度随列宽不变；
     // 曲线、坐标范围和帧号信息照常完整绘制。
@@ -1939,35 +1965,9 @@ void RobotControlPanel::buildUi()
 
     auto *rightColumn = new QVBoxLayout;
     rightColumn->addWidget(profileGroup);
-    auto *status = new QGroupBox(QStringLiteral("车体状态"));
-    auto *statusGrid = new QGridLayout(status);
-    statusGrid->setColumnStretch(1, 1);
-    statusGrid->setColumnStretch(3, 1);
-    auto addMetric = [statusGrid, status](int row, int column, const QString &name) {
-        statusGrid->addWidget(new QLabel(name, status), row, column);
-        auto *value = metricLabel(status);
-        statusGrid->addWidget(value, row, column + 1);
-        return value;
-    };
-    m_infoState = addMetric(0, 0, QStringLiteral("运行状态"));
-    m_infoReason = addMetric(1, 0, QStringLiteral("状态说明"));
-    m_infoTarget = addMetric(2, 0, QStringLiteral("目标运动"));
-    m_infoApplied = addMetric(3, 0, QStringLiteral("实际运动"));
-    m_infoLeftWheel = addMetric(4, 0, QStringLiteral("左轮"));
-    m_infoRightWheel = addMetric(5, 0, QStringLiteral("右轮"));
-    m_infoFeedback = addMetric(6, 0, QStringLiteral("反馈看门狗"));
-    m_infoSync = addMetric(7, 0, QStringLiteral("双轮同步"));
-    m_imuStatus = addMetric(0, 2, QStringLiteral("RIM302 IMU"));
-    m_laserStatus = addMetric(1, 2, QStringLiteral("MV3DLP 激光"));
-    m_usbStatus = addMetric(2, 2, QStringLiteral("USB 摄像头"));
-    statusGrid->addWidget(new QLabel(QStringLiteral("辅助设备"), status), 3, 2);
-    auto *aux = metricLabel(status);
-    aux->setText(QStringLiteral("外部编码器未接入；夹子 CANopen 仅显示检测状态"));
-    statusGrid->addWidget(aux, 3, 3, 2, 1);
-    // 预览框改成按画面比例定高后，右列会多出一截高度留给状态面板；用末尾的
-    // 占位行吸收，别让 8 行状态被均摊得行距发虚。
-    statusGrid->addWidget(new QWidget(status), 8, 0, 1, 4);
-    statusGrid->setRowStretch(8, 1);
+    // 「车体状态」已融合到主窗口「状态」页（经 vehicleStatusChanged 同步展示），
+    // 这里不再重复构建状态分组；原占用的竖直空间用末尾 stretch 吸收，保证
+    // 轮廓视图与 USB 摄像头画面上置、不被拉伸变形。
 
     auto *usbGroup = new QGroupBox(QStringLiteral("USB 摄像头画面"));
     auto *usbLayout = new QVBoxLayout(usbGroup);
@@ -1991,7 +1991,7 @@ void RobotControlPanel::buildUi()
     }
     usbLayout->addWidget(usbViewRow);
     rightColumn->addWidget(usbGroup);
-    rightColumn->addWidget(status, 1);
+    rightColumn->addStretch(1);
     columns->addLayout(rightColumn, 2);
     controlScroll->setWidget(body);
     m_tabs->addTab(controlScroll, QStringLiteral("底盘控制"));
@@ -3832,7 +3832,11 @@ void RobotControlPanel::setAutoCorrectionPaused(bool paused)
 
 void RobotControlPanel::sendMotionCommand()
 {
-    if (m_autoCorrectionActive) return;
+    // 纠偏启动准备阶段同样禁止手动通道：启动按钮会清零方向状态，随后的
+    // 松键/状态丢失事件会发出最后一个零速 MotionSetpoint 包，在主机端
+    // 激活 200 ms 运动租约，租约到期触发的 motion_lease_expired 安全停车
+    // 会把刚启动的纠偏一并停止。
+    if (m_autoCorrectionActive || m_autoCorrectionStartPending) return;
     if (m_remoteSession) {
         if (!m_remoteLinkReady || !m_connected) {
             m_remoteSession->clearMotion();
@@ -3981,7 +3985,8 @@ void RobotControlPanel::updateImuConnection(bool connected, const QString &messa
     m_imuText = message.isEmpty() ? (connected ? QStringLiteral("已连接")
                                                : QStringLiteral("未连接"))
                                   : message;
-    m_imuStatus->setText(m_imuText);
+    if (m_imuStatus)
+        m_imuStatus->setText(m_imuText);
     m_imuConfigState->setText(m_imuText);
     updateInformationDialog();
 }
@@ -4027,7 +4032,8 @@ void RobotControlPanel::updateLaserConnection(bool connected, const QString &mes
     m_laserText = message.isEmpty() ? (connected ? QStringLiteral("已连接")
                                                 : QStringLiteral("未连接"))
                                     : message;
-    m_laserStatus->setText(m_laserText);
+    if (m_laserStatus)
+        m_laserStatus->setText(m_laserText);
     m_laserConfigState->setText(m_laserText);
     updateInformationDialog();
 }
@@ -4503,12 +4509,12 @@ void RobotControlPanel::updateUsbConnection(int slot, bool connected, const QStr
         if (m_usbConnectedSlot[i]) { snapshotSlot = i; break; }
     }
     if (snapshotSlot < 0) {
-        m_usbStatus->setText(QStringLiteral("未连接"));
-        m_usbText = m_usbStatus->text();
+        m_usbText = QStringLiteral("未连接");
     } else {
-        m_usbStatus->setText(QStringLiteral("%1 已连接").arg(snapshotSlot + 1));
-        m_usbText = m_usbStatus->text();
+        m_usbText = QStringLiteral("%1 已连接").arg(snapshotSlot + 1);
     }
+    if (m_usbStatus)
+        m_usbStatus->setText(m_usbText);
     if (m_usbCameraUi[slot].configState)
         m_usbCameraUi[slot].configState->setText(statusText);
     if (!connected) {
@@ -4815,6 +4821,11 @@ void RobotControlPanel::showConfigurationPage()
         raise();
         activateWindow();
     }
+}
+
+QWidget *RobotControlPanel::vehicleControlWidget() const
+{
+    return m_vehicleControlGroup;
 }
 
 bool RobotControlPanel::eventFilter(QObject *watched, QEvent *event)

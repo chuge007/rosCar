@@ -27,6 +27,7 @@ class QDialog;
 class QDoubleSpinBox;
 class QComboBox;
 class QEvent;
+class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -64,6 +65,10 @@ public:
 
     void showInformationDialog(QWidget *parent = nullptr);
     void showConfigurationPage();
+    // 「车体控制」滑块组（纠偏速度/分段长度/Kp/Kd/内侧轮最小比例 + 保存并应用）。
+    // 该分组在底盘控制页不再展示，由主窗口「状态」页取走嵌入（父窗口转移），
+    // 信号连接仍归属本面板，reparent 后照常生效。
+    QWidget *vehicleControlWidget() const;
 
 public slots:
     void setLaserProfileImage(const QImage &image);
@@ -265,6 +270,7 @@ private:
 
     QLabel *m_stateLabel = nullptr;
     QLabel *m_connectionLabel = nullptr;
+    QGroupBox *m_vehicleControlGroup = nullptr;
     RobotProfileView *m_laserView = nullptr;
     QLabel *m_usbViews[crawling::kUsbCameraChannelCount] = {nullptr, nullptr};
     QSlider *m_speedSlider = nullptr;

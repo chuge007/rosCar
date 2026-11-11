@@ -51,6 +51,7 @@
 #include <QSaveFile>
 #include <QSignalBlocker>
 #include <QScreen>
+#include <QScrollArea>
 #include <QSet>
 #include <QSettings>
 #include <QSlider>
@@ -925,7 +926,15 @@ void MainWindow::buildUi()
     statusForm->addRow(QStringLiteral("帧尾信息"), m_tailInfo);
     statusLayout->addLayout(statusForm);
 
-    // 车体状态：从小车控制页复用到「状态」分区（数据经 vehicleStatusChanged 同步）。
+    // 车体控制：从「小车控制」页整体迁来的滑块组（纠偏速度/分段/Kp/Kd/内侧轮
+    // 最小比例），信号仍归属 RobotControlPanel，父窗口转移到「状态」页后照常生效。
+    if (m_robotPanel && m_robotPanel->vehicleControlWidget()) {
+        QWidget *vehicleControl = m_robotPanel->vehicleControlWidget();
+        vehicleControl->setParent(statusPage);
+        statusLayout->addWidget(vehicleControl);
+    }
+
+    // 车体状态：车体状态快照统一在此展示（数据经 vehicleStatusChanged 同步）。
     auto *vehicleGroup = new QGroupBox(QStringLiteral("车体状态"));
     auto *vehicleForm = new QFormLayout(vehicleGroup);
     const char *vehicleNames[] = {"运行状态", "状态说明", "适配器", "目标运动", "实际运动",
@@ -940,7 +949,14 @@ void MainWindow::buildUi()
     }
     statusLayout->addWidget(vehicleGroup);
     statusLayout->addStretch();
-    m_panelPages->addWidget(statusPage);
+
+    // 状态页内容放入滚动区：加宽后超出高度可滚动查看。
+    auto *statusScroll = new QScrollArea;
+    statusScroll->setWidgetResizable(true);
+    statusScroll->setFrameShape(QFrame::NoFrame);
+    statusScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    statusScroll->setWidget(statusPage);
+    m_panelPages->addWidget(statusScroll);
 
     auto *paramPage = new QWidget;
     auto *paramLayout = new QVBoxLayout(paramPage);
@@ -1016,8 +1032,8 @@ void MainWindow::buildUi()
     m_panelDock->setAllowedAreas(Qt::NoDockWidgetArea);
     m_panelDock->setFeatures(QDockWidget::DockWidgetMovable
                              | QDockWidget::DockWidgetFloatable);
-    m_panelDock->setMinimumSize(300, 420);
-    m_panelDock->resize(390, 640);
+    m_panelDock->setMinimumSize(420, 460);
+    m_panelDock->resize(500, 720);
     auto *titleBar = new QWidget(m_panelDock);
     titleBar->setObjectName(QStringLiteral("panelTitleBar"));
     auto *titleLayout = new QHBoxLayout(titleBar);

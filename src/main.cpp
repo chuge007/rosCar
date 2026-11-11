@@ -441,14 +441,19 @@ int main(int argc, char *argv[])
                     throw std::runtime_error("setCurrentGroup returned false");
                 state->originalTx = sdk.getTransmissionChannel();
                 state->originalRx = sdk.getReceptionChannel();
-                const bool txOk = sdk.setTransmissionChannel(7); // 界面通道 7
-                const bool rxOk = sdk.setReceptionChannel(2);    // 界面通道 2
-                const int txReadBack = sdk.getTransmissionChannel();
-                const int rxReadBack = sdk.getReceptionChannel();
-                state->writePassed = txOk && rxOk && txReadBack == 7 && rxReadBack == 2;
+                // 逐个写 1..8 并回读，确认 SDK 公开接口接受的通道编号域。
+                QString detail;
+                bool allOk = true;
+                for (int ch = 1; ch <= 8 && allOk; ++ch) {
+                    const bool okTx = sdk.setTransmissionChannel(ch);
+                    const int txReadBack = sdk.getTransmissionChannel();
+                    detail += QStringLiteral(" tx%1=%2").arg(ch).arg(okTx ? txReadBack : -1);
+                    if (!okTx || txReadBack != ch) allOk = false;
+                }
+                state->writePassed = allOk;
                 std::fprintf(stdout,
-                             "CHANNEL_HW_TEST: group=%d txSdk=%d rxSdk=%d write=%s\n",
-                             state->targetGroup, txReadBack, rxReadBack,
+                             "CHANNEL_HW_TEST: group=%d%s write=%s\n",
+                             state->targetGroup, detail.toLocal8Bit().constData(),
                              state->writePassed ? "PASS" : "FAIL");
                 std::fflush(stdout);
             } catch (const std::exception &e) {

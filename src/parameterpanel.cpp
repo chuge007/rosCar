@@ -262,17 +262,20 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     tabs->addTab(pageFor(beam), QStringLiteral("相控阵"));
 
     auto *probe = new QFormLayout;
-    // 设备外壳按 1..8 标注，原厂 SDK 和配置 JSON 按 0..7 编号。
-    // 下拉框显示物理编号，但 itemData 始终保存并下发 SDK 编号。
+    // PA-1664 USB SDK 的公开 TX/RX 接口（set/getTransmissionChannel、
+    // set/getReceptionChannel）使用 1..8 编号；配置 JSON 中才可能存 0..7
+    // 的 0-based 内部值（由 ultrasoundconfigsanitizer 维护）。下拉框的
+    // itemData 必须保存并下发 SDK 公开接口的 1..8 域，否则写 0 会被 SDK
+    // 修正为 1，导致“通道 1”永远切换不过去。
     const QList<QPair<QString, int>> utChannels = {
-        {QStringLiteral("通道 1"), 0}, {QStringLiteral("通道 2"), 1},
-        {QStringLiteral("通道 3"), 2}, {QStringLiteral("通道 4"), 3},
-        {QStringLiteral("通道 5"), 4}, {QStringLiteral("通道 6"), 5},
-        {QStringLiteral("通道 7"), 6}, {QStringLiteral("通道 8"), 7}
+        {QStringLiteral("通道 1"), 1}, {QStringLiteral("通道 2"), 2},
+        {QStringLiteral("通道 3"), 3}, {QStringLiteral("通道 4"), 4},
+        {QStringLiteral("通道 5"), 5}, {QStringLiteral("通道 6"), 6},
+        {QStringLiteral("通道 7"), 7}, {QStringLiteral("通道 8"), 8}
     };
     auto *channelHint = new QLabel(QStringLiteral(
-        "当前工作组的一激一收通道。界面显示设备物理通道 1–8，"
-        "内部自动换算为 SDK 通道 0–7。"));
+        "当前工作组的一激一收通道。界面通道与 SDK 公开接口均为 1–8；"
+        "激励与接收可选同一路，也可选不同路。"));
     channelHint->setWordWrap(true);
     channelHint->setStyleSheet(QStringLiteral("color:#52606d;padding:4px 0 8px 0"));
     probe->addRow(channelHint);
@@ -1347,7 +1350,7 @@ void ParameterPanel::apply()
                 if (readBack != value.toInt()) {
                     ok = false;
                     errors << QStringLiteral("%1：写入通道 %2 后回读为通道 %3")
-                                  .arg(field.name).arg(value.toInt() + 1).arg(readBack + 1);
+                                  .arg(field.name).arg(value.toInt()).arg(readBack);
                 }
             }
         } catch (const std::exception &e) {

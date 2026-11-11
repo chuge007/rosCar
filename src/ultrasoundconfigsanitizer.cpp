@@ -114,10 +114,10 @@ bool UltrasoundConfigSanitizer::normalizeGroup(QJsonObject *group,
     normalizeInteger(group, QStringLiteral("suppression"), 0, 100, 0,
                      location, repairs, true);
 
-    // The PA-1664 SDK and persisted JSON use zero-based channel indices 0..7,
-    // while the physical connectors and the user-facing UI are labelled 1..8.
-    // Keep the persisted value in the SDK domain; the UI supplies the label.
-    // (真机回读确认：向 SDK 写 6 得到物理通道 7。)
+    // 配置 JSON（default_config.json / presets）中的通道字段用 0..7 的
+    // 0-based 内部值持久化；而 SDK 公开接口 set/getTransmissionChannel 与
+    // set/getReceptionChannel 是 1..8（见 parameterpanel.cpp 的 utChannels）。
+    // 这里只对 JSON 持久化值做 0..7 钳制，不做 +1 换算。
     normalizeInteger(group, QStringLiteral("transmission_channel"), 0, 7, 0,
                      location, repairs, false);
     normalizeInteger(group, QStringLiteral("reception_channel"), 0, 7, 0,
