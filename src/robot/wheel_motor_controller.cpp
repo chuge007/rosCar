@@ -14,6 +14,11 @@ constexpr int kInterByteWaitMs = 2;
 constexpr int kPositionReplyWaitMs = 20;
 constexpr double kHoldMaximumMotorSpeedDps = 360.0;
 constexpr int kCanAckWaitMs = 15;
+// Fallback poll cadence used only while the motors are stopped, where the
+// cyclic status request already covers the bus. A moving chassis is polled
+// every control period instead: the wheel synchronizer needs a fresh pair of
+// speed samples at that rate, and the former flat 200 ms fallback made its
+// response factors converge 5-10x slower, which is longer than a short jog.
 constexpr int kFallbackFeedbackQueryIntervalMs = 200;
 constexpr int kPositionQueryIntervalMs = 1000;
 
@@ -502,8 +507,10 @@ bool WheelMotorController::pollFeedback(WheelMotorFeedback* feedback,
   }
 
   const qint64 now = feedbackClock_.isValid() ? feedbackClock_.elapsed() : 0;
+  const qint64 fallbackIntervalMs =
+      isStopped() ? kFallbackFeedbackQueryIntervalMs : 0;
   const bool queryFeedback = requestStatus || lastFeedbackQueryMs_ < 0 ||
-      now - lastFeedbackQueryMs_ >= kFallbackFeedbackQueryIntervalMs;
+      now - lastFeedbackQueryMs_ >= fallbackIntervalMs;
   if (queryFeedback) {
     lastFeedbackQueryMs_ = now;
     const bool queryLeftFirst = nextFeedbackSide_ == 0;
@@ -718,11 +725,19 @@ bool WheelMotorController::pollCanFeedback(bool requestStatus,
     return sent;
   };
   const qint64 now = feedbackClock_.isValid() ? feedbackClock_.elapsed() : 0;
+  // A moving chassis bypasses the fallback throttle so the synchronizer gets a
+  // fresh left/right speed pair on every control period instead of every
+  // 200 ms.
+  const qint64 fallbackIntervalMs =
+      isStopped() ? kFallbackFeedbackQueryIntervalMs : 0;
   const bool queryFeedback = requestStatus || lastFeedbackQueryMs_ < 0 ||
-      now - lastFeedbackQueryMs_ >= kFallbackFeedbackQueryIntervalMs;
+      now - lastFeedbackQueryMs_ >= fallbackIntervalMs;
   if (queryFeedback) {
     lastFeedbackQueryMs_ = now;
-    const char* queryReason = requestStatus ? "request_status" : "fallback_200ms";
+    const char* queryReason =
+        requestStatus ? "request_status"
+                      : (fallbackIntervalMs == 0 ? "fallback_moving"
+                                                 : "fallback_stopped");
     QElapsedTimer queryTimer;
     queryTimer.start();
     bool requested = false;

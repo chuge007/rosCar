@@ -24,6 +24,7 @@ SOURCES += \
     src/main.cpp \
     src/mainwindow.cpp \
     src/devicecontroller.cpp \
+    src/ultrasoundconfigsanitizer.cpp \
     src/pulseloadguard.cpp \
     src/parameterpresetstore.cpp \
     src/framedecoderworker.cpp \
@@ -72,6 +73,7 @@ SOURCES += $$ROBOT_SOURCE_ROOT/zdt_can_protocol.cpp \
 HEADERS += \
     src/mainwindow.h \
     src/devicecontroller.h \
+    src/ultrasoundconfigsanitizer.h \
     src/pulseloadguard.h \
     src/parameterpresetstore.h \
     src/framedecoderworker.h \

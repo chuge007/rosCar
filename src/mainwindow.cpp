@@ -278,7 +278,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             m_cacheSizeLabel->setText(QStringLiteral("%1（%2 条波形记录）")
                                           .arg(readableBytes(bytes)).arg(records));
         if (m_cacheContentLabel)
-            m_cacheContentLabel->setText(QStringLiteral("B 扫 %1 点，C 扫 %2 格\n%3")
+            m_cacheContentLabel->setText(QStringLiteral("B 扫 %1 点，路径 %2 格\n%3")
                                              .arg(bPoints).arg(cPoints).arg(groups));
         if (m_cacheUpdatedLabel)
             m_cacheUpdatedLabel->setText(updatedAt);
@@ -343,34 +343,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         updateParametersForPlot();
     });
     connect(m_parameters, &ParameterPanel::message, this, &MainWindow::showMessage);
-    connect(m_parameters, &ParameterPanel::gatePlacementRequested,
-            m_aScan, &AScanWidget::beginGatePlacement);
-    connect(m_parameters, &ParameterPanel::surfaceWindowPlacementRequested,
-            m_aScan, &AScanWidget::beginSurfaceWindowPlacement);
-    connect(m_parameters, &ParameterPanel::gateVisualizationChanged, this, [this] {
-        m_aScan->setGates(m_parameters->currentGates());
-        m_aScan->setActiveGate(m_parameters->activeGate());
-        updateImagingGates();
-    });
-    connect(m_parameters, &ParameterPanel::surfaceTrackingChanged, this, [this] {
-        m_aScan->setSurfaceTracking(m_parameters->surfaceTrackingEnabled(),
-                                    m_parameters->surfaceWindowStart(),
-                                    m_parameters->surfaceWindowEnd(),
-                                    m_parameters->surfaceThreshold(),
-                                    m_parameters->surfaceHoldMissing(),
-                                    m_parameters->surfaceTrackedGates());
-        updateImagingGates();
-    });
-    connect(m_aScan, &AScanWidget::gateSelected,
-            m_parameters, &ParameterPanel::selectGate);
-    connect(m_aScan, &AScanWidget::gateRangeEdited,
-            m_parameters, &ParameterPanel::setGateRangeFromPlot);
-    connect(m_aScan, &AScanWidget::gateThresholdEdited,
-            m_parameters, &ParameterPanel::setGateThresholdFromPlot);
-    connect(m_aScan, &AScanWidget::surfaceWindowEdited,
-            m_parameters, &ParameterPanel::setSurfaceWindowFromPlot);
-    connect(m_aScan, &AScanWidget::surfaceTrackingUpdated,
-            m_parameters, &ParameterPanel::updateSurfaceStatus);
     connect(m_aScan, &AScanWidget::interactionHint, this,
             [this](const QString &text) { showMessage(text, false); });
     connect(m_parameters, &ParameterPanel::applyStarted, this, [this] {
@@ -551,8 +523,10 @@ void MainWindow::buildUi()
 
     // ===== 超声检测页：左 A 扫卡片 + 右扫描图谱页签（E/B/C） =====
     auto *central = new QWidget;
-    auto *root = new QHBoxLayout(central);
-    root->setContentsMargins(10, 8, 10, 8);
+    auto *outer = new QVBoxLayout(central);
+    outer->setContentsMargins(10, 8, 10, 8);
+    outer->setSpacing(8);
+    auto *root = new QHBoxLayout;
     root->setSpacing(8);
 
     auto *aCard = new QGroupBox(QStringLiteral("A 扫波形"));
@@ -560,12 +534,17 @@ void MainWindow::buildUi()
     auto *aLayout = new QVBoxLayout(aCard);
     aLayout->setContentsMargins(8, 6, 8, 8);
     aLayout->setSpacing(6);
-    auto *aHeader = new QHBoxLayout;
+    constexpr int scanHeaderHeight = 36;
+    auto *aHeaderWidget = new QWidget;
+    aHeaderWidget->setFixedHeight(scanHeaderHeight);
+    auto *aHeader = new QHBoxLayout(aHeaderWidget);
+    aHeader->setContentsMargins(0, 0, 0, 0);
     aHeader->addWidget(new QLabel(QStringLiteral("显示声束")));
     m_beam = new QSpinBox;
     m_beam->setRange(1, 1);
+    m_beam->setMinimumHeight(30);
     aHeader->addWidget(m_beam);
-    m_measurements = new QLabel(QStringLiteral("Gate A/B/C/I: --"));
+    m_measurements = new QLabel(QStringLiteral("峰值: --"));
     aHeader->addWidget(m_measurements, 1);
     aHeader->addWidget(new QLabel(QStringLiteral("采集")));
     m_captureToggle = new QSlider(Qt::Horizontal);
@@ -577,70 +556,33 @@ void MainWindow::buildUi()
         "QSlider::sub-page:horizontal { border-radius:10px; background:#13ad58; }"
         "QSlider::handle:horizontal { width:16px; height:16px; margin:2px 2px; border-radius:8px; background:white; }"));
     aHeader->addWidget(m_captureToggle);
-    aLayout->addLayout(aHeader);
+    aLayout->addWidget(aHeaderWidget);
     m_aScan = new AScanWidget;
     aLayout->addWidget(m_aScan, 1);
-    root->addWidget(aCard, 2);
+    root->addWidget(aCard, 3);
 
     auto *mapCard = new QGroupBox(QStringLiteral("扫描图谱"));
     mapCard->setObjectName(QStringLiteral("mapCard"));
     auto *mapLayout = new QVBoxLayout(mapCard);
     mapLayout->setContentsMargins(8, 6, 8, 8);
     mapLayout->setSpacing(6);
-    auto *mapHeader = new QHBoxLayout;
-    mapHeader->addWidget(new QLabel(QStringLiteral("B/C 路径精度")));
-    m_cPrecision = new QDoubleSpinBox;
-    m_cPrecision->setRange(0.01, 100000.0);
-    m_cPrecision->setDecimals(2);
-    m_cPrecision->setValue(m_groupEncoderPrecision.value(currentGroupId(), 1.0));
-    m_cPrecision->setSuffix(QStringLiteral(" mm/格"));
-    m_cPrecision->setToolTip(QStringLiteral(
-        "B 扫列/C 扫网格的空间分辨率（毫米/格）。数值越小，空间采样越细。"));
-    m_cPrecision->setMaximumWidth(165);
-    mapHeader->addWidget(m_cPrecision);
-    mapHeader->addStretch();
-    mapLayout->addLayout(mapHeader);
-
-    // 每个图谱页签内容：页签内启停开关 + 图谱视图。
-    const auto buildScanPage = [](QWidget *view, QPushButton *toggle, QComboBox *gateSelector) {
-        auto *page = new QWidget;
-        auto *layout = new QVBoxLayout(page);
-        layout->setContentsMargins(4, 6, 4, 4);
-        layout->setSpacing(4);
-        auto *bar = new QHBoxLayout;
-        bar->addWidget(toggle);
-        bar->addStretch();
-        bar->addWidget(new QLabel(QStringLiteral("成像闸门")));
-        bar->addWidget(gateSelector);
-        layout->addLayout(bar);
-        layout->addWidget(view, 1);
-        return page;
-    };
-    m_mapTabs = new QTabWidget;
+    // E/B 扫视图用 QStackedWidget（无页签），切换由共享工具栏的 E/B 开关完成。
+    m_mapTabs = new QStackedWidget;
     m_mapTabs->setObjectName(QStringLiteral("mapTabs"));
-    m_mapTabs->setDocumentMode(true);
     m_eScan = new EScanWidget;
-    m_eScanToggle = new QPushButton(QStringLiteral("启动 E 扫"));
-    m_eScanToggle->setCheckable(true);
-    m_eImagingGate = new QComboBox;
-    for (const QString &name : {QStringLiteral("Gate A"), QStringLiteral("Gate B"),
-                                QStringLiteral("Gate C"), QStringLiteral("Gate I")})
-        m_eImagingGate->addItem(name);
-    m_mapTabs->addTab(buildScanPage(m_eScan, m_eScanToggle, m_eImagingGate), QStringLiteral("E 扫截面"));
+    m_mapTabs->addWidget(m_eScan);
+    connect(m_aScan, &AScanWidget::depthHovered,
+            this, &MainWindow::synchronizeDepthCursor);
+    connect(m_eScan, &EScanWidget::depthHovered,
+            this, &MainWindow::synchronizeDepthCursor);
     m_bScanStack = new QStackedWidget;
     m_bScan = ensureBScan(currentGroupId());
-    m_bScanToggle = new QPushButton(QStringLiteral("启动 B 扫"));
-    m_bScanToggle->setCheckable(true);
-    m_bImagingGate = new QComboBox;
-    for (const QString &name : {QStringLiteral("Gate A"), QStringLiteral("Gate B"),
-                                QStringLiteral("Gate C"), QStringLiteral("Gate I")})
-        m_bImagingGate->addItem(name);
     auto *bPage = new QWidget;
     auto *bLayout = new QVBoxLayout(bPage);
-    bLayout->setContentsMargins(4, 6, 4, 4);
-    bLayout->setSpacing(4);
+    bLayout->setContentsMargins(0, 0, 0, 0);
+    bLayout->setSpacing(0);
 
-    // B 扫显示配置控件（统一收进「配置」下拉菜单，避免工具栏拥挤）。
+    // E/B 扫显示配置控件（统一收进「配置」下拉菜单，避免工具栏拥挤）。
     m_bViewMode = new QComboBox;
     m_bViewMode->addItem(QStringLiteral("幅值"), BScanWidget::AmplitudeView);
     m_bViewMode->addItem(QStringLiteral("轮廓/厚度"), BScanWidget::ProfileView);
@@ -648,6 +590,8 @@ void MainWindow::buildUi()
     m_bPaletteMode->addItem(QStringLiteral("彩色"), BScanWidget::HeatPalette);
     m_bPaletteMode->addItem(QStringLiteral("灰度"), BScanWidget::GrayscalePalette);
     m_bPaletteMode->addItem(QStringLiteral("RF 双极性"), BScanWidget::RfPalette);
+    m_bPaletteMode->setCurrentIndex(1);
+    m_eScan->setPaletteMode(m_bPaletteMode->currentData().toInt());
     m_bScaleMode = new QComboBox;
     m_bScaleMode->addItem(QStringLiteral("固定 100%"), BScanWidget::FixedFullScale);
     m_bScaleMode->addItem(QStringLiteral("动态"), BScanWidget::DynamicScale);
@@ -671,23 +615,42 @@ void MainWindow::buildUi()
     m_bInterpolateMissing->setToolTip(QStringLiteral(
         "仅对后续不超过 64 格的小间隙插值，并用黄色透明层标记；原始漏点仍计入质量统计。"));
 
-    auto *bBar = new QHBoxLayout;
-    bBar->addWidget(m_bScanToggle);
+    // 共享工具栏：E/B 视图切换 + B 扫配置 + 精度 + 复位视图（与 A 扫 header 同高，保证深度轴对齐）。
+    auto *mapBarWidget = new QWidget;
+    mapBarWidget->setFixedHeight(scanHeaderHeight);
+    auto *mapBar = new QHBoxLayout(mapBarWidget);
+    mapBar->setContentsMargins(0, 0, 0, 0);
+    m_eViewButton = new QPushButton(QStringLiteral("E 扫"));
+    m_eViewButton->setCheckable(true);
+    m_bViewButton = new QPushButton(QStringLiteral("B 扫"));
+    m_bViewButton->setCheckable(true);
+    connect(m_eViewButton, &QPushButton::clicked, this, [this] { setScanView(0); });
+    connect(m_bViewButton, &QPushButton::clicked, this, [this] { setScanView(1); });
+    m_eViewButton->setChecked(true);
     auto *bConfigButton = new QToolButton;
     bConfigButton->setText(QStringLiteral("配置"));
     bConfigButton->setPopupMode(QToolButton::InstantPopup);
-    bConfigButton->setToolTip(QStringLiteral("B 扫显示参数"));
+    bConfigButton->setToolTip(QStringLiteral("E/B 扫显示参数"));
     bConfigButton->setStyleSheet(QStringLiteral(
         "QToolButton::menu-indicator { image: none; } padding:0 6px;"));
     auto *bConfigMenu = new QMenu(bConfigButton);
     bConfigButton->setMenu(bConfigMenu);
-    bBar->addWidget(bConfigButton);
-    bBar->addWidget(new QLabel(QStringLiteral("闸门")));
-    bBar->addWidget(m_bImagingGate);
-    bBar->addStretch();
+    mapBar->addWidget(new QLabel(QStringLiteral("精度")));
+    m_cPrecision = new QDoubleSpinBox;
+    m_cPrecision->setRange(0.01, 100000.0);
+    m_cPrecision->setDecimals(2);
+    m_cPrecision->setValue(m_groupEncoderPrecision.value(currentGroupId(), 1.0));
+    m_cPrecision->setSuffix(QStringLiteral(" mm/格"));
+    m_cPrecision->setToolTip(QStringLiteral(
+        "B 扫列和下方编码器路径的空间分辨率（毫米/格）。数值越小，空间采样越细。"));
+    m_cPrecision->setMaximumWidth(120);
+    mapBar->addWidget(m_cPrecision);
+    mapBar->addWidget(bConfigButton);
+    mapBar->addWidget(m_bViewButton);
+    mapBar->addWidget(m_eViewButton);
+    mapBar->addStretch();
     auto *resetBView = new QPushButton(QStringLiteral("复位视图"));
-    bBar->addWidget(resetBView);
-    bLayout->addLayout(bBar);
+    mapBar->addWidget(resetBView);
 
     // 「配置」下拉菜单：QFormLayout 承载全部显示配置控件。
     auto *configWidget = new QWidget;
@@ -712,20 +675,20 @@ void MainWindow::buildUi()
     bConfigMenu->addAction(configAction);
 
     bLayout->addWidget(m_bScanStack, 1);
-    m_mapTabs->addTab(bPage, QStringLiteral("编码器 B 扫"));
-    m_cScanStack = new QStackedWidget;
-    m_cScan = ensureCScan(currentGroupId());
-    m_cScanToggle = new QPushButton(QStringLiteral("启动 C 扫"));
-    m_cScanToggle->setCheckable(true);
-    m_cImagingGate = new QComboBox;
-    for (const QString &name : {QStringLiteral("Gate A"), QStringLiteral("Gate B"),
-                                QStringLiteral("Gate C"), QStringLiteral("Gate I")})
-        m_cImagingGate->addItem(name);
-    m_mapTabs->addTab(buildScanPage(m_cScanStack, m_cScanToggle, m_cImagingGate), QStringLiteral("编码器 C 扫"));
-    m_bScan->setEncoderPrecision(encoderCountsPerCell(currentGroupId()));
-    m_cScan->setEncoderPrecision(encoderCountsPerCell(currentGroupId()));
+    m_mapTabs->addWidget(bPage);
+    m_bScan->setEncoderPrecision(encoderCountsPerCellA(currentGroupId()));
+    mapLayout->addWidget(mapBarWidget);
     mapLayout->addWidget(m_mapTabs, 1);
-    root->addWidget(mapCard, 3);
+    root->addWidget(mapCard, 7);
+
+    // C 扫路径：横跨 A/B 扫底部的全宽横条，让 A/E/B 扫高度一致、深度轴对齐。
+    outer->addLayout(root, 1);
+    m_cScanStack = new QStackedWidget;
+    m_cScanStack->setFixedHeight(80);
+    m_cScan = ensureCScan(currentGroupId());
+    m_cScan->setEncoderPrecision(encoderCountsPerCellA(currentGroupId()),
+                                 encoderCountsPerCellB(currentGroupId()));
+    outer->addWidget(m_cScanStack);
 
     m_workspace = new QTabWidget;
     m_workspace->setObjectName(QStringLiteral("workspaceTabs"));
@@ -851,7 +814,7 @@ void MainWindow::buildUi()
     auto *scanGroup = new QGroupBox(QStringLiteral("扫描管理"));
     auto *scanLayout = new QVBoxLayout(scanGroup);
     auto *saveScan = new QPushButton(QStringLiteral("保存当前扫查"));
-    saveScan->setToolTip(QStringLiteral("把当前 B/C 扫图像和点选回看缓存保存成一份独立会话"));
+    saveScan->setToolTip(QStringLiteral("把当前 B 扫、编码器路径和点选回看缓存保存成一份独立会话"));
     auto *openScan = new QPushButton(QStringLiteral("打开已保存扫查"));
     openScan->setToolTip(QStringLiteral("载入一份已保存的扫查会话，直接查看，无需重新扫"));
     auto *reset = new QPushButton(QStringLiteral("编码器复位"));
@@ -933,9 +896,9 @@ void MainWindow::buildUi()
     closeAction->setToolTip(QStringLiteral("关闭程序"));
     m_startAction->setShortcut(QKeySequence(Qt::Key_F5));
     m_stopAction->setShortcut(QKeySequence(Qt::Key_F6));
-    m_startAction->setToolTip(QStringLiteral("使能小车、启动自动纠偏，并开始 B/C 扫描及点选 A 扫缓存"));
+    m_startAction->setToolTip(QStringLiteral("使能小车、启动自动纠偏，并开始 B 扫、路径记录及点选 A 扫缓存"));
     m_pauseAction->setToolTip(QStringLiteral("暂停/继续当前扫描缓存，不覆盖已有数据"));
-    m_stopAction->setToolTip(QStringLiteral("停止自动纠偏和 B/C 扫描缓存，硬件继续采集实时 A 扫"));
+    m_stopAction->setToolTip(QStringLiteral("停止自动纠偏、B 扫和路径缓存，硬件继续采集实时 A 扫"));
     connect(m_startAction, &QAction::triggered, this, [this] {
         setScanSessionActive(true);
         if (m_scanSessionActive && m_robotPanel) {
@@ -944,7 +907,7 @@ void MainWindow::buildUi()
             // No robot panel or auto-correction unavailable, start ultrasound immediately
             m_waitingForTrackingStart = false;
             emit waveformCachingChanged(true);
-            showMessage(QStringLiteral("扫描缓存已启动（手动模式），B/C 扫数据和对应 A 扫开始保存。"), false);
+            showMessage(QStringLiteral("扫描缓存已启动（手动模式），B 扫、路径和对应 A 扫开始保存。"), false);
         }
     });
     connect(m_pauseAction, &QAction::triggered, this, [this] {
@@ -996,84 +959,31 @@ void MainWindow::buildUi()
         const int groupId = currentGroupId();
         m_groupSelectedBeam[groupId] = qMax(0, m_beam->value() - 1);
         updateDecoderSettings();
-        if (m_bScanToggle->isChecked()) {
+        if ((m_groupScanModes.value(groupId, 0) & 0x2) != 0) {
             m_bScan->clear();
-            emit waveformCacheGroupReset(groupId, 0x2);
-        }
-        if (m_cScanToggle->isChecked()) {
             m_cScan->clear();
-            emit waveformCacheGroupReset(groupId, 0x4);
+            emit waveformCacheGroupReset(groupId, 0x6);
         }
         if (!m_lastFrame.beams.isEmpty()) renderCurrentFrame(false);
-    });
-    // 图谱页签只控制查看内容；各扫描的启停由页签内的开关独立控制。
-    connect(m_eScanToggle, &QPushButton::toggled, this, [this](bool enabled) {
-        m_eScanToggle->setText(enabled ? QStringLiteral("停止 E 扫")
-                                       : QStringLiteral("启动 E 扫"));
-        if (m_restoringGroupControls)
-            return;
-        const int groupId = currentGroupId();
-        int modes = m_groupScanModes.value(groupId, 0);
-        m_groupScanModes[groupId] = enabled ? (modes | 0x1) : (modes & ~0x1);
-        if (enabled)
-            m_mapTabs->setCurrentIndex(0);
-        updateDecoderSettings();
-    });
-    connect(m_bScanToggle, &QPushButton::toggled, this, [this](bool enabled) {
-        m_bScanToggle->setText(enabled ? QStringLiteral("停止 B 扫")
-                                       : QStringLiteral("启动 B 扫"));
-        if (m_restoringGroupControls)
-            return;
-        const int groupId = currentGroupId();
-        int modes = m_groupScanModes.value(groupId, 0);
-        m_groupScanModes[groupId] = enabled ? (modes | 0x2) : (modes & ~0x2);
-        if (enabled) {
-            m_bScan->clear();
-            emit waveformCacheGroupReset(groupId, 0x2);
-            m_mapTabs->setCurrentIndex(1);
-        }
-        updateDecoderSettings();
-    });
-    connect(m_cScanToggle, &QPushButton::toggled, this, [this](bool enabled) {
-        m_cScanToggle->setText(enabled ? QStringLiteral("停止 C 扫")
-                                       : QStringLiteral("启动 C 扫"));
-        if (m_restoringGroupControls)
-            return;
-        const int groupId = currentGroupId();
-        int modes = m_groupScanModes.value(groupId, 0);
-        m_groupScanModes[groupId] = enabled ? (modes | 0x4) : (modes & ~0x4);
-        if (enabled) {
-            m_cScan->clear();
-            emit waveformCacheGroupReset(groupId, 0x4);
-            m_mapTabs->setCurrentIndex(2);
-        }
-        updateDecoderSettings();
     });
     connect(m_cPrecision, &QDoubleSpinBox::valueChanged, this, [this](double mmPerCell) {
         if (m_restoringGroupControls)
             return;
         const int groupId = currentGroupId();
         m_groupEncoderPrecision[groupId] = mmPerCell;
+        ++m_encoderGeometryRevision;
         QString error;
         if (!ParameterPresetStore::saveScanPrecisionMmPerCell(groupId, mmPerCell,
                                                                &error)) {
-            showMessage(QStringLiteral("保存 B/C 扫路径精度失败：%1").arg(error), true);
+            showMessage(QStringLiteral("保存精度失败：%1").arg(error), true);
         }
-        const int counts = encoderCountsPerCell(groupId);
-        m_bScan->setEncoderPrecision(counts);
-        m_cScan->setEncoderPrecision(counts);
+        const int countsA = encoderCountsPerCellA(groupId);
+        const int countsB = encoderCountsPerCellB(groupId);
+        m_bScan->setEncoderPrecision(countsA);
+        m_cScan->setEncoderPrecision(countsA, countsB);
+        updateEncoderPrecisionDisplay();
         emit waveformCacheGroupReset(groupId, 0x6);
         updateDecoderSettings();
-    });
-    connect(m_eImagingGate, &QComboBox::currentIndexChanged, this, [this](int index) {
-        if (!m_restoringGroupControls)
-            m_groupEImagingGate[currentGroupId()] = index;
-        updateImagingGates();
-    });
-    connect(m_bImagingGate, &QComboBox::currentIndexChanged, this, [this](int index) {
-        if (!m_restoringGroupControls)
-            m_groupBImagingGate[currentGroupId()] = index;
-        updateImagingGates();
     });
     connect(m_bViewMode, &QComboBox::currentIndexChanged, this, [this] {
         const int mode = m_bViewMode->currentData().toInt();
@@ -1082,6 +992,8 @@ void MainWindow::buildUi()
     });
     connect(m_bPaletteMode, &QComboBox::currentIndexChanged, this, [this] {
         const int mode = m_bPaletteMode->currentData().toInt();
+        if (m_eScan)
+            m_eScan->setPaletteMode(mode);
         for (BScanWidget *widget : qAsConst(m_bScans))
             widget->setPaletteMode(mode);
     });
@@ -1114,11 +1026,6 @@ void MainWindow::buildUi()
     connect(resetBView, &QPushButton::clicked, this, [this] {
         if (m_bScan)
             m_bScan->resetView();
-    });
-    connect(m_cImagingGate, &QComboBox::currentIndexChanged, this, [this](int index) {
-        if (!m_restoringGroupControls)
-            m_groupCImagingGate[currentGroupId()] = index;
-        updateImagingGates();
     });
     connect(m_robotPanel, &RobotControlPanel::vehicleStatusChanged, this,
             [this](const QStringList &metrics) {
@@ -1343,23 +1250,20 @@ void MainWindow::setScanSessionActive(bool active)
     if (m_robotPanel)
         m_robotPanel->setAutoCorrectionPaused(false);
     if (active) {
-        // 新的一次缓存会话：先清掉上一次的 B/C 扫图像和 A 扫缓存，再启用缓存，
+        // 新的一次缓存会话：先清掉上一次的 B 扫、路径图和 A 扫缓存，再启用缓存，
         // 避免新数据叠加在旧图像/旧缓存之上。
         clearAllScanHistories();
         emit waveformCacheReset();
         // Delay ultrasound start until auto-correction tracking phase begins
         m_waitingForTrackingStart = true;
         emit waveformCachingChanged(false);
-        // 点击右侧“启动”即自动开启 B 扫和 C 扫成像：即使操作员停留在小车控制
-        // 页签，B/C 扫数据也会从启动瞬间开始采集，避免切回超声页时整段漏帧。
-        m_bScanToggle->setChecked(true);
-        m_cScanToggle->setChecked(true);
-        updateDecoderSettings();
+        // 点击右侧“启动”即自动开启 B 扫和编码器路径记录，并切到 B 扫成像视图。
+        m_groupScanModes[currentGroupId()] |= 0x6;
+        setScanView(1);
         showMessage(QStringLiteral("已准备扫描缓存，等待小车自动纠偏跟踪开始后同步启动超声采集。"), false);
     } else {
-        // 点击右侧“停止”即自动关闭 B 扫和 C 扫成像；已采集的图像保留供查看。
-        m_bScanToggle->setChecked(false);
-        m_cScanToggle->setChecked(false);
+        // 点击右侧“停止”即自动关闭 B 扫和路径记录；已采集的图像保留供查看。
+        m_groupScanModes[currentGroupId()] &= ~0x6;
         updateDecoderSettings();
         emit waveformCachingChanged(false);
         showMessage(QStringLiteral("扫描缓存已停止，实时 A 扫采集继续运行。"), false);
@@ -1376,6 +1280,9 @@ void MainWindow::setScanCachingPaused(bool paused)
         return;
     }
     m_scanCachingPaused = paused;
+    // 暂停不自动切视图；继续时若还在 E 扫则切回 B 扫继续成像。
+    if (!paused)
+        setScanView(1);
     if (m_robotPanel)
         m_robotPanel->setAutoCorrectionPaused(paused);
     
@@ -1437,7 +1344,9 @@ void MainWindow::updateDecoderSettings()
         group.selectedBeam = qBound(0, m_groupSelectedBeam.value(groupId, 0),
                                     group.beamCount - 1);
         group.amplitudeScale = qMax(1, m_device->maxAmplitudeValue());
-        group.encoderPrecision = encoderCountsPerCell(groupId);
+        group.encoderPrecisionA = encoderCountsPerCellA(groupId);
+        group.encoderPrecisionB = encoderCountsPerCellB(groupId);
+        group.encoderGeometryRevision = m_encoderGeometryRevision;
         group.rangeStart = m_rangeStart;
         group.rangeEnd = m_rangeEnd;
         QVector<GroupScanSettings> settings{group};
@@ -1464,7 +1373,9 @@ void MainWindow::updateDecoderSettings()
     group.selectedBeam = qBound(0, m_groupSelectedBeam.value(logicalPresetId, 0),
                                 beamCount - 1);
     group.amplitudeScale = qMax(1, int(sdk.getMaxAmplitude(hardwareGroupId)));
-    group.encoderPrecision = encoderCountsPerCell(logicalPresetId);
+    group.encoderPrecisionA = encoderCountsPerCellA(logicalPresetId);
+    group.encoderPrecisionB = encoderCountsPerCellB(logicalPresetId);
+    group.encoderGeometryRevision = m_encoderGeometryRevision;
     group.rangeStart = sdk.getRangeStart(hardwareGroupId);
     group.rangeEnd = sdk.getRangeEnd(hardwareGroupId);
     QVector<GroupScanSettings> settings{group};
@@ -1512,11 +1423,11 @@ void MainWindow::acceptGroupScanBatch(GroupScanFrameBatch frames, int deviceId)
 
     if (m_auxUiClock.elapsed() >= 100) {
         m_auxUiClock.restart();
-        if (!m_lastFrame.measurements.isEmpty()) {
-            const auto &m = m_lastFrame.measurements.first();
-            m_measurements->setText(QStringLiteral("幅值 A %1 | B %2 | C %3 | I %4")
-                                        .arg(m.amplitudeA).arg(m.amplitudeB)
-                                        .arg(m.amplitudeC).arg(m.amplitudeI));
+        if (!m_lastFrame.beams.isEmpty()) {
+            int peak = 0;
+            for (qint16 sample : m_lastFrame.beams[0])
+                peak = qMax(peak, qAbs(int(sample)));
+            m_measurements->setText(QStringLiteral("峰值 %1").arg(peak));
         }
         const auto &t = m_lastFrame.tail;
         m_tailInfo->setText(QStringLiteral("帧号 %1%2 | 编码器 A %3 / B %4 / C %5 | 时间戳 %6")
@@ -1731,8 +1642,7 @@ void MainWindow::renderCurrentFrame(bool newlyAcquired)
         // E-scan decoding deliberately produces a ready-to-paint image without
         // retaining every beam waveform.  Requiring beams here discarded those
         // valid E-scan frames and left the widget on "waiting for data".
-        if (m_eScanToggle->isChecked()
-            && (!m_lastFrame.eScanImage.isNull() || !m_lastFrame.beams.isEmpty()))
+        if (!m_lastFrame.eScanImage.isNull() || !m_lastFrame.beams.isEmpty())
             m_eScan->setFrame(m_lastFrame, scale);
     }
     // Text shaping/layout for rapidly changing labels is surprisingly costly
@@ -1740,10 +1650,11 @@ void MainWindow::renderCurrentFrame(bool newlyAcquired)
     // waveform at 60 Hz while updating numeric diagnostics at 10 Hz.
     if (newlyAcquired && m_auxUiClock.elapsed() >= 100) {
         m_auxUiClock.restart();
-        if (index < m_lastFrame.measurements.size()) {
-            const auto &m = m_lastFrame.measurements[index];
-            m_measurements->setText(QStringLiteral("幅值 A %1 | B %2 | C %3 | I %4")
-                                        .arg(m.amplitudeA).arg(m.amplitudeB).arg(m.amplitudeC).arg(m.amplitudeI));
+        if (index < m_lastFrame.beams.size()) {
+            int peak = 0;
+            for (qint16 sample : m_lastFrame.beams[index])
+                peak = qMax(peak, qAbs(int(sample)));
+            m_measurements->setText(QStringLiteral("峰值 %1").arg(peak));
         }
         const auto &t = m_lastFrame.tail;
         m_tailInfo->setText(QStringLiteral("帧号 %1%2 | 编码器 A %3 / B %4 / C %5 | 时间戳 %6")
@@ -1798,14 +1709,6 @@ void MainWindow::updateParametersForPlot()
     m_rangeEnd = Client::getInstance().getRangeEnd();
     m_bScan->setRange(m_rangeStart, m_rangeEnd);
     m_aScan->setBipolar(Client::getInstance().getRectifierMode() == RectifierType::Rectifier_RF);
-    m_aScan->setGates(m_parameters->currentGates());
-    m_aScan->setActiveGate(m_parameters->activeGate());
-    m_aScan->setSurfaceTracking(m_parameters->surfaceTrackingEnabled(),
-                                m_parameters->surfaceWindowStart(),
-                                m_parameters->surfaceWindowEnd(),
-                                m_parameters->surfaceThreshold(),
-                                m_parameters->surfaceHoldMissing(),
-                                m_parameters->surfaceTrackedGates());
     updateImagingGates();
     m_device->refreshGeometry();
     if (!m_lastFrame.beams.isEmpty()) renderCurrentFrame(false);
@@ -1813,43 +1716,41 @@ void MainWindow::updateParametersForPlot()
 
 void MainWindow::updateImagingGates()
 {
-    if (!m_parameters || !m_eImagingGate || !m_bImagingGate || !m_cImagingGate)
-        return;
-    const QVector<QVector<double>> gates = m_parameters->currentGates();
-    const auto gateAt = [&gates](int index) {
-        return index >= 0 && index < gates.size() && gates[index].size() >= 4
-            ? gates[index] : QVector<double>{0.0, 0.0, 0.0, 0.0};
-    };
-    const QString gateLetters = QStringLiteral("ABCI");
-    for (QComboBox *selector : {m_eImagingGate, m_bImagingGate, m_cImagingGate}) {
-        for (int i = 0; i < 4; ++i) {
-            const QVector<double> gate = gateAt(i);
-            selector->setItemText(i, gate[0] >= 0.5
-                ? QStringLiteral("Gate %1").arg(gateLetters.mid(i, 1))
-                : QStringLiteral("Gate %1（未启用）").arg(gateLetters.mid(i, 1)));
-        }
+    // 闸门已移除：E/B 扫使用 A 扫完整深度范围，C 扫使用整段峰值幅值（Gate 0）。
+    if (m_eScan)
+        m_eScan->setImagingGate(true, m_rangeStart, m_rangeEnd,
+                                m_rangeStart, m_rangeEnd);
+    if (m_bScan)
+        m_bScan->setImagingGate(true, m_rangeStart, m_rangeEnd, 0.0);
+    if (m_cScan)
+        m_cScan->setImagingGate(0, true, 0.0);
+}
+
+void MainWindow::setScanView(int index)
+{
+    if (m_mapTabs)
+        m_mapTabs->setCurrentIndex(index);
+    // E 扫随视图启停：E 视图开、B 视图关。
+    const int groupId = currentGroupId();
+    int modes = m_groupScanModes.value(groupId, 0);
+    m_groupScanModes[groupId] = index == 0 ? (modes | 0x1) : (modes & ~0x1);
+    if (m_eViewButton)
+        m_eViewButton->setChecked(index == 0);
+    if (m_bViewButton)
+        m_bViewButton->setChecked(index == 1);
+    updateDecoderSettings();
+}
+
+void MainWindow::synchronizeDepthCursor(double depth, bool visible)
+{
+    if (m_aScan)
+        m_aScan->setDepthCursor(depth, visible);
+    if (m_eScan)
+        m_eScan->setDepthCursor(depth, visible);
+    for (BScanWidget *widget : qAsConst(m_bScans)) {
+        if (widget)
+            widget->setDepthCursor(depth, visible);
     }
-
-    const int eIndex = m_eImagingGate->currentIndex();
-    const QVector<double> eGate = gateAt(eIndex);
-    m_eScan->setImagingGate(eGate[0] >= 0.5, eGate[1], eGate[2],
-                            m_rangeStart, m_rangeEnd);
-
-    const int bIndex = m_bImagingGate->currentIndex();
-    const QVector<double> bGate = gateAt(bIndex);
-    m_bScan->setImagingGate(bGate[0] >= 0.5, bGate[1], bGate[2], bGate[3]);
-    const QVector<bool> trackedGates = m_parameters->surfaceTrackedGates();
-    m_bScan->setSurfaceTracking(m_parameters->surfaceTrackingEnabled(),
-                                m_parameters->surfaceWindowStart(),
-                                m_parameters->surfaceWindowEnd(),
-                                m_parameters->surfaceThreshold(),
-                                m_parameters->surfaceHoldMissing(),
-                                bIndex >= 0 && bIndex < trackedGates.size()
-                                    && trackedGates[bIndex]);
-
-    const int cIndex = m_cImagingGate->currentIndex();
-    const QVector<double> cGate = gateAt(cIndex);
-    m_cScan->setImagingGate(cIndex, cGate[0] >= 0.5, cGate[3]);
 }
 
 int MainWindow::currentGroupId() const
@@ -1857,10 +1758,30 @@ int MainWindow::currentGroupId() const
     return m_activePresetId;
 }
 
-int MainWindow::encoderCountsPerCell(int groupId) const
+int MainWindow::encoderCountsPerCellA(int groupId) const
 {
     const double mmPerCell = m_groupEncoderPrecision.value(groupId, 1.0);
-    return qMax(1, qRound(mmPerCell / m_encoderMmPerCount));
+    return qMax(1, qRound(mmPerCell / m_encoderMmPerCountA));
+}
+
+int MainWindow::encoderCountsPerCellB(int groupId) const
+{
+    const double mmPerCell = m_groupEncoderPrecision.value(groupId, 1.0);
+    return qMax(1, qRound(mmPerCell / m_encoderMmPerCountB));
+}
+
+void MainWindow::updateEncoderPrecisionDisplay()
+{
+    if (!m_cPrecision)
+        return;
+    const int groupId = currentGroupId();
+    const int countsA = encoderCountsPerCellA(groupId);
+    const int countsB = encoderCountsPerCellB(groupId);
+    m_cPrecision->setToolTip(
+        QStringLiteral("设定 %1 mm/格；实际 A：%2 计数/格 = %3 mm/格；实际 B：%4 计数/格 = %5 mm/格")
+            .arg(m_groupEncoderPrecision.value(groupId, 1.0), 0, 'f', 2)
+            .arg(countsA).arg(countsA * m_encoderMmPerCountA, 0, 'f', 4)
+            .arg(countsB).arg(countsB * m_encoderMmPerCountB, 0, 'f', 4));
 }
 
 BScanWidget *MainWindow::ensureBScan(int groupId)
@@ -1869,8 +1790,8 @@ BScanWidget *MainWindow::ensureBScan(int groupId)
     if (slot)
         return slot;
     auto *widget = new BScanWidget;
-    widget->setEncoderPrecision(encoderCountsPerCell(groupId));
-    widget->setMmPerCount(m_encoderMmPerCount);
+    widget->setEncoderPrecision(encoderCountsPerCellA(groupId));
+    widget->setMmPerCount(m_encoderMmPerCountA);
     if (m_bViewMode)
         widget->setViewMode(m_bViewMode->currentData().toInt());
     if (m_bPaletteMode)
@@ -1890,6 +1811,8 @@ BScanWidget *MainWindow::ensureBScan(int groupId)
             [this, groupId](int column, double depth) {
         emit bWaveformRequested(groupId, column, depth);
     });
+    connect(widget, &BScanWidget::depthHovered,
+            this, &MainWindow::synchronizeDepthCursor);
     slot = widget;
     return widget;
 }
@@ -1900,13 +1823,23 @@ CScanWidget *MainWindow::ensureCScan(int groupId)
     if (slot)
         return slot;
     auto *widget = new CScanWidget;
-    widget->setEncoderPrecision(encoderCountsPerCell(groupId));
-    widget->setMmPerCount(m_encoderMmPerCount);
+    widget->setCompactOverview(true);
+    widget->setEncoderPrecision(encoderCountsPerCellA(groupId),
+                                encoderCountsPerCellB(groupId));
+    widget->setMmPerCount(m_encoderMmPerCountA, m_encoderMmPerCountB);
     if (m_cScanStack)
         m_cScanStack->addWidget(widget);
     connect(widget, &CScanWidget::cellClicked, this,
-            [this, groupId, widget](int x, int y) {
-        emit cWaveformRequested(groupId, widget->imagingGate(), x, y);
+            [this, groupId](int x, int) {
+        BScanWidget *bScan = ensureBScan(groupId);
+        bScan->showEncoderCell(x);
+        if (groupId == currentGroupId()) {
+            m_bScan = bScan;
+            if (m_bScanStack)
+                m_bScanStack->setCurrentWidget(bScan);
+            if (m_mapTabs)
+                m_mapTabs->setCurrentIndex(1);
+        }
     });
     slot = widget;
     return widget;
@@ -1938,18 +1871,21 @@ void MainWindow::restoreCurrentGroupControls()
     m_restoringGroupControls = true;
     m_beam->setValue(m_groupSelectedBeam.value(groupId, 0) + 1);
     m_cPrecision->setValue(m_groupEncoderPrecision.value(groupId, 1.0));
-    const int encoderPrecision = encoderCountsPerCell(groupId);
+    const int encoderPrecisionA = encoderCountsPerCellA(groupId);
+    const int encoderPrecisionB = encoderCountsPerCellB(groupId);
     if (m_bScan)
-        m_bScan->setEncoderPrecision(encoderPrecision);
+        m_bScan->setEncoderPrecision(encoderPrecisionA);
     if (m_cScan)
-        m_cScan->setEncoderPrecision(encoderPrecision);
-    const int modes = m_groupScanModes.value(groupId, 0);
-    m_eScanToggle->setChecked((modes & 0x1) != 0);
-    m_bScanToggle->setChecked((modes & 0x2) != 0);
-    m_cScanToggle->setChecked((modes & 0x4) != 0);
-    m_eImagingGate->setCurrentIndex(m_groupEImagingGate.value(groupId, 0));
-    m_bImagingGate->setCurrentIndex(m_groupBImagingGate.value(groupId, 0));
-    m_cImagingGate->setCurrentIndex(m_groupCImagingGate.value(groupId, 0));
+        m_cScan->setEncoderPrecision(encoderPrecisionA, encoderPrecisionB);
+    updateEncoderPrecisionDisplay();
+    int modes = m_groupScanModes.value(groupId, 0);
+    modes = (modes & 0x2) ? (modes | 0x4) : (modes & ~0x4);
+    // E 扫随视图启停：E 视图开、B 视图关。
+    if (m_mapTabs && m_mapTabs->currentIndex() == 0)
+        modes |= 0x1;
+    else
+        modes &= ~0x1;
+    m_groupScanModes[groupId] = modes;
     m_restoringGroupControls = false;
 }
 
@@ -1971,22 +1907,54 @@ void MainWindow::updateEncoderCalibration()
         return;
     const double diameter = qMax(0.001, m_parameters->wheelDiameter());
     const int resolution = qMax(1, m_parameters->encoderResolution());
-    m_encoderMmPerCount = 3.14159265358979323846 * diameter / double(resolution);
-    ParameterPresetStore::saveEncoderCalibration(diameter, resolution);
+    const double theoreticalCountsPerMm = double(resolution)
+                                          / (3.14159265358979323846 * diameter);
+    const bool measured = m_parameters->encoderCalibrationMode() == 1;
+    const double countsPerMmA = measured
+        ? qMax(0.000001, m_parameters->measuredEncoderCountsPerMmA())
+        : theoreticalCountsPerMm;
+    const double countsPerMmB = measured
+        ? qMax(0.000001, m_parameters->measuredEncoderCountsPerMmB())
+        : theoreticalCountsPerMm;
+    const double newMmPerCountA = 1.0 / countsPerMmA;
+    const double newMmPerCountB = 1.0 / countsPerMmB;
+    const bool geometryChanged =
+        !qFuzzyCompare(m_encoderMmPerCountA + 1.0, newMmPerCountA + 1.0)
+        || !qFuzzyCompare(m_encoderMmPerCountB + 1.0, newMmPerCountB + 1.0);
+    m_encoderMmPerCountA = newMmPerCountA;
+    m_encoderMmPerCountB = newMmPerCountB;
+    QString calibrationError;
+    if (!ParameterPresetStore::saveEncoderCalibration(
+            diameter, resolution, measured ? 1 : 0,
+            m_parameters->measuredEncoderCountsPerMmA(),
+            m_parameters->measuredEncoderCountsPerMmB(),
+            &calibrationError)) {
+        showMessage(QStringLiteral("保存编码器标定失败：%1").arg(calibrationError), true);
+    }
+    updateEncoderPrecisionDisplay();
+    if (!geometryChanged)
+        return;
+
+    ++m_encoderGeometryRevision;
     for (auto it = m_bScans.constBegin(); it != m_bScans.constEnd(); ++it) {
         BScanWidget *widget = it.value();
         if (widget) {
-            widget->setMmPerCount(m_encoderMmPerCount);
-            widget->setEncoderPrecision(encoderCountsPerCell(it.key()));
+            widget->setMmPerCount(m_encoderMmPerCountA);
+            widget->setEncoderPrecision(encoderCountsPerCellA(it.key()));
+            widget->clear();
         }
     }
     for (auto it = m_cScans.constBegin(); it != m_cScans.constEnd(); ++it) {
         CScanWidget *widget = it.value();
         if (widget) {
-            widget->setMmPerCount(m_encoderMmPerCount);
-            widget->setEncoderPrecision(encoderCountsPerCell(it.key()));
+            widget->setMmPerCount(m_encoderMmPerCountA, m_encoderMmPerCountB);
+            widget->setEncoderPrecision(encoderCountsPerCellA(it.key()),
+                                        encoderCountsPerCellB(it.key()));
+            widget->clear();
         }
     }
+    emit waveformCacheReset();
+    updateDecoderSettings();
 }
 
 void MainWindow::saveScanSession()
@@ -2108,8 +2076,8 @@ void MainWindow::loadScanSession()
         BScanWidget bValidator;
         CScanWidget cValidator;
         if ((hasB && !bValidator.loadFrom(in))
-            || (hasC && !cValidator.loadFrom(in))) {
-            showMessage(QStringLiteral("扫查会话中的 B/C 扫数据不完整"), true);
+            || (hasC && !cValidator.loadFrom(in, version >= 3))) {
+            showMessage(QStringLiteral("扫查会话中的 B 扫/路径数据不完整"), true);
             return;
         }
     }
@@ -2180,13 +2148,14 @@ void MainWindow::loadScanSession()
         bool hasB = false, hasC = false;
         liveIn >> groupId >> hasB >> hasC;
         if ((hasB && !ensureBScan(int(groupId))->loadFrom(liveIn))
-            || (hasC && !ensureCScan(int(groupId))->loadFrom(liveIn))) {
-            showMessage(QStringLiteral("恢复 B/C 扫视图失败"), true);
+            || (hasC && !ensureCScan(int(groupId))->loadFrom(liveIn,
+                                                                version >= 3))) {
+            showMessage(QStringLiteral("恢复 B 扫/路径视图失败"), true);
             return;
         }
     }
     selectCurrentGroupViews();
-    showMessage(QStringLiteral("已加载扫查会话，可在 B/C 扫图像上点选回看 A 扫"), false);
+    showMessage(QStringLiteral("已加载扫查会话，可点击 B 扫或下方路径总览定位回看"), false);
 }
 
 void MainWindow::saveConfig()
@@ -2291,8 +2260,8 @@ void MainWindow::processPlaybackFrame(const QByteArray &packet, int pointCount, 
     m_bScan->appendFrame(m_lastFrame, scale, index);
     m_cScan->appendFrame(m_lastFrame, scale, index);
     const auto &t = m_lastFrame.tail;
-    const double encoderAMm = double(t.encoder[0]) * m_encoderMmPerCount;
-    const double encoderBMm = double(t.encoder[1]) * m_encoderMmPerCount;
+    const double encoderAMm = double(t.encoder[0]) * m_encoderMmPerCountA;
+    const double encoderBMm = double(t.encoder[1]) * m_encoderMmPerCountB;
     m_tailInfo->setText(QStringLiteral("回放帧 %1 | 位置 A %2 mm / B %3 mm | 时间戳 %4")
                             .arg(t.frameNumber).arg(encoderAMm, 0, 'f', 2)
                             .arg(encoderBMm, 0, 'f', 2).arg(t.timestamp));

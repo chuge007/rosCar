@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QWidget>
 #include <QVariant>
 #include <functional>
@@ -9,7 +10,9 @@ class QCheckBox;
 class QDoubleSpinBox;
 class QSpinBox;
 class QFormLayout;
+class QGroupBox;
 class QLabel;
+class QPushButton;
 class QStackedWidget;
 class QTabWidget;
 class QTimer;
@@ -32,6 +35,9 @@ public:
     int currentPresetId() const { return m_currentPresetId; }
     double wheelDiameter() const;
     int encoderResolution() const;
+    int encoderCalibrationMode() const;
+    double measuredEncoderCountsPerMmA() const;
+    double measuredEncoderCountsPerMmB() const;
 
 public slots:
     bool activatePreset(int presetId) { return switchPreset(presetId); }
@@ -43,6 +49,7 @@ public slots:
     void setSurfaceWindowFromPlot(double start, double end);
     void selectGate(int gateIndex);
     void updateSurfaceStatus(bool valid, double reference, double current);
+    void setLiveEncoderCounts(qint64 encoderA, qint64 encoderB);
 
 signals:
     void configurationChanged();
@@ -56,6 +63,7 @@ signals:
     void gateVisualizationChanged();
     void surfaceTrackingChanged();
     void encoderCalibrationChanged();
+    void encoderDebugActiveChanged(bool active);
 
 private:
     struct Field {
@@ -96,8 +104,13 @@ private:
     void refreshGateTree();
     int selectedGroupId() const;
     void scheduleAutoApply();
+    void updateLongitudinalAngleFromWedgeInput();
+    void updateWedgeAngleFromLongitudinalInput(double longitudinalAngle);
     void recomputeTofdPcs();
     bool switchPreset(int presetId);
+    void updateEncoderCalibrationSummary();
+    void resetEncoderDebugSession();
+    bool hasFreshEncoderCounts() const;
 
     QVector<Field> m_fields;
     QComboBox *m_group = nullptr;
@@ -113,6 +126,34 @@ private:
     QLabel *m_surfaceStatus = nullptr;
     QDoubleSpinBox *m_wheelDiameter = nullptr;
     QSpinBox *m_encoderResolution = nullptr;
+    QComboBox *m_encoderCalibrationMode = nullptr;
+    QLabel *m_encoderTheorySummary = nullptr;
+    QLabel *m_encoderActiveSummary = nullptr;
+    QPushButton *m_encoderDebugToggle = nullptr;
+    QGroupBox *m_encoderDebugGroup = nullptr;
+    QComboBox *m_encoderDebugAxis = nullptr;
+    QDoubleSpinBox *m_encoderDebugDistance = nullptr;
+    QLabel *m_encoderLiveCounts = nullptr;
+    QLabel *m_encoderDebugStartLabel = nullptr;
+    QLabel *m_encoderDebugResult = nullptr;
+    QPushButton *m_encoderRecordStart = nullptr;
+    QPushButton *m_encoderRecordEnd = nullptr;
+    QPushButton *m_encoderApplyMeasured = nullptr;
+    qint64 m_liveEncoderA = 0;
+    qint64 m_liveEncoderB = 0;
+    qint64 m_encoderDebugStartCount = 0;
+    QElapsedTimer m_encoderLiveClock;
+    double m_measuredCountsPerMmA = 0.0;
+    double m_measuredCountsPerMmB = 0.0;
+    double m_pendingCountsPerMmA = 0.0;
+    double m_pendingCountsPerMmB = 0.0;
+    bool m_hasLiveEncoderCounts = false;
+    bool m_hasEncoderDebugStart = false;
+    QDoubleSpinBox *m_workpieceVelocityInput = nullptr;
+    QDoubleSpinBox *m_wedgeAngleInput = nullptr;
+    QDoubleSpinBox *m_wedgeVelocityInput = nullptr;
+    QDoubleSpinBox *m_longitudinalAngleInput = nullptr;
+    QLabel *m_wedgeAngleStatus = nullptr;
     QDoubleSpinBox *m_tofdDepthFraction = nullptr;
     QLabel *m_tofdAngleLabel = nullptr;
     QLabel *m_tofdDepthLabel = nullptr;

@@ -76,7 +76,9 @@ bool FrameDecoderWorker::triggerGeometryChanged(const GroupScanSettings &left,
            || left.pointCount != right.pointCount
            || (left.scanModes & 0x6) != (right.scanModes & 0x6)
            || left.selectedBeam != right.selectedBeam
-           || left.encoderPrecision != right.encoderPrecision;
+           || left.encoderPrecisionA != right.encoderPrecisionA
+           || left.encoderPrecisionB != right.encoderPrecisionB
+           || left.encoderGeometryRevision != right.encoderGeometryRevision;
 }
 
 void FrameDecoderWorker::updateSettings(QVector<GroupScanSettings> groups,
@@ -96,7 +98,8 @@ void FrameDecoderWorker::updateSettings(QVector<GroupScanSettings> groups,
         group.scanModes &= 0x7;
         group.selectedBeam = qBound(0, group.selectedBeam, group.beamCount - 1);
         group.amplitudeScale = qMax(1, group.amplitudeScale);
-        group.encoderPrecision = qMax(1, group.encoderPrecision);
+        group.encoderPrecisionA = qMax(1, group.encoderPrecisionA);
+        group.encoderPrecisionB = qMax(1, group.encoderPrecisionB);
         presentGroups.insert(group.groupId);
         hasEncoderScans |= (group.scanModes & 0x6) != 0;
 
@@ -282,89 +285,95 @@ void FrameDecoderWorker::processEncoderTriggeredPackets()
             bool inspectBColumn = false;
             if (bEnabled) {
                 const qint64 delta = encoderA - state.originA;
-                if (state.direction == 0 && delta != 0)
-                    state.direction = delta > 0 ? 1 : -1;
-                const int direction = state.direction == 0 ? 1 : state.direction;
-                const qint64 directedCounts = delta * direction;
-                if (directedCounts >= 0) {
-                    const qint64 column = directedCounts / settings.encoderPrecision;
-                    bColumn = int(qMin<qint64>(column, INT_MAX));
-                    // Inspect every waveform within the current spatial cell.
-                    // Only a stronger complete waveform is emitted below, so a
-                    // B-scan column and its click-to-review A-scan stay identical.
-                    inspectBColumn = true;
-                }
+                const auto cellForDelta = [](qint64 counts, int precision) {
+                    // Use the same signed spatial cells as the encoder path.
+                    // Taking the magnitude below makes B-scan distance independent
+                    // of whether the vehicle starts in the positive or negative
+                    // encoder direction, without letting startup jitter lock the
+                    // whole scan to the wrong direction.
+                    return counts >= 0
+                               ? counts / precision
+                               : -((-counts + precision - 1) / precision);
+                };
+                const qint64 signedColumn = cellForDelta(
+                    delta, settings.encoderPrecisionA);
+                const quint64 distanceColumn = signedColumn >= 0
+                    ? quint64(signedColumn)
+                    : quint64(-(signedColumn + 1)) + 1;
+                bColumn = int(qMin<quint64>(distanceColumn,
+                                             quint64(INT_MAX)));
+                // Inspect every waveform within the current spatial cell.
+                // Only a stronger complete waveform is emitted below, so a
+                // B-scan column and its click-to-review A-scan stay identical.
+                inspectBColumn = true;
             }
             if (cEnabled) {
-                const auto cellForDelta = [&settings](qint64 delta) {
+                const auto cellForDelta = [](qint64 delta, int precision) {
                     return delta >= 0
-                               ? delta / settings.encoderPrecision
-                               : -((-delta + settings.encoderPrecision - 1)
-                                   / settings.encoderPrecision);
+                               ? delta / precision
+                               : -((-delta + precision - 1) / precision);
                 };
-                const qint64 column = cellForDelta(encoderA - state.originA);
-                const qint64 row = cellForDelta(encoderB - state.originB);
+                const qint64 column = cellForDelta(encoderA - state.originA,
+                                                   settings.encoderPrecisionA);
+                const qint64 row = cellForDelta(encoderB - state.originB,
+                                                settings.encoderPrecisionB);
                 if (column != state.lastCColumn || row != state.lastCRow) {
                     state.lastCColumn = column;
                     state.lastCRow = row;
-                    state.lastCGateScores = {{-1, -1, -1, -1}};
+                    state.lastCScore = -1;
                 }
                 cColumn = int(qBound<qint64>(qint64(INT_MIN), column,
                                               qint64(INT_MAX)));
                 cRow = int(qBound<qint64>(qint64(INT_MIN), row,
                                           qint64(INT_MAX)));
             }
-            BeamMeasurement measurement;
+            DecodedFrame frame;
             if (inspectBColumn || cEnabled) {
-                if (!PacketDecoder::decodeSelectedMeasurement(
-                        packetView, settings.groupOffsetWords,
-                        settings.beamCount, settings.pointCount,
-                        settings.selectedBeam, measurement, &error)) {
+                if (!PacketDecoder::decodeSelectedBeam(packetView,
+                                                        settings.groupOffsetWords,
+                                                        settings.beamCount,
+                                                        settings.pointCount,
+                                                        settings.selectedBeam,
+                                                        frame, &error)) {
                     emit decodeFailed(error);
                     continue;
                 }
-            }
-            if (inspectBColumn) {
-                const int score = int(qMax(qMax(measurement.amplitudeA,
-                                                measurement.amplitudeB),
-                                           qMax(measurement.amplitudeC,
-                                                measurement.amplitudeI)));
-                if (bColumn != state.lastBColumn) {
-                    state.lastBColumn = bColumn;
-                    state.lastBScore = score;
-                    triggeredModes |= 0x2;
-                } else if (score > state.lastBScore) {
-                    state.lastBScore = score;
-                    triggeredModes |= 0x2;
+                // 整段峰值幅值：在整个 A 扫深度范围内取最大绝对值，作为 B/C 扫的幅值。
+                int peak = 0;
+                if (!frame.beams.isEmpty()) {
+                    const QVector<qint16> &samples = frame.beams[0];
+                    for (qint16 sample : samples)
+                        peak = qMax(peak, qAbs(int(sample)));
                 }
-            }
-            if (cEnabled) {
-                const int amplitudes[4] = {int(measurement.amplitudeA),
-                                           int(measurement.amplitudeB),
-                                           int(measurement.amplitudeC),
-                                           int(measurement.amplitudeI)};
-                for (int gate = 0; gate < 4; ++gate) {
-                    if (amplitudes[gate] <= state.lastCGateScores[gate])
-                        continue;
-                    state.lastCGateScores[gate] = amplitudes[gate];
-                    cGateMask |= 1 << gate;
+                // 用整段峰值覆盖 SDK 闸门幅值，C 扫只保留 Gate 0 一个路径。
+                if (!frame.measurements.isEmpty()) {
+                    BeamMeasurement &m = frame.measurements[0];
+                    m.amplitudeA = quint32(peak);
+                    m.amplitudeB = 0;
+                    m.amplitudeC = 0;
+                    m.amplitudeI = 0;
                 }
-                if (cGateMask != 0)
-                    triggeredModes |= 0x4;
+                if (inspectBColumn) {
+                    if (bColumn != state.lastBColumn) {
+                        state.lastBColumn = bColumn;
+                        state.lastBScore = peak;
+                        triggeredModes |= 0x2;
+                    } else if (peak > state.lastBScore) {
+                        state.lastBScore = peak;
+                        triggeredModes |= 0x2;
+                    }
+                }
+                if (cEnabled) {
+                    if (peak > state.lastCScore) {
+                        state.lastCScore = peak;
+                        cGateMask = 0x1;
+                        triggeredModes |= 0x4;
+                    }
+                }
             }
             if (triggeredModes == 0)
                 continue;
 
-            DecodedFrame frame;
-            if (!PacketDecoder::decodeSelectedBeam(packetView,
-                                                    settings.groupOffsetWords,
-                                                    settings.beamCount,
-                                                    settings.pointCount,
-                                                    settings.selectedBeam,
-                                                    frame, &error)) {
-                emit decodeFailed(error);
-                continue;
-            }
             GroupScanFrame item;
             item.groupId = settings.groupId;
             item.triggeredModes = triggeredModes;

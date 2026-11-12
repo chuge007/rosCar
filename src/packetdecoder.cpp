@@ -217,24 +217,28 @@ bool PacketDecoder::decodeEScan(const QByteArray &packet, int groupOffsetWords,
     out = {};
     out.sourceBeamCount = beamCount;
     out.selectedSourceBeam = selectedBeam;
-    out.eScanImage = QImage(beamCount, pointCount, QImage::Format_RGB32);
+    out.eScanImage = QImage(beamCount, pointCount, QImage::Format_Indexed8);
     if (out.eScanImage.isNull()) {
         if (error) *error = QStringLiteral("无法分配 E 扫图像缓冲区");
         return false;
     }
+    QVector<QRgb> colorTable(256);
+    for (int i = 0; i < colorTable.size(); ++i)
+        colorTable[i] = palette[size_t(i)];
+    out.eScanImage.setColorTable(colorTable);
 
     // The packet is beam-major while the image is row-major.  Generate the
     // raster directly from the SDK buffer with an integer palette lookup;
     // avoid constructing beamCount temporary QVector waveforms and avoid a
     // QColor/HSV conversion for every pixel on the GUI thread.
     for (int point = 0; point < pointCount; ++point) {
-        auto *line = reinterpret_cast<QRgb *>(out.eScanImage.scanLine(point));
+        uchar *line = out.eScanImage.scanLine(point);
         for (int beam = 0; beam < beamCount; ++beam) {
             const qsizetype sampleIndex = groupOffsetWords
                 + qsizetype(beam) * strideWords + point;
             const int magnitude = qAbs(int(words[sampleIndex]));
             const int colorIndex = qMin(255, int(double(magnitude) * 255.0 / scale));
-            line[beam] = palette[size_t(colorIndex)];
+            line[beam] = uchar(colorIndex);
         }
     }
 
