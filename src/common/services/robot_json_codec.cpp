@@ -1,10 +1,14 @@
 #include "robot_json_codec.h"
 
+#include "robot_app_logger.h"
+
+#include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonValue>
+#include <QMutex>
 #include <QSettings>
-#include <QTemporaryFile>
 
 #include <cmath>
 
@@ -45,24 +49,75 @@ void readMotor(const QJsonObject& value, crawling::MotorFeedback* motor) {
           .toDouble(static_cast<double>(motor->receivedAtMs)));
 }
 
+// QSettings 只能读写文件。中间文件统一放在程序自身的 config 目录（该目录
+// 本来就要持久化 drive_settings.ini，一定可写），避免依赖系统 TEMP：
+// 主机由计划任务以另一身份启动，TEMP 未必可写，失败时旧实现会静默返回
+// 空对象，操作端因此永远读不到主机配置。
+QString codecTempIniPath(const QString& tag) {
+  const QDir appDir(QCoreApplication::applicationDirPath());
+  const QString configPath = appDir.filePath(QStringLiteral("config"));
+  if (!QDir().mkpath(configPath)) return {};
+  return QDir(configPath).filePath(
+      QStringLiteral(".%1_%2.ini")
+          .arg(tag)
+          .arg(QCoreApplication::applicationPid()));
+}
+
 }  // namespace
 
 QJsonObject driveSettingsToJson(const crawling::DriveSettings& settings) {
-  // QSettings only works with file paths, so round-trip through a temp file.
-  QTemporaryFile temp;
-  if (!temp.open()) return {};
-  const QString iniPath = temp.fileName();
-  temp.close();
+  // QSettings 只能读写文件，所以先把当前配置落成一个临时 ini 再取字节。
+  //
+  // 这里刻意不用 QTemporaryFile：主机进程由计划任务以另一身份启动，系统
+  // 临时目录未必可写，而原实现任何一步失败都会静默返回空对象，表现为
+  // robot.snapshot / robot.connect 应答里的 settings 永远为 {}，操作端
+  // 一直读不到主机配置且毫无提示。改为写入自身 config 目录（主机本来
+  // 就在那里持久化 drive_settings.ini，一定可写），失败时留日志。
+  static QMutex exportMutex;
+  const QMutexLocker locker(&exportMutex);
+  const QString iniPath =
+      codecTempIniPath(QStringLiteral("drive_settings_export"));
+  if (iniPath.isEmpty()) {
+    crawling::AppLogger::error(
+        QStringLiteral("COMM.CONTROL"),
+        QStringLiteral("event=settings_export_failed stage=mkpath"));
+    return {};
+  }
   {
     QSettings stored(iniPath, QSettings::IniFormat);
+    stored.clear();
     settings.save(stored);
     stored.sync();
-    if (stored.status() != QSettings::NoError) return {};
+    if (stored.status() != QSettings::NoError) {
+      crawling::AppLogger::error(
+          QStringLiteral("COMM.CONTROL"),
+          QStringLiteral("event=settings_export_failed stage=qsettings "
+                         "status=%1 path=%2")
+              .arg(static_cast<int>(stored.status()))
+              .arg(iniPath));
+      QFile::remove(iniPath);
+      return {};
+    }
   }
   QFile iniFile(iniPath);
-  if (!iniFile.open(QIODevice::ReadOnly)) return {};
+  if (!iniFile.open(QIODevice::ReadOnly)) {
+    crawling::AppLogger::error(
+        QStringLiteral("COMM.CONTROL"),
+        QStringLiteral("event=settings_export_failed stage=open path=%1")
+            .arg(iniPath));
+    QFile::remove(iniPath);
+    return {};
+  }
   const QByteArray ini = iniFile.readAll();
   iniFile.close();
+  QFile::remove(iniPath);
+  if (ini.isEmpty()) {
+    crawling::AppLogger::error(
+        QStringLiteral("COMM.CONTROL"),
+        QStringLiteral("event=settings_export_failed stage=empty path=%1")
+            .arg(iniPath));
+    return {};
+  }
   QJsonObject json;
   json.insert(QStringLiteral("schema"),
               crawling::DriveSettings::kCurrentSettingsSchemaVersion);
@@ -90,19 +145,35 @@ bool driveSettingsFromJson(const QJsonObject& json,
     if (error) *error = QStringLiteral("底盘配置内容无效");
     return false;
   }
-  QTemporaryFile temp;
-  if (!temp.open() || temp.write(ini) != ini.size() || !temp.flush()) {
-    if (error) *error = QStringLiteral("无法读取底盘配置");
+  const QString iniPath =
+      codecTempIniPath(QStringLiteral("drive_settings_import"));
+  if (iniPath.isEmpty()) {
+    if (error) *error = QStringLiteral("无法创建底盘配置暂存文件");
     return false;
   }
-  const QString iniPath = temp.fileName();
-  temp.close();
-  QSettings stored(iniPath, QSettings::IniFormat);
-  if (!stored.contains(QStringLiteral("drive/settingsSchemaVersion"))) {
+  {
+    QFile output(iniPath);
+    if (!output.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+        output.write(ini) != ini.size()) {
+      output.close();
+      QFile::remove(iniPath);
+      if (error) *error = QStringLiteral("无法写入底盘配置暂存文件");
+      return false;
+    }
+  }
+  bool schemaOk = false;
+  crawling::DriveSettings parsed;
+  {
+    QSettings stored(iniPath, QSettings::IniFormat);
+    schemaOk = stored.contains(QStringLiteral("drive/settingsSchemaVersion"));
+    if (schemaOk) parsed = crawling::DriveSettings::load(stored);
+  }
+  QFile::remove(iniPath);
+  if (!schemaOk) {
     if (error) *error = QStringLiteral("底盘配置缺少版本字段");
     return false;
   }
-  *settings = crawling::DriveSettings::load(stored);
+  *settings = parsed;
   // Serial ports belong to the robot host, not to the operator console. The
   // panel saves with nonPortValidationError(), so decoding with the strict
   // validationError() here used to reject a perfectly good configuration just
