@@ -7,6 +7,9 @@
 #include "robot_usb_camera_controller.h"
 #include "clamp_motor_controller.h"
 #include "clamp_motor_widgets.h"
+#include "remote_channel_reader.h"
+#include "remote_input_mapper.h"
+#include "remote_platform.h"
 #include "synchronized_drive_controller.h"
 #include "services/robot_json_codec.h"
 #include "services/workbench_data_codec.h"
@@ -21,6 +24,7 @@
 #include <QJsonValue>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFormLayout>
@@ -35,6 +39,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPixmap>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSerialPortInfo>
@@ -332,6 +337,7 @@ RobotControlPanel::RobotControlPanel(
     buildUi();
     loadSettings();
     refreshPorts();
+    setupRemoteInput();
 
     if (m_remoteSession) {
         m_clampSettings->setRemoteMode(true);
@@ -1748,10 +1754,14 @@ void RobotControlPanel::buildUi()
     auto *directionGrid = new QGridLayout;
     for (int column = 0; column < 3; ++column)
         directionGrid->setColumnStretch(column, 1);
-    auto *forward = actionButton(QStringLiteral("▲ 前进"), "jog");
-    auto *reverse = actionButton(QStringLiteral("▼ 后退"), "jog");
-    auto *left = actionButton(QStringLiteral("◀ 左转"), "jog");
-    auto *right = actionButton(QStringLiteral("右转 ▶"), "jog");
+    m_forwardButton = actionButton(QStringLiteral("▲ 前进"), "jog");
+    m_reverseButton = actionButton(QStringLiteral("▼ 后退"), "jog");
+    m_leftButton = actionButton(QStringLiteral("◀ 左转"), "jog");
+    m_rightButton = actionButton(QStringLiteral("右转 ▶"), "jog");
+    auto *forward = m_forwardButton;
+    auto *reverse = m_reverseButton;
+    auto *left = m_leftButton;
+    auto *right = m_rightButton;
     directionGrid->addWidget(forward, 0, 1);
     directionGrid->addWidget(left, 1, 0);
     directionGrid->addWidget(right, 1, 2);
@@ -1771,7 +1781,8 @@ void RobotControlPanel::buildUi()
     m_stopMotionButton = actionButton(QStringLiteral("暂停"));
     m_stopMotionButton->setEnabled(false);
     m_stopMotionButton->setToolTip(QStringLiteral("暂停/继续自动纠偏"));
-    auto *emergency = actionButton(QStringLiteral("紧急停止"), "danger");
+    m_emergencyButton = actionButton(QStringLiteral("紧急停止"), "danger");
+    auto *emergency = m_emergencyButton;
     driveGrid->addWidget(m_enableButton, 0, 0);
     driveGrid->addWidget(m_stopMotionButton, 0, 1);
     driveGrid->addWidget(emergency, 1, 0, 1, 2);
@@ -4777,7 +4788,8 @@ void RobotControlPanel::showInformationDialog(QWidget *parent)
         auto *dialog = new QDialog(parent ? parent : this);
         dialog->setWindowTitle(QStringLiteral("小车信息"));
         dialog->setAttribute(Qt::WA_DeleteOnClose, false);
-        auto *layout = new QFormLayout(dialog);
+        auto *rootLayout = new QVBoxLayout(dialog);
+        auto *layout = new QFormLayout;
         m_dialogState = new QLabel(dialog);
         m_dialogReason = new QLabel(dialog);
         m_dialogConnection = new QLabel(dialog);
@@ -4804,7 +4816,11 @@ void RobotControlPanel::showInformationDialog(QWidget *parent)
         layout->addRow(QStringLiteral("右轮"), m_dialogRightWheel);
         layout->addRow(QStringLiteral("反馈看门狗"), m_dialogFeedback);
         layout->addRow(QStringLiteral("双轮同步"), m_dialogSync);
+        rootLayout->addLayout(layout);
+        rootLayout->addWidget(buildRemoteInputGroup(dialog));
+        dialog->setMinimumWidth(600);
         m_infoDialog = dialog;
+        loadRemoteInputSettings();
     }
     m_infoDialog->show();
     updateInformationDialog();
@@ -4928,6 +4944,487 @@ void RobotControlPanel::releaseAllJog(const QString &reason)
         m_remoteSession->request(QStringLiteral("robot.clamp.stop"));
     else if (m_clampController)
         m_clampController->stop();
+}
+
+namespace {
+QString remoteInputSettingsFile()
+{
+    const QDir base(QCoreApplication::applicationDirPath());
+    base.mkpath(QStringLiteral("config"));
+    return base.filePath(QStringLiteral("config/remote_input.ini"));
+}
+} // namespace
+
+void RobotControlPanel::setupRemoteInput()
+{
+    crawling::RemotePlatformRegistry::instance().reload();
+    loadRemoteInputSettings();
+    m_remoteReader = new crawling::RemoteChannelReader(this);
+    m_remoteMapper = new crawling::RemoteInputMapper(this);
+    m_remoteMapper->setProfile(
+        crawling::RemotePlatformRegistry::instance().profile(m_remotePlatformId));
+
+    connect(m_remoteReader, &crawling::RemoteChannelReader::sampleReceived,
+            this, &RobotControlPanel::updateRemoteMonitor);
+    connect(m_remoteReader, &crawling::RemoteChannelReader::sampleReceived,
+            m_remoteMapper, &crawling::RemoteInputMapper::applySample);
+    connect(m_remoteReader, &crawling::RemoteChannelReader::linkStateChanged,
+            this, &RobotControlPanel::updateRemoteLinkUi);
+    connect(m_remoteReader, &crawling::RemoteChannelReader::logMessage,
+            this, &RobotControlPanel::appendLog);
+
+    connect(m_remoteMapper, &crawling::RemoteInputMapper::driveAxesChanged,
+            this, &RobotControlPanel::applyRemoteDriveAxes);
+    connect(m_remoteMapper, &crawling::RemoteInputMapper::motorJogChanged,
+            this, &RobotControlPanel::applyRemoteMotorJog);
+    connect(m_remoteMapper, &crawling::RemoteInputMapper::speedPresetChanged,
+            this, [this](int percent) {
+                if (!m_speedSlider) return;
+                m_speedSlider->setValue(
+                    qBound(m_speedSlider->minimum(), percent, m_speedSlider->maximum()));
+            });
+    connect(m_remoteMapper, &crawling::RemoteInputMapper::actionTriggered,
+            this, &RobotControlPanel::handleRemoteAction);
+    connect(m_remoteMapper, &crawling::RemoteInputMapper::armedChanged,
+            this, [this](bool armed) {
+                appendLog(armed ? QStringLiteral("实体遥控器已接管：摇杆/按键开始驱动界面")
+                                : QStringLiteral("实体遥控器已退出接管，输出已归零"));
+            });
+    connect(m_remoteMapper, &crawling::RemoteInputMapper::statusMessage,
+            this, &RobotControlPanel::appendLog);
+}
+
+QWidget *RobotControlPanel::buildRemoteInputGroup(QWidget *parentFragment)
+{
+    auto *group = new QGroupBox(QStringLiteral("输入设备（实体遥控器）"), parentFragment);
+    auto *layout = new QVBoxLayout(group);
+
+    auto *firstRow = new QHBoxLayout;
+    firstRow->addWidget(new QLabel(QStringLiteral("平台")));
+    m_remotePlatformCombo = new QComboBox(group);
+    m_remotePlatformCombo->setMinimumWidth(200);
+    firstRow->addWidget(m_remotePlatformCombo, 1);
+    firstRow->addWidget(new QLabel(QStringLiteral("串口")));
+    m_remotePortCombo = new QComboBox(group);
+    m_remotePortCombo->setEditable(true);
+    m_remotePortCombo->setMinimumWidth(110);
+    firstRow->addWidget(m_remotePortCombo);
+    auto *refresh = new QPushButton(QStringLiteral("刷新"), group);
+    m_remoteConnectButton = new QPushButton(QStringLiteral("连接"), group);
+    m_remoteDisconnectButton = new QPushButton(QStringLiteral("断开"), group);
+    m_remoteDisconnectButton->setEnabled(false);
+    firstRow->addWidget(refresh);
+    firstRow->addWidget(m_remoteConnectButton);
+    firstRow->addWidget(m_remoteDisconnectButton);
+    layout->addLayout(firstRow);
+
+    auto *secondRow = new QHBoxLayout;
+    m_remoteLinkLabel = new QLabel(QStringLiteral("○ 未连接"), group);
+    m_remoteLinkLabel->setStyleSheet(QStringLiteral("color:#8a94a6;"));
+    secondRow->addWidget(m_remoteLinkLabel, 1);
+    m_remoteTakeoverCheck =
+        new QCheckBox(QStringLiteral("接管（勾选后摇杆/按键才驱动）"), group);
+    secondRow->addWidget(m_remoteTakeoverCheck);
+    layout->addLayout(secondRow);
+
+    m_remoteHintLabel = new QLabel(group);
+    m_remoteHintLabel->setWordWrap(true);
+    m_remoteHintLabel->setStyleSheet(QStringLiteral("color:#8a94a6;font-size:11px;"));
+    layout->addWidget(m_remoteHintLabel);
+
+    m_remoteMonitorScroll = new QScrollArea(group);
+    m_remoteMonitorScroll->setWidgetResizable(true);
+    m_remoteMonitorScroll->setMinimumHeight(140);
+    m_remoteMonitorScroll->setMaximumHeight(210);
+    auto *body = new QWidget;
+    m_remoteMonitorGrid = new QGridLayout(body);
+    m_remoteMonitorGrid->setContentsMargins(4, 4, 4, 4);
+    m_remoteMonitorGrid->setHorizontalSpacing(8);
+    m_remoteMonitorGrid->setVerticalSpacing(2);
+    m_remoteMonitorScroll->setWidget(body);
+    layout->addWidget(m_remoteMonitorScroll);
+
+    connect(refresh, &QPushButton::clicked, this, [this] {
+        crawling::RemotePlatformRegistry::instance().reload();
+        refreshRemotePlatforms();
+        refreshRemotePorts();
+    });
+    connect(m_remoteConnectButton, &QPushButton::clicked, this,
+            [this] { connectRemoteInput(); });
+    connect(m_remoteDisconnectButton, &QPushButton::clicked, this,
+            [this] { disconnectRemoteInput(QStringLiteral("operator_disconnect")); });
+    connect(m_remotePlatformCombo, &QComboBox::currentIndexChanged, this,
+            [this](int index) {
+                if (index < 0 || index >= m_remotePlatformIds.size()) return;
+                const QString id = m_remotePlatformIds.at(index);
+                if (id == m_remotePlatformId) return;
+                disconnectRemoteInput(QStringLiteral("platform_switch"));
+                m_remotePlatformId = id;
+                if (m_remoteMapper)
+                    m_remoteMapper->setProfile(
+                        crawling::RemotePlatformRegistry::instance().profile(id));
+                refreshRemotePorts();
+                rebuildRemoteMonitor();
+                saveRemoteInputSettings();
+                appendLog(QStringLiteral("实体遥控器平台已切换为 %1").arg(id));
+            });
+    connect(m_remoteTakeoverCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        if (m_remoteMapper) m_remoteMapper->setTakeoverEnabled(checked);
+        if (!checked) resetRemoteOutputs(QStringLiteral("takeover_off"));
+        saveRemoteInputSettings();
+    });
+
+    rebuildRemoteMonitor();
+    return group;
+}
+
+void RobotControlPanel::refreshRemotePlatforms()
+{
+    const auto profiles = crawling::RemotePlatformRegistry::instance().profiles();
+    m_remotePlatformIds.clear();
+    for (const auto &profile : profiles) m_remotePlatformIds.append(profile.id);
+    if (!m_remotePlatformCombo) return;
+
+    const QSignalBlocker blocker(m_remotePlatformCombo);
+    m_remotePlatformCombo->clear();
+    int current = -1;
+    for (int i = 0; i < profiles.size(); ++i) {
+        m_remotePlatformCombo->addItem(QStringLiteral("%1 (%2)")
+                                           .arg(profiles.at(i).displayName,
+                                                profiles.at(i).id));
+        if (profiles.at(i).id == m_remotePlatformId) current = i;
+    }
+    if (current >= 0) m_remotePlatformCombo->setCurrentIndex(current);
+}
+
+void RobotControlPanel::refreshRemotePorts()
+{
+    if (!m_remotePortCombo) return;
+    const QString previous = m_remotePortCombo->currentText().trimmed();
+    const QSignalBlocker blocker(m_remotePortCombo);
+    m_remotePortCombo->clear();
+    for (const auto &info : QSerialPortInfo::availablePorts())
+        m_remotePortCombo->addItem(info.portName());
+    const auto profile =
+        crawling::RemotePlatformRegistry::instance().profile(m_remotePlatformId);
+    const QString preferred = previous.isEmpty()
+                                  ? (m_remotePortName.isEmpty() ? profile.defaultPort
+                                                                : m_remotePortName)
+                                  : previous;
+    int index = m_remotePortCombo->findText(preferred, Qt::MatchFixedString);
+    if (index < 0 && !preferred.isEmpty()) {
+        m_remotePortCombo->addItem(preferred);
+        index = m_remotePortCombo->count() - 1;
+    }
+    if (index >= 0) m_remotePortCombo->setCurrentIndex(index);
+}
+
+void RobotControlPanel::rebuildRemoteMonitor()
+{
+    if (!m_remoteMonitorGrid) return;
+    while (QLayoutItem *item = m_remoteMonitorGrid->takeAt(0)) {
+        if (QWidget *widget = item->widget()) widget->deleteLater();
+        delete item;
+    }
+    m_remoteBars.clear();
+    m_remoteIndicators.clear();
+
+    const auto profile = m_remoteMapper
+                             ? m_remoteMapper->profile()
+                             : crawling::RemotePlatformRegistry::instance().profile(
+                                   m_remotePlatformId);
+    int row = 0;
+    for (const auto &channel : profile.channels) {
+        auto *name = new QLabel(QStringLiteral("%1 %2").arg(channel.key, channel.label));
+        name->setMinimumWidth(96);
+        m_remoteMonitorGrid->addWidget(name, row, 0);
+        if (channel.kind == crawling::RemoteChannelKind::Switch3) {
+            auto *indicator = new QLabel(QStringLiteral("中"));
+            indicator->setMinimumWidth(40);
+            indicator->setStyleSheet(QStringLiteral("color:#8a94a6;"));
+            m_remoteMonitorGrid->addWidget(indicator, row, 1, 1, 2);
+            m_remoteIndicators.insert(channel.key, indicator);
+        } else {
+            auto *bar = new QProgressBar;
+            bar->setRange(channel.minimum, channel.maximum);
+            bar->setValue(channel.center);
+            bar->setTextVisible(false);
+            bar->setFixedHeight(12);
+            m_remoteMonitorGrid->addWidget(bar, row, 1, 1, 2);
+            m_remoteBars.insert(channel.key, bar);
+        }
+        ++row;
+    }
+    if (!profile.buttons.isEmpty()) {
+        auto *buttonLabel = new QLabel(QStringLiteral("按键"));
+        buttonLabel->setMinimumWidth(96);
+        m_remoteMonitorGrid->addWidget(buttonLabel, row, 0);
+        auto *buttonRow = new QHBoxLayout;
+        for (const auto &button : profile.buttons) {
+            auto *indicator = new QLabel(button.key + QStringLiteral(" ○"));
+            indicator->setStyleSheet(QStringLiteral("color:#8a94a6;"));
+            indicator->setMinimumWidth(52);
+            buttonRow->addWidget(indicator);
+            m_remoteIndicators.insert(button.key, indicator);
+        }
+        buttonRow->addStretch(1);
+        m_remoteMonitorGrid->addLayout(buttonRow, row, 1, 1, 2);
+        ++row;
+    }
+    m_remoteMonitorGrid->setRowStretch(row, 1);
+
+    QStringList hints;
+    const auto &mapping = profile.mapping;
+    if (mapping.linear.bound() || mapping.angular.bound())
+        hints << QStringLiteral("左摇杆 %1/%2 → 前进后退·左右")
+                     .arg(mapping.linear.channel, mapping.angular.channel);
+    if (mapping.spacing.bound())
+        hints << QStringLiteral("%1 → X%2 探头间距")
+                     .arg(mapping.spacing.channel)
+                     .arg(mapping.spacingMotor.index + 1);
+    if (mapping.lift.bound()) {
+        QStringList motors;
+        for (const auto &motor : mapping.liftMotors)
+            motors << QStringLiteral("Z%1").arg(motor.index + 1);
+        hints << QStringLiteral("%1 → %2 同步升降")
+                     .arg(mapping.lift.channel, motors.join(QLatin1Char('+')));
+    }
+    if (!mapping.buttonEmergencyStop.isEmpty())
+        hints << QStringLiteral("%1 → 急停").arg(mapping.buttonEmergencyStop);
+    if (m_remoteHintLabel && !hints.isEmpty())
+        m_remoteHintLabel->setText(hints.join(QStringLiteral("；")));
+}
+
+void RobotControlPanel::updateRemoteMonitor(
+    const crawling::RemoteChannelSample &sample)
+{
+    if (!m_infoDialog || !m_infoDialog->isVisible()) return;
+    for (auto it = m_remoteBars.constBegin(); it != m_remoteBars.constEnd(); ++it) {
+        const int value = sample.channelValue(it.key(), -1);
+        if (value >= 0) it.value()->setValue(value);
+    }
+    const auto &profile = m_remoteMapper ? m_remoteMapper->profile()
+                                         : crawling::RemotePlatformProfile();
+    for (const auto &channel : profile.channels) {
+        if (channel.kind != crawling::RemoteChannelKind::Switch3) continue;
+        auto indicator = m_remoteIndicators.value(channel.key);
+        if (!indicator) continue;
+        const int value = sample.channelValue(channel.key, channel.center);
+        indicator->setText(value < 400 ? QStringLiteral("下")
+                                       : value > 800 ? QStringLiteral("上")
+                                                     : QStringLiteral("中"));
+    }
+    for (const auto &button : profile.buttons) {
+        auto indicator = m_remoteIndicators.value(button.key);
+        if (!indicator) continue;
+        const bool pressed = sample.buttonPressed(button.key);
+        indicator->setText(button.key + (pressed ? QStringLiteral(" ●")
+                                                 : QStringLiteral(" ○")));
+        indicator->setStyleSheet(pressed ? QStringLiteral("color:#c62828;")
+                                         : QStringLiteral("color:#8a94a6;"));
+    }
+}
+
+void RobotControlPanel::updateRemoteLinkUi(bool connected, const QString &detail)
+{
+    if (m_remoteLinkLabel) {
+        m_remoteLinkLabel->setText(connected
+                                       ? QStringLiteral("● 已连接 %1").arg(detail)
+                                       : QStringLiteral("○ 未连接 %1").arg(detail));
+        m_remoteLinkLabel->setStyleSheet(connected ? QStringLiteral("color:#2e7d32;")
+                                                   : QStringLiteral("color:#c62828;"));
+    }
+    if (m_remoteConnectButton) m_remoteConnectButton->setEnabled(!connected);
+    if (m_remoteDisconnectButton)
+        m_remoteDisconnectButton->setEnabled(m_remoteReader && m_remoteReader->isOpen());
+    if (m_remotePlatformCombo) m_remotePlatformCombo->setEnabled(!connected);
+    if (!connected) {
+        if (m_remoteMapper) m_remoteMapper->reset();
+        resetRemoteOutputs(QStringLiteral("link_down"));
+        appendLog(QStringLiteral("实体遥控器链路断开：%1").arg(detail));
+    }
+}
+
+bool RobotControlPanel::connectRemoteInput()
+{
+    if (!m_remoteReader || !m_remoteMapper) return false;
+    if (m_remoteReader->isOpen()) return true;
+    const QString port = m_remotePortCombo
+                             ? m_remotePortCombo->currentText().trimmed()
+                             : m_remotePortName;
+    if (port.isEmpty()) {
+        appendLog(QStringLiteral("实体遥控器：未选择串口"));
+        return false;
+    }
+
+    QStringList used;
+    const auto addPort = [&used](const QString &value) {
+        if (!value.trimmed().isEmpty()) used.append(value.trimmed());
+    };
+    addPort(m_settings.imuSerialPort);
+    addPort(m_settings.wheelCanSerialPort);
+    addPort(m_settings.leftMotorSerialPort);
+    addPort(m_settings.rightMotorSerialPort);
+    for (int axis = 0; axis < 3; ++axis)
+        for (const auto &motor : m_settings.clampMotors[axis]) addPort(motor.serialPort);
+    if (used.contains(port, Qt::CaseInsensitive)) {
+        appendLog(QStringLiteral("实体遥控器：%1 已被底盘/IMU/夹子电机占用，未连接").arg(port));
+        return false;
+    }
+
+    const auto profile =
+        crawling::RemotePlatformRegistry::instance().profile(m_remotePlatformId);
+    m_remoteMapper->setProfile(profile);
+    rebuildRemoteMonitor();
+    QString error;
+    if (!m_remoteReader->open(profile, port, &error)) {
+        appendLog(QStringLiteral("实体遥控器打开失败：%1").arg(error));
+        return false;
+    }
+    m_remotePortName = port;
+    if (m_remoteConnectButton) m_remoteConnectButton->setEnabled(false);
+    if (m_remoteDisconnectButton) m_remoteDisconnectButton->setEnabled(true);
+    if (m_remotePlatformCombo) m_remotePlatformCombo->setEnabled(false);
+    saveRemoteInputSettings();
+    appendLog(QStringLiteral("实体遥控器已连接 %1（平台 %2，只读监视，需勾选接管才驱动）")
+                  .arg(port, profile.displayName));
+    return true;
+}
+
+void RobotControlPanel::disconnectRemoteInput(const QString &reason)
+{
+    if (!m_remoteReader) return;
+    const bool wasOpen = m_remoteReader->isOpen();
+    m_remoteReader->close();
+    resetRemoteOutputs(reason);
+    if (m_remoteConnectButton) m_remoteConnectButton->setEnabled(true);
+    if (m_remoteDisconnectButton) m_remoteDisconnectButton->setEnabled(false);
+    if (m_remotePlatformCombo) m_remotePlatformCombo->setEnabled(true);
+    if (wasOpen)
+        appendLog(QStringLiteral("实体遥控器已断开（%1）").arg(reason));
+}
+
+void RobotControlPanel::resetRemoteOutputs(const QString &reason)
+{
+    if (m_forward || m_reverse || m_left || m_right) {
+        m_forward = m_reverse = m_left = m_right = false;
+        for (QPushButton *button :
+             {m_forwardButton, m_reverseButton, m_leftButton, m_rightButton}) {
+            if (button) button->setDown(false);
+        }
+        sendMotionCommand();
+    }
+    for (int axis = 0; axis < 3; ++axis)
+        if (m_clampControls) m_clampControls->applyExternalJogAxis(axis, 0);
+    if (m_remoteMapper) m_remoteMapper->reset();
+    appendLog(QStringLiteral("实体遥控器输出已归零（%1）").arg(reason));
+}
+
+void RobotControlPanel::applyRemoteDriveAxes(int linear, int angular)
+{
+    if (m_autoCorrectionActive || m_autoCorrectionStartPending) {
+        // 纠偏占用期间手动通道关闭：必须把标志清掉，否则纠偏停止后车会突然走。
+        if (m_forward || m_reverse || m_left || m_right)
+            resetRemoteOutputs(QStringLiteral("correction_active"));
+        return;
+    }
+    // 操作员正在按界面方向键（或已长按锁定）时以界面为准，摇杆不抢。
+    if (m_pressedJogButton || m_jogLatched) return;
+
+    const bool forward = linear > 0;
+    const bool reverse = linear < 0;
+    const bool left = angular < 0;
+    const bool right = angular > 0;
+    if (forward == m_forward && reverse == m_reverse && left == m_left &&
+        right == m_right)
+        return;
+
+    m_forward = forward;
+    m_reverse = reverse;
+    m_left = left;
+    m_right = right;
+    if (m_forwardButton) m_forwardButton->setDown(forward);
+    if (m_reverseButton) m_reverseButton->setDown(reverse);
+    if (m_leftButton) m_leftButton->setDown(left);
+    if (m_rightButton) m_rightButton->setDown(right);
+    sendMotionCommand();
+}
+
+void RobotControlPanel::applyRemoteMotorJog(int axis, int index, int percent)
+{
+    if (!m_clampControls) return;
+    if (!m_remoteMapper || !m_remoteMapper->armed()) percent = 0;
+    m_clampControls->applyExternalJog(axis, index, percent);
+}
+
+void RobotControlPanel::handleRemoteAction(int action)
+{
+    const auto kind = static_cast<crawling::RemoteAction>(action);
+    QString name;
+    switch (kind) {
+    case crawling::RemoteAction::Enable:
+        name = QStringLiteral("底盘使能");
+        if (m_enableButton) m_enableButton->click();
+        break;
+    case crawling::RemoteAction::StartCorrection:
+        name = QStringLiteral("启动自动纠偏");
+        if (m_autoCorrectionStart) m_autoCorrectionStart->click();
+        break;
+    case crawling::RemoteAction::StopCorrection:
+        name = QStringLiteral("停止自动纠偏");
+        if (m_autoCorrectionStop) m_autoCorrectionStop->click();
+        break;
+    case crawling::RemoteAction::PauseToggle:
+        name = QStringLiteral("暂停/继续");
+        if (m_stopMotionButton) m_stopMotionButton->click();
+        break;
+    case crawling::RemoteAction::EmergencyStop:
+        name = QStringLiteral("紧急停止");
+        emergencyStop();
+        break;
+    }
+    if (!name.isEmpty())
+        appendLog(QStringLiteral("实体遥控器按键触发：%1").arg(name));
+}
+
+void RobotControlPanel::loadRemoteInputSettings()
+{
+    QSettings settings(remoteInputSettingsFile(), QSettings::IniFormat);
+    const QString platformId =
+        settings.value(QStringLiteral("platform"), QStringLiteral("hc10pro")).toString();
+    const QString port = settings.value(QStringLiteral("port")).toString().trimmed();
+    const bool takeover = settings.value(QStringLiteral("takeover"), false).toBool();
+
+    m_remotePlatformId = platformId.isEmpty() ? QStringLiteral("hc10pro") : platformId;
+    if (!port.isEmpty()) m_remotePortName = port;
+
+    if (m_remoteMapper) {
+        const auto profile =
+            crawling::RemotePlatformRegistry::instance().profile(m_remotePlatformId);
+        if (m_remoteMapper->profile().id != profile.id)
+            m_remoteMapper->setProfile(profile);
+    }
+    refreshRemotePlatforms();
+    refreshRemotePorts();
+    if (!m_remoteTakeoverCheck) return;
+    {
+        const QSignalBlocker blocker(m_remoteTakeoverCheck);
+        m_remoteTakeoverCheck->setChecked(takeover);
+    }
+    if (m_remoteMapper) m_remoteMapper->setTakeoverEnabled(takeover);
+    rebuildRemoteMonitor();
+}
+
+void RobotControlPanel::saveRemoteInputSettings()
+{
+    QSettings settings(remoteInputSettingsFile(), QSettings::IniFormat);
+    settings.setValue(QStringLiteral("platform"), m_remotePlatformId);
+    if (m_remotePortCombo)
+        settings.setValue(QStringLiteral("port"),
+                          m_remotePortCombo->currentText().trimmed());
+    if (m_remoteTakeoverCheck)
+        settings.setValue(QStringLiteral("takeover"), m_remoteTakeoverCheck->isChecked());
+    settings.sync();
 }
 
 
