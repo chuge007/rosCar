@@ -30,4 +30,11 @@ QWidget *paramSliderField(QDoubleSpinBox *box, const QString &hint, QWidget *par
 void refreshParamSlider(QSpinBox *box);
 void refreshParamSlider(QDoubleSpinBox *box);
 
+// 设定滑轨的映射上限：数值框允许的最大值可以更大（键盘直接输入大数值），
+// 但滑轨只覆盖 [minimum, maximum] 这一段；数值超过该上限时滑块停在最右端，
+// 不会被压缩成「整个范围拖不动」的线性刻度。传 0 或超过数值框上限时恢复默认
+// （滑轨与数值框同范围）。
+void setParamSliderMaximum(QSpinBox *box, double maximum);
+void setParamSliderMaximum(QDoubleSpinBox *box, double maximum);
+
 } // namespace pa1664::ui

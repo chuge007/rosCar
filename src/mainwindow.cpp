@@ -1080,7 +1080,10 @@ void MainWindow::buildUi()
     mapBar->addWidget(new QLabel(QStringLiteral("精度")));
     m_cPrecision = new QDoubleSpinBox;
     // 精度是连续量，滑轨粗调 + 数值框精确输入。
+    // 数值框允许到 100000（超出 10 的精度只能键盘输入），滑轨只映射 0.01~10：
+    // 数值超过 10 时滑块停在最右端，避免整条刻度被 10 万压缩后 0~10 拖不动。
     m_cPrecision->setRange(0.01, 100000.0);
+    m_cPrecision->setSingleStep(0.01);
     m_cPrecision->setDecimals(2);
     m_cPrecision->setValue(m_groupEncoderPrecision.value(currentGroupId(), 1.0));
     m_cPrecision->setSuffix(QStringLiteral(" mm/格"));
@@ -1088,6 +1091,8 @@ void MainWindow::buildUi()
         "B 扫列和下方编码器路径的空间分辨率（毫米/格）。数值越小，空间采样越细。"));
     m_cPrecision->setMaximumWidth(120);
     auto *precisionField = pa1664::ui::paramSliderField(m_cPrecision);
+    // 滑轨只覆盖常规精度段，大数值靠输入框直接敲。
+    pa1664::ui::setParamSliderMaximum(m_cPrecision, 10.0);
     precisionField->setMinimumWidth(210);
     mapBar->addWidget(precisionField);
     mapBar->addWidget(m_bViewButton);

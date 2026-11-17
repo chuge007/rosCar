@@ -28,6 +28,9 @@ struct SpinRange
 {
     double minimum = 0.0;
     double maximum = 0.0;
+    // 滑轨实际映射到的上限。数值框允许更大范围，但滑轨只覆盖
+    // [minimum, sliderMaximum]；超出部分滑块停在最右端。
+    double sliderMaximum = 0.0;
     int decimals = 0;
     bool integer = true;
 };
@@ -45,12 +48,19 @@ SpinRange rangeOf(const QAbstractSpinBox *box)
         range.decimals = spin->decimals();
         range.integer = false;
     }
+    range.sliderMaximum = range.maximum;
+    const QVariant capped = box->property("paramSliderMaximum");
+    if (capped.isValid()) {
+        const double value = capped.toDouble();
+        if (value > range.minimum && value < range.maximum)
+            range.sliderMaximum = value;
+    }
     return range;
 }
 
 int sliderSteps(const SpinRange &range)
 {
-    const double span = range.maximum - range.minimum;
+    const double span = range.sliderMaximum - range.minimum;
     if (!(span > 0.0))
         return 0;
     if (range.integer)
@@ -68,7 +78,7 @@ double valueAt(const SpinRange &range, int steps, int position)
 {
     if (steps <= 0)
         return range.minimum;
-    const double span = range.maximum - range.minimum;
+    const double span = range.sliderMaximum - range.minimum;
     return range.minimum + span * double(position) / double(steps);
 }
 
@@ -76,9 +86,11 @@ int positionOf(const SpinRange &range, int steps, double value)
 {
     if (steps <= 0)
         return 0;
-    const double span = range.maximum - range.minimum;
+    const double span = range.sliderMaximum - range.minimum;
     if (!(span > 0.0))
         return 0;
+    // 数值超过滑轨上限时 ratio > 1，夹到最右端（滑块拉满），
+    // 而不是把整条刻度按数值框的极值压缩。
     const double ratio = (value - range.minimum) / span;
     return int(std::lround(qBound(0.0, ratio, 1.0) * double(steps)));
 }
@@ -286,6 +298,22 @@ void refreshParamSlider(QDoubleSpinBox *box)
 {
     if (box)
         updateBounds(box, sliderOf(box));
+}
+
+void setParamSliderMaximum(QSpinBox *box, double maximum)
+{
+    if (!box)
+        return;
+    box->setProperty("paramSliderMaximum", maximum);
+    updateBounds(box, sliderOf(box));
+}
+
+void setParamSliderMaximum(QDoubleSpinBox *box, double maximum)
+{
+    if (!box)
+        return;
+    box->setProperty("paramSliderMaximum", maximum);
+    updateBounds(box, sliderOf(box));
 }
 
 } // namespace pa1664::ui
