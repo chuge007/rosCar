@@ -2,6 +2,7 @@
 #include "clamp_motor_controller.h"
 #include "candle_can_adapter.h"
 #include "pcan_can_adapter.h"
+#include "sliderinput.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -154,7 +155,8 @@ ClampMotorSettingsWidget::ClampMotorSettingsWidget(QWidget* parent) : QWidget(pa
     auto* countForm = new QFormLayout;
     counts_[axis] = new QSpinBox;
     counts_[axis]->setRange(0, DriveSettings::kMaximumClampMotorsPerAxis);
-    countForm->addRow(QStringLiteral("电机数量"), counts_[axis]);
+    countForm->addRow(QStringLiteral("电机数量"),
+                      SliderInput::wrap(counts_[axis]));
     column->addLayout(countForm);
     tabs_[axis] = new QTabWidget;
     tabs_[axis]->setObjectName(QStringLiteral("clampMotorTabs"));
@@ -316,7 +318,7 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->mode->setCurrentIndex(f->mode->findData(clampModeKey(motor.communicationMode)));
   f->form->addRow(QStringLiteral("通信方式"), f->mode);
   f->id = new QSpinBox;
-  f->form->addRow(QStringLiteral("电机 ID"), f->id);
+  f->form->addRow(QStringLiteral("电机 ID"), SliderInput::wrap(f->id));
   f->alias = new QLineEdit;
   f->alias->setPlaceholderText(QStringLiteral("可选，主控页面显示此名称"));
   f->alias->setText(motor.alias);
@@ -327,7 +329,7 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->gearRatio->setSuffix(QStringLiteral(" mm/圈"));
   f->gearRatio->setValue(motor.gearRatio);
   f->gearRatio->setToolTip(QStringLiteral("电机转一圈，探头实际移动的距离"));
-  f->form->addRow(QStringLiteral("传动比"), f->gearRatio);
+  f->form->addRow(QStringLiteral("传动比"), SliderInput::wrap(f->gearRatio));
   auto* limitRow = new QHBoxLayout;
   f->recordUpper = new QPushButton(QStringLiteral("记录上限位"));
   f->recordLower = new QPushButton(QStringLiteral("记录下限位"));
@@ -380,9 +382,9 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->maximumRpm = new QSpinBox;
   f->maximumRpm->setRange(1, 3000);
   f->maximumRpm->setSuffix(QStringLiteral(" RPM"));
-  zdtForm->addRow(QStringLiteral("100% 对应转速"), f->maximumRpm);
+  zdtForm->addRow(QStringLiteral("100% 对应转速"), SliderInput::wrap(f->maximumRpm));
   f->acceleration = new QSpinBox;
-  zdtForm->addRow(QStringLiteral("加速度"), f->acceleration);
+  zdtForm->addRow(QStringLiteral("加速度"), SliderInput::wrap(f->acceleration));
   auto* note = new QLabel(QStringLiteral(
       "驱动器需设置 CAN、自由协议及固定校验 6B，使用 PCAN、candleLight（candle0 等）"
       "或支持扩展帧的 SLCAN 适配器。请先关闭占用通道的其他控制程序。"

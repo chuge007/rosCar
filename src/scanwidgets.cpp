@@ -13,6 +13,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QtMath>
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <limits>
@@ -51,6 +52,79 @@ QColor waveColor(double normalized)
     return QColor::fromHsvF(float(hue),
                             float(normalized > 0.02 ? 0.92 : 0.0),
                             float(normalized > 0.02 ? 0.95 : 1.0));
+}
+
+// B/E 扫共用的阈值分段默认值：由低到高依次为深蓝、天蓝、绿、黄、红。
+QVector<ScanPalette::ThresholdColorBand> scanDefaultThresholdBands()
+{
+    return {
+        {0.00, 0.20, QColor(0, 18, 110)},
+        {0.20, 0.40, QColor(0, 150, 255)},
+        {0.40, 0.60, QColor(45, 210, 120)},
+        {0.60, 0.80, QColor(255, 220, 30)},
+        {0.80, 1.00, QColor(230, 45, 35)}
+    };
+}
+
+// 丢弃退化区间并按下限排序，保证查色时区间不重叠、可二分推进。
+QVector<ScanPalette::ThresholdColorBand> sanitizeThresholdBands(
+    int valueMode, const QVector<ScanPalette::ThresholdColorBand> &bands)
+{
+    QVector<ScanPalette::ThresholdColorBand> normalizedBands;
+    normalizedBands.reserve(bands.size());
+    for (ScanPalette::ThresholdColorBand band : bands) {
+        if (valueMode == ScanPalette::PercentageThresholdValues) {
+            band.lower = qBound(0.0, band.lower, 1.0);
+            band.upper = qBound(0.0, band.upper, 1.0);
+        } else {
+            band.lower = qMax(0.0, band.lower);
+            band.upper = qMax(0.0, band.upper);
+        }
+        if (band.upper < band.lower)
+            qSwap(band.lower, band.upper);
+        if (band.upper - band.lower < 0.000001 || !band.color.isValid())
+            continue;
+        normalizedBands.append(band);
+    }
+    std::sort(normalizedBands.begin(), normalizedBands.end(),
+              [](const ScanPalette::ThresholdColorBand &l,
+                 const ScanPalette::ThresholdColorBand &r) {
+        if (!qFuzzyCompare(l.lower + 1.0, r.lower + 1.0))
+            return l.lower < r.lower;
+        return l.upper < r.upper;
+    });
+    return normalizedBands.isEmpty() ? scanDefaultThresholdBands()
+                                     : normalizedBands;
+}
+
+// 落在某段内取该段颜色；落在所有分段之外时取水平距离最近的分段颜色。
+QColor thresholdBandColorFor(const QVector<ScanPalette::ThresholdColorBand> &bands,
+                             double value)
+{
+    if (bands.isEmpty())
+        return Qt::black;
+    for (int index = 0; index < bands.size(); ++index) {
+        const ScanPalette::ThresholdColorBand &band = bands.at(index);
+        const bool lastBand = index == bands.size() - 1;
+        if (value >= band.lower && (value < band.upper || (lastBand && value <= band.upper)))
+            return band.color;
+    }
+    const ScanPalette::ThresholdColorBand &first = bands.first();
+    const ScanPalette::ThresholdColorBand &last = bands.last();
+    if (value < first.lower)
+        return first.color;
+    if (value > last.upper)
+        return last.color;
+    QColor nearestColor = Qt::black;
+    double nearestDistance = std::numeric_limits<double>::max();
+    for (const ScanPalette::ThresholdColorBand &band : bands) {
+        const double distance = value < band.lower ? band.lower - value : value - band.upper;
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestColor = band.color;
+        }
+    }
+    return nearestColor;
 }
 
 QRectF depthPlotRect(const QWidget *w, qreal leftMargin, qreal rightMargin)
@@ -1042,9 +1116,69 @@ void EScanWidget::setImagingGate(bool enabled, double start, double end,
 
 void EScanWidget::setPaletteMode(int mode)
 {
-    m_paletteMode = qBound(int(HeatPalette), mode, int(RfPalette));
+    m_paletteMode = qBound(int(HeatPalette), mode, int(CustomPalette));
     rebuildColorTable();
     update();
+}
+
+void EScanWidget::setPaletteSettings(int mode, double lowerPercent,
+                                     double upperPercent, double gamma)
+{
+    m_paletteMode = qBound(int(HeatPalette), mode, int(CustomPalette));
+    m_displayLower = qBound(0.0, lowerPercent / 100.0, 0.99);
+    m_displayUpper = qBound(m_displayLower + 0.01,
+                            upperPercent / 100.0, 1.0);
+    m_displayGamma = qBound(0.2, gamma, 3.0);
+    rebuildColorTable();
+    update();
+}
+
+void EScanWidget::setCustomPalette(const QColor &startColor,
+                                   const QColor &endColor)
+{
+    m_paletteMode = CustomPalette;
+    m_customPaletteStart = startColor.isValid() ? startColor : QColor(0, 8, 70);
+    m_customPaletteEnd = endColor.isValid() ? endColor : QColor(255, 255, 255);
+    rebuildColorTable();
+    update();
+}
+
+void EScanWidget::setThresholdColorSettings(
+    int mode, const QVector<ScanPalette::ThresholdColorBand> &bands,
+    int valueMode)
+{
+    m_colorRuleMode = mode == ScanPalette::ThresholdBandsColorRule
+        ? ScanPalette::ThresholdBandsColorRule : ScanPalette::ContinuousColorRule;
+    m_thresholdValueMode = valueMode == ScanPalette::AbsoluteThresholdValues
+        ? ScanPalette::AbsoluteThresholdValues : ScanPalette::PercentageThresholdValues;
+    m_thresholdBands = sanitizeThresholdBands(m_thresholdValueMode, bands);
+    rebuildColorTable();
+    update();
+}
+
+int EScanWidget::colorRuleMode() const
+{
+    return m_colorRuleMode;
+}
+
+QVector<ScanPalette::ThresholdColorBand> EScanWidget::thresholdColorBands() const
+{
+    return m_thresholdBands;
+}
+
+int EScanWidget::thresholdValueMode() const
+{
+    return m_thresholdValueMode;
+}
+
+QVector<ScanPalette::ThresholdColorBand> EScanWidget::defaultThresholdColorBands()
+{
+    return scanDefaultThresholdBands();
+}
+
+QColor EScanWidget::thresholdBandColor(double value) const
+{
+    return thresholdBandColorFor(m_thresholdBands, value);
 }
 
 void EScanWidget::setDepthCursor(double depth, bool visible)
@@ -1070,10 +1204,31 @@ void EScanWidget::rebuildColorTable()
         return;
     QVector<QRgb> palette(256);
     for (int i = 0; i < palette.size(); ++i) {
-        if (m_paletteMode == HeatPalette)
-            palette[i] = waveColor(double(i) / 255.0).rgb();
-        else
-            palette[i] = QColor(i, i, i).rgb();
+        double normalized = double(i) / 255.0;
+        if (m_colorRuleMode == ScanPalette::ThresholdBandsColorRule) {
+            const double value = m_thresholdValueMode == ScanPalette::AbsoluteThresholdValues
+                ? normalized * 100.0 : normalized;
+            palette[i] = thresholdBandColor(value).rgb();
+            continue;
+        }
+        normalized = qBound(0.0, (normalized - m_displayLower)
+                                  / qMax(0.01, m_displayUpper - m_displayLower), 1.0);
+        normalized = qPow(normalized, 1.0 / m_displayGamma);
+        if (m_paletteMode == HeatPalette) {
+            palette[i] = waveColor(normalized).rgb();
+        } else if (m_paletteMode == CustomPalette) {
+            palette[i] = QColor(
+                qRound(m_customPaletteStart.red()
+                       + (m_customPaletteEnd.red() - m_customPaletteStart.red()) * normalized),
+                qRound(m_customPaletteStart.green()
+                       + (m_customPaletteEnd.green() - m_customPaletteStart.green()) * normalized),
+                qRound(m_customPaletteStart.blue()
+                       + (m_customPaletteEnd.blue() - m_customPaletteStart.blue()) * normalized)).rgb();
+        } else {
+            // E 扫解码后只保留幅值，不保留正负极性；RF 模式在此按灰度显示。
+            const int gray = qRound(normalized * 255.0);
+            palette[i] = QColor(gray, gray, gray).rgb();
+        }
     }
     m_image.setColorTable(palette);
 }
@@ -1234,7 +1389,18 @@ void BScanWidget::setViewMode(int mode)
 
 void BScanWidget::setPaletteMode(int mode)
 {
-    m_paletteMode = qBound(int(HeatPalette), mode, int(RfPalette));
+    m_paletteMode = qBound(int(HeatPalette), mode, int(CustomPalette));
+    rebuildColorTable();
+    rebuildImage();
+    update();
+}
+
+void BScanWidget::setCustomPalette(const QColor &startColor,
+                                   const QColor &endColor)
+{
+    m_paletteMode = CustomPalette;
+    m_customPaletteStart = startColor.isValid() ? startColor : QColor(0, 8, 70);
+    m_customPaletteEnd = endColor.isValid() ? endColor : QColor(255, 255, 255);
     rebuildColorTable();
     rebuildImage();
     update();
@@ -1245,6 +1411,53 @@ void BScanWidget::setScaleMode(int mode)
     m_scaleMode = mode == DynamicScale ? DynamicScale : FixedFullScale;
     rebuildImage();
     update();
+}
+
+void BScanWidget::setFixedScaleMaximum(double percent)
+{
+    m_fixedScaleMaximum = qBound(0.0001, percent / 100.0, 1.0);
+    if (m_scaleMode == FixedFullScale)
+        rebuildImage();
+    update();
+}
+
+void BScanWidget::setThresholdColorSettings(
+    int mode, const QVector<ScanPalette::ThresholdColorBand> &bands,
+    int valueMode)
+{
+    m_colorRuleMode = mode == ScanPalette::ThresholdBandsColorRule
+        ? ScanPalette::ThresholdBandsColorRule : ScanPalette::ContinuousColorRule;
+    m_thresholdValueMode = valueMode == ScanPalette::AbsoluteThresholdValues
+        ? ScanPalette::AbsoluteThresholdValues : ScanPalette::PercentageThresholdValues;
+    m_thresholdBands = sanitizeThresholdBands(m_thresholdValueMode, bands);
+    rebuildColorTable();
+    rebuildImage();
+    update();
+}
+
+int BScanWidget::colorRuleMode() const
+{
+    return m_colorRuleMode;
+}
+
+QVector<ScanPalette::ThresholdColorBand> BScanWidget::thresholdColorBands() const
+{
+    return m_thresholdBands;
+}
+
+int BScanWidget::thresholdValueMode() const
+{
+    return m_thresholdValueMode;
+}
+
+QVector<ScanPalette::ThresholdColorBand> BScanWidget::defaultThresholdColorBands()
+{
+    return scanDefaultThresholdBands();
+}
+
+QColor BScanWidget::thresholdBandColor(double value) const
+{
+    return thresholdBandColorFor(m_thresholdBands, value);
 }
 
 void BScanWidget::setDisplayLevels(double lowerPercent, double upperPercent,
@@ -1651,6 +1864,13 @@ void BScanWidget::rebuildColorTable()
         return;
     QVector<QRgb> palette(256);
     for (int i = 0; i < 256; ++i) {
+        if (m_colorRuleMode == ScanPalette::ThresholdBandsColorRule) {
+            const double normalized = double(i) / 255.0;
+            const double value = m_thresholdValueMode == ScanPalette::AbsoluteThresholdValues
+                ? normalized * 100.0 : normalized;
+            palette[i] = thresholdBandColor(value).rgb();
+            continue;
+        }
         if (m_paletteMode == GrayscalePalette) {
             // 灰度：幅值越低越黑、越高越白（索引 0=空/低幅值，255=高幅值）。
             const int gray = i;
@@ -1661,6 +1881,15 @@ void BScanWidget::rebuildColorTable()
             palette[i] = (signedValue < 0.0
                 ? QColor::fromRgbF(1.0 - magnitude, 1.0 - magnitude, 1.0)
                 : QColor::fromRgbF(1.0, 1.0 - magnitude, 1.0 - magnitude)).rgb();
+        } else if (m_paletteMode == CustomPalette) {
+            const double normalized = double(i) / 255.0;
+            palette[i] = QColor(
+                qRound(m_customPaletteStart.red()
+                       + (m_customPaletteEnd.red() - m_customPaletteStart.red()) * normalized),
+                qRound(m_customPaletteStart.green()
+                       + (m_customPaletteEnd.green() - m_customPaletteStart.green()) * normalized),
+                qRound(m_customPaletteStart.blue()
+                       + (m_customPaletteEnd.blue() - m_customPaletteStart.blue()) * normalized)).rgb();
         } else {
             palette[i] = waveColor(double(i) / 255.0).rgb();
         }
@@ -1680,7 +1909,7 @@ void BScanWidget::rebuildColumn(int column)
         return;
 
     const double scaleMaximum = m_scaleMode == DynamicScale
-        ? qMax(0.000001, m_dynamicMaximum) : 1.0;
+        ? qMax(0.000001, m_dynamicMaximum) : m_fixedScaleMaximum;
     const double levelSpan = qMax(0.01, m_displayUpper - m_displayLower);
     if (m_viewMode == ProfileView) {
         double rawAmplitude = 0.0;
@@ -1704,6 +1933,12 @@ void BScanWidget::rebuildColumn(int column)
         if (rawMagnitude < m_displayReject)
             continue;
         double normalized = qBound(0.0, rawMagnitude / scaleMaximum, 1.0);
+        if (m_colorRuleMode == ScanPalette::ThresholdBandsColorRule) {
+            // 阈值分段：直接按显示值映射到分段颜色，跳过上下限/中间调节与 RF 极性。
+            const int index = qBound(0, qRound(normalized * 255.0), 255);
+            m_image.scanLine(y)[column] = uchar(index);
+            continue;
+        }
         normalized = qBound(0.0, (normalized - m_displayLower) / levelSpan, 1.0);
         normalized = qPow(normalized, 1.0 / m_displayGamma);
         int index = qBound(0, qRound(normalized * 255.0), 255);
@@ -1954,7 +2189,7 @@ void BScanWidget::paintEvent(QPaintEvent *)
         p.setPen(QColor("#52606d"));
         p.drawRect(colorBar);
         const double scaleMaximum = (m_scaleMode == DynamicScale
-                                     ? m_dynamicMaximum : 1.0) * 100.0;
+                                     ? m_dynamicMaximum : m_fixedScaleMaximum) * 100.0;
         p.drawText(QRect(colorBar.right() + 2, colorBar.top() - 6, 30, 18),
                    Qt::AlignLeft | Qt::AlignVCenter,
                    QString::number(scaleMaximum, 'f', 0) + "%");

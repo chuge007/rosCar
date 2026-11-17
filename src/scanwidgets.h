@@ -1,6 +1,8 @@
 #pragma once
 
 #include "packetdecoder.h"
+#include "scanpalette.h"
+#include <QColor>
 #include <QElapsedTimer>
 #include <QImage>
 #include <QHash>
@@ -108,13 +110,28 @@ class EScanWidget : public QWidget
 {
     Q_OBJECT
 public:
-    enum PaletteMode { HeatPalette = 0, GrayscalePalette = 1, RfPalette = 2 };
+    enum PaletteMode {
+        HeatPalette = 0,
+        GrayscalePalette = 1,
+        RfPalette = 2,
+        CustomPalette = 3
+    };
 
     explicit EScanWidget(QWidget *parent = nullptr);
     void setFrame(const DecodedFrame &frame, double scale);
     void setImagingGate(bool enabled, double start, double end,
                         double rangeStart, double rangeEnd);
     void setPaletteMode(int mode);
+    void setPaletteSettings(int mode, double lowerPercent,
+                            double upperPercent, double gamma);
+    void setCustomPalette(const QColor &startColor, const QColor &endColor);
+    void setThresholdColorSettings(int mode,
+                                   const QVector<ScanPalette::ThresholdColorBand> &bands,
+                                   int valueMode = ScanPalette::PercentageThresholdValues);
+    int colorRuleMode() const;
+    QVector<ScanPalette::ThresholdColorBand> thresholdColorBands() const;
+    int thresholdValueMode() const;
+    static QVector<ScanPalette::ThresholdColorBand> defaultThresholdColorBands();
     void setDepthCursor(double depth, bool visible);
 
 signals:
@@ -128,6 +145,7 @@ protected:
 private:
     QRectF imageTargetRect() const;
     void rebuildColorTable();
+    QColor thresholdBandColor(double value) const;
 
     QImage m_image;
     bool m_gateEnabled = true;
@@ -136,6 +154,14 @@ private:
     double m_rangeStart = 0.0;
     double m_rangeEnd = 50.0;
     int m_paletteMode = GrayscalePalette;
+    double m_displayLower = 0.0;
+    double m_displayUpper = 1.0;
+    double m_displayGamma = 1.0;
+    QColor m_customPaletteStart = QColor(0, 8, 70);
+    QColor m_customPaletteEnd = QColor(255, 255, 255);
+    int m_colorRuleMode = ScanPalette::ContinuousColorRule;
+    QVector<ScanPalette::ThresholdColorBand> m_thresholdBands;
+    int m_thresholdValueMode = ScanPalette::PercentageThresholdValues;
     double m_depthCursor = 0.0;
     bool m_depthCursorVisible = false;
 };
@@ -145,7 +171,12 @@ class BScanWidget : public QWidget
     Q_OBJECT
 public:
     enum ViewMode { AmplitudeView = 0, ProfileView = 1 };
-    enum PaletteMode { HeatPalette = 0, GrayscalePalette = 1, RfPalette = 2 };
+    enum PaletteMode {
+        HeatPalette = 0,
+        GrayscalePalette = 1,
+        RfPalette = 2,
+        CustomPalette = 3
+    };
     enum ScaleMode { FixedFullScale = 0, DynamicScale = 1 };
 
     explicit BScanWidget(QWidget *parent = nullptr);
@@ -168,10 +199,19 @@ public:
                             bool alignSelectedGate);
     void setViewMode(int mode);
     void setPaletteMode(int mode);
+    void setCustomPalette(const QColor &startColor, const QColor &endColor);
     void setScaleMode(int mode);
+    void setFixedScaleMaximum(double percent);
     void setDisplayLevels(double lowerPercent, double upperPercent, double gamma);
     void setDisplayReject(double percent);
     void setInterpolateMissing(bool enabled);
+    void setThresholdColorSettings(int mode,
+                                   const QVector<ScanPalette::ThresholdColorBand> &bands,
+                                   int valueMode = ScanPalette::PercentageThresholdValues);
+    int colorRuleMode() const;
+    QVector<ScanPalette::ThresholdColorBand> thresholdColorBands() const;
+    int thresholdValueMode() const;
+    static QVector<ScanPalette::ThresholdColorBand> defaultThresholdColorBands();
     void setDepthCursor(double depth, bool visible);
     void showEncoderCell(int encoderCellA);
     void resetView();
@@ -215,6 +255,7 @@ private:
     void rebuildImage();
     void rebuildColumn(int column);
     void rebuildColorTable();
+    QColor thresholdBandColor(double value) const;
     double normalizedMagnitude(const ColumnData &column, int row) const;
     int sourceRowForDisplay(const ColumnData &column, int displayRow) const;
     int profileRow(const ColumnData &column, double *amplitude = nullptr) const;
@@ -250,12 +291,18 @@ private:
     int m_viewMode = AmplitudeView;
     int m_paletteMode = GrayscalePalette;
     int m_scaleMode = FixedFullScale;
+    double m_fixedScaleMaximum = 1.0;
+    QColor m_customPaletteStart = QColor(0, 8, 70);
+    QColor m_customPaletteEnd = QColor(255, 255, 255);
     double m_displayLower = 0.0;
     double m_displayUpper = 1.0;
     double m_displayGamma = 1.0;
     double m_displayReject = 0.0;
     double m_dynamicMaximum = 1.0;
     bool m_interpolateMissing = false;
+    int m_colorRuleMode = ScanPalette::ContinuousColorRule;
+    QVector<ScanPalette::ThresholdColorBand> m_thresholdBands;
+    int m_thresholdValueMode = ScanPalette::PercentageThresholdValues;
     int m_acquiredColumns = 0;
     int m_interpolatedColumns = 0;
     int m_gapColumns = 0;

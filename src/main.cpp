@@ -6,6 +6,7 @@
 #include "usbbootstrap.h"
 
 #include <QApplication>
+#include <QColor>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDebug>
@@ -15,8 +16,11 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPalette>
 #include <QRegularExpression>
 #include <QSet>
+#include <QStyle>
+#include <QStyleFactory>
 #include <QTimer>
 #include <cstdio>
 #include <memory>
@@ -313,15 +317,49 @@ int main(int argc, char *argv[])
         });
         return app.exec();
     }
+    // 系统深色模式下 Qt 会跟随深色调色板，未在样式表里显式配色控件（标签页、分组框、
+    // 菜单、列表、滚动区、提示）就会变成黑底；而输入框又被下面的样式表强制成白底，
+    // 于是出现「黑底白框」。这里固定一套浅色调色板（配 Fusion，Windows 原生风格不完全
+    // 响应 palette），让整个界面与既有浅色样式表保持一致。
+    if (QStyle *fusionStyle = QStyleFactory::create(QStringLiteral("Fusion")))
+        QApplication::setStyle(fusionStyle);
+    QPalette lightPalette;
+    lightPalette.setColor(QPalette::Window, QColor(0xf2, 0xf5, 0xf9));
+    lightPalette.setColor(QPalette::WindowText, QColor(0x1f, 0x2b, 0x36));
+    lightPalette.setColor(QPalette::Base, QColor(0xff, 0xff, 0xff));
+    lightPalette.setColor(QPalette::AlternateBase, QColor(0xf5, 0xf8, 0xfb));
+    lightPalette.setColor(QPalette::Text, QColor(0x1f, 0x2b, 0x36));
+    lightPalette.setColor(QPalette::Button, QColor(0xe8, 0xee, 0xf5));
+    lightPalette.setColor(QPalette::ButtonText, QColor(0x1f, 0x2b, 0x36));
+    lightPalette.setColor(QPalette::BrightText, QColor(0xb4, 0x23, 0x18));
+    lightPalette.setColor(QPalette::Highlight, QColor(0x26, 0x84, 0xc7));
+    lightPalette.setColor(QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
+    lightPalette.setColor(QPalette::ToolTipBase, QColor(0xff, 0xff, 0xff));
+    lightPalette.setColor(QPalette::ToolTipText, QColor(0x1f, 0x2b, 0x36));
+    lightPalette.setColor(QPalette::PlaceholderText, QColor(0x8a, 0x94, 0xa6));
+    lightPalette.setColor(QPalette::Disabled, QPalette::Text, QColor(0x9a, 0xa5, 0xaf));
+    lightPalette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(0x9a, 0xa5, 0xaf));
+    lightPalette.setColor(QPalette::Disabled, QPalette::WindowText, QColor(0x9a, 0xa5, 0xaf));
+    app.setPalette(lightPalette);
+
     app.setStyleSheet(R"(
         QWidget { font-family: "Microsoft YaHei UI"; font-size: 13px; }
         QPushButton { min-height: 30px; padding: 2px 10px; border: 1px solid #b9c5d0; border-radius: 5px; background: #f8fafc; }
         QPushButton:hover { background: #eaf4ff; border-color: #2684c7; }
         QPushButton:disabled { color: #9aa5af; background: #eef1f4; }
-        QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { min-height: 28px; border: 1px solid #b9c5d0; border-radius: 4px; background: white; }
-        QTabWidget::pane { border: 1px solid #cbd5df; }
-        QTabBar::tab { padding: 8px 14px; }
-        QTabBar::tab:selected { color: #087dcc; font-weight: 600; }
+        QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { min-height: 28px; border: 1px solid #b9c5d0; border-radius: 4px; background: white; color: #1f2b36; }
+        QTabWidget::pane { border: 1px solid #cbd5df; background: #ffffff; top: -1px; }
+        QTabBar::tab { padding: 8px 14px; background: #e6edf5; color: #243b53;
+                       border: 1px solid #cbd5df; border-bottom: none;
+                       border-top-left-radius: 5px; border-top-right-radius: 5px;
+                       margin-right: 2px; }
+        QTabBar::tab:hover { background: #d9e7f4; }
+        QTabBar::tab:selected { background: #ffffff; color: #087dcc; font-weight: 600; }
+        QGroupBox { border: 1px solid #cbd5df; border-radius: 6px; margin-top: 10px; padding-top: 6px; }
+        QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #243b53; }
+        QMenu { background: #ffffff; border: 1px solid #b9c5d0; }
+        QMenu::item:selected { background: #d8ebfb; color: #0b3a5d; }
+        QToolTip { background: #ffffff; color: #1f2b36; border: 1px solid #b9c5d0; }
     )");
     if (app.arguments().contains("--channel-ui-test")) {
         ParameterPanel panel;

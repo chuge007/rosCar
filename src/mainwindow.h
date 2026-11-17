@@ -2,6 +2,8 @@
 
 #include "framedecoderworker.h"
 #include "rawpacket.h"
+#include "scanpalette.h"
+#include <QColor>
 #include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
@@ -75,6 +77,8 @@ private:
     void applyScreenLayout();
     void buildUi();
     void buildMenus();
+    void showPaletteDialog();
+    void applyPaletteSettings();
     void showMessage(const QString &text, bool error);
     void renderCurrentFrame(bool newlyAcquired);
     void updateDecoderSettings();
@@ -141,14 +145,21 @@ private:
     QSpinBox *m_deviceId = nullptr;
     QSpinBox *m_beam = nullptr;
     QDoubleSpinBox *m_cPrecision = nullptr;
-    QComboBox *m_bViewMode = nullptr;
-    QComboBox *m_bPaletteMode = nullptr;
-    QComboBox *m_bScaleMode = nullptr;
-    QDoubleSpinBox *m_bDisplayReject = nullptr;
-    QDoubleSpinBox *m_bDisplayLower = nullptr;
-    QDoubleSpinBox *m_bDisplayUpper = nullptr;
-    QDoubleSpinBox *m_bGamma = nullptr;
-    QCheckBox *m_bInterpolateMissing = nullptr;
+    // B 扫显示状态。原「配置」下拉菜单已并入「调色盘」对话框，这里只留值。
+    int m_bViewModeValue = 0;            // BScanWidget::AmplitudeView
+    double m_bDisplayRejectValue = 0.0;  // 显示低切，百分比
+    bool m_bInterpolateMissingValue = false;
+    // 调色盘状态。
+    int m_paletteMode = 1;       // 默认灰度
+    int m_paletteScaleMode = 0;  // BScanWidget::FixedFullScale
+    double m_paletteFixedMaximum = 100.0;
+    double m_paletteLower = 0.0;
+    double m_paletteUpper = 100.0;
+    double m_paletteGamma = 1.0;
+    QColor m_customPaletteStart = QColor(0, 8, 70);
+    QColor m_customPaletteEnd = QColor(255, 255, 255);
+    int m_colorRuleMode = ScanPalette::ContinuousColorRule;
+    QVector<ScanPalette::ThresholdColorBand> m_thresholdBands;
     QLabel *m_serviceStatus = nullptr;
     QLabel *m_hardwareStatus = nullptr;
     QLabel *m_groupStatus = nullptr;

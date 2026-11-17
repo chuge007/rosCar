@@ -3,6 +3,7 @@
 #include "client.h"
 #include "parameterpresetstore.h"
 #include "pulseloadguard.h"
+#include "sliderinput.h"
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -358,7 +359,8 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     m_wheelDiameter->setValue(500.0);
     m_wheelDiameter->setSuffix(QStringLiteral(" mm"));
     m_wheelDiameter->setKeyboardTracking(false);
-    other->addRow(QStringLiteral("编码器轮子直径"), m_wheelDiameter);
+    other->addRow(QStringLiteral("编码器轮子直径"),
+                  SliderInput::wrap(m_wheelDiameter));
     connect(m_wheelDiameter, &QDoubleSpinBox::valueChanged,
             this, [this] {
         updateEncoderCalibrationSummary();
@@ -369,7 +371,8 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     m_encoderResolution->setValue(4096);
     m_encoderResolution->setSuffix(QStringLiteral(" 计数/圈"));
     m_encoderResolution->setKeyboardTracking(false);
-    other->addRow(QStringLiteral("编码器有效计数/圈"), m_encoderResolution);
+    other->addRow(QStringLiteral("编码器有效计数/圈"),
+                  SliderInput::wrap(m_encoderResolution));
     connect(m_encoderResolution, &QSpinBox::valueChanged,
             this, [this] {
         updateEncoderCalibrationSummary();
@@ -421,7 +424,8 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     m_encoderDebugDistance->setValue(1000.0);
     m_encoderDebugDistance->setSuffix(QStringLiteral(" mm"));
     m_encoderDebugDistance->setKeyboardTracking(false);
-    debugForm->addRow(QStringLiteral("实际移动距离"), m_encoderDebugDistance);
+    debugForm->addRow(QStringLiteral("实际移动距离"),
+                      SliderInput::wrap(m_encoderDebugDistance));
     m_encoderDebugStartLabel = new QLabel(QStringLiteral("--"));
     debugForm->addRow(QStringLiteral("起点计数"), m_encoderDebugStartLabel);
     m_encoderDebugResult = new QLabel(QStringLiteral("请先记录起点"));
@@ -533,6 +537,11 @@ QWidget *ParameterPanel::pageFor(QFormLayout *form)
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidget(body);
+    // 系统深色主题下滚动区会露出深色窗口底，而输入框被全局样式表强制成白色，
+    // 两者叠在一起就是「黑底白框」。参数页统一铺浅色底，只作用于滚动区与 viewport。
+    scroll->setStyleSheet(QStringLiteral(
+        "QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget"
+        " { background:#f7f9fc; }"));
     return scroll;
 }
 
@@ -543,7 +552,7 @@ void ParameterPanel::addDouble(QFormLayout *form, const QString &name, double mi
     auto *w = new QDoubleSpinBox;
     w->setProperty("parameterName", name);
     w->setRange(min, max); w->setDecimals(decimals); w->setSuffix(suffix); w->setKeyboardTracking(false);
-    form->addRow(name, w);
+    form->addRow(name, SliderInput::wrap(w));
     m_fields.push_back({name, w, [getter] { return getter(); }, [setter](const QVariant &v) { return setter(v.toDouble()); }, {}});
     connect(w, &QDoubleSpinBox::valueChanged, this, &ParameterPanel::scheduleAutoApply);
 }
@@ -555,7 +564,7 @@ void ParameterPanel::addInt(QFormLayout *form, const QString &name, int min, int
     auto *w = new QSpinBox;
     w->setProperty("parameterName", name);
     w->setRange(min, max); w->setSuffix(suffix); w->setKeyboardTracking(false);
-    form->addRow(name, w);
+    form->addRow(name, SliderInput::wrap(w));
     m_fields.push_back({name, w, [getter] { return getter(); }, [setter](const QVariant &v) { return setter(v.toInt()); }, {}});
     connect(w, &QSpinBox::valueChanged, this, &ParameterPanel::scheduleAutoApply);
 }
@@ -693,9 +702,12 @@ void ParameterPanel::addGateTab(QTabWidget *tabs)
     m_surfaceHold = new QCheckBox(QStringLiteral("漏检时保持上一有效表面"));
     m_surfaceHold->setChecked(true);
     surfaceForm->addRow(m_surfaceEnabled);
-    surfaceForm->addRow(QStringLiteral("搜索起点"), m_surfaceStart);
-    surfaceForm->addRow(QStringLiteral("搜索长度"), m_surfaceLength);
-    surfaceForm->addRow(QStringLiteral("触发阈值"), m_surfaceThreshold);
+    surfaceForm->addRow(QStringLiteral("搜索起点"),
+                        SliderInput::wrap(m_surfaceStart));
+    surfaceForm->addRow(QStringLiteral("搜索长度"),
+                        SliderInput::wrap(m_surfaceLength));
+    surfaceForm->addRow(QStringLiteral("触发阈值"),
+                        SliderInput::wrap(m_surfaceThreshold));
     surfaceForm->addRow(m_surfaceHold);
     surfaceLayout->addLayout(surfaceForm);
 
@@ -772,7 +784,8 @@ void ParameterPanel::addTcgTab(QTabWidget *tabs)
     form->addRow(QStringLiteral("编辑范围"), scope);
     auto *beam = new QSpinBox;
     beam->setRange(0, 4095);
-    form->addRow(QStringLiteral("声束索引（从 0 开始）"), beam);
+    form->addRow(QStringLiteral("声束索引（从 0 开始）"),
+                 SliderInput::wrap(beam));
     connect(scope, &QComboBox::currentIndexChanged, beam, [scope, beam] { beam->setEnabled(scope->currentData().toInt() == 1); });
     connect(scope, &QComboBox::currentIndexChanged, this, &ParameterPanel::reload);
     connect(beam, &QSpinBox::editingFinished, this, &ParameterPanel::reload);

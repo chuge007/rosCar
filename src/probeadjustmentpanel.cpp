@@ -3,6 +3,7 @@
 #include "clamp_motor_controller.h"
 #include "clamp_motor_widgets.h"
 #include "robot_app_logger.h"
+#include "sliderinput.h"
 
 using crawling::AppLogger;
 
@@ -87,7 +88,7 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(crawling::ClampMotorController *contr
     m_minSpacingSpin->setRange(0, 1000);
     m_minSpacingSpin->setDecimals(2);
     m_minSpacingSpin->setValue(10.0);
-    minRow->addWidget(m_minSpacingSpin);
+    minRow->addWidget(SliderInput::wrap(m_minSpacingSpin, nullptr, 90), 1);
     m_resetZeroButton = new QPushButton(QStringLiteral("重置零点"));
     minRow->addWidget(m_resetZeroButton);
     minRow->addStretch();
@@ -98,7 +99,7 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(crawling::ClampMotorController *contr
     m_targetSpacingSpin->setRange(0, 1000);
     m_targetSpacingSpin->setDecimals(2);
     m_targetSpacingSpin->setValue(50.0);
-    targetRow->addWidget(m_targetSpacingSpin);
+    targetRow->addWidget(SliderInput::wrap(m_targetSpacingSpin, nullptr, 90), 1);
     m_moveToSpacingButton = new QPushButton(QStringLiteral("移动到间距"));
     targetRow->addWidget(m_moveToSpacingButton);
     targetRow->addStretch();

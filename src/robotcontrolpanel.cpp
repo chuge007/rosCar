@@ -7,6 +7,7 @@
 #include "robot_usb_camera_controller.h"
 #include "clamp_motor_controller.h"
 #include "clamp_motor_widgets.h"
+#include "sliderinput.h"
 #include "synchronized_drive_controller.h"
 
 #include <QCheckBox>
@@ -87,23 +88,21 @@ QDoubleSpinBox *makeDouble(double minimum, double maximum, double step,
 
 QWidget *wrapWithHint(QDoubleSpinBox *box, const QString &hint)
 {
+    // 滑轨在上、范围提示在下，避免提示文字盖住滑轨的拖动区域。
     auto *container = new QWidget(box->parentWidget());
-    auto *stack = new QStackedLayout(container);
-    stack->setStackingMode(QStackedLayout::StackAll);
-    stack->setContentsMargins(0, 0, 0, 0);
-    stack->addWidget(box);
+    auto *column = new QVBoxLayout(container);
+    column->setContentsMargins(0, 0, 0, 0);
+    column->setSpacing(1);
+    column->addWidget(SliderInput::wrap(box, container));
     const QString range = QStringLiteral("%1~%2")
                               .arg(box->minimum(), 0, 'f', box->decimals())
                               .arg(box->maximum(), 0, 'f', box->decimals());
     auto *label = new QLabel(QStringLiteral("范围 %1；%2").arg(range, hint), container);
     label->setObjectName(QStringLiteral("spinHint"));
-    label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    label->setContentsMargins(0, 0, 26, 0);
+    label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     label->setAttribute(Qt::WA_TransparentForMouseEvents);
     label->setStyleSheet(QStringLiteral("color:#8a94a6;background:transparent;font-size:11px;"));
-    stack->addWidget(label);
-    // StackAll raises the current widget above the others; keep the hint on top.
-    stack->setCurrentIndex(1);
+    column->addWidget(label);
     return container;
 }
 
@@ -1043,11 +1042,11 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                     &m_wheelCanRows);
     addTransportRow(QStringLiteral("左轮串口"), m_leftPort, &m_wheelRs485Rows);
     addTransportRow(QStringLiteral("左轮波特率"), m_leftBaud, &m_wheelRs485Rows);
-    adapterForm->addRow(QStringLiteral("左轮 ID"), m_leftId);
+    adapterForm->addRow(QStringLiteral("左轮 ID"), SliderInput::wrap(m_leftId));
     adapterForm->addRow(QStringLiteral("左轮方向"), m_leftSign);
     addTransportRow(QStringLiteral("右轮串口"), m_rightPort, &m_wheelRs485Rows);
     addTransportRow(QStringLiteral("右轮波特率"), m_rightBaud, &m_wheelRs485Rows);
-    adapterForm->addRow(QStringLiteral("右轮 ID"), m_rightId);
+    adapterForm->addRow(QStringLiteral("右轮 ID"), SliderInput::wrap(m_rightId));
     adapterForm->addRow(QStringLiteral("右轮方向"), m_rightSign);
     adapterForm->addRow(QString(), buttonRow({refresh, connectButton, disconnectButton}));
     connect(refresh, &QPushButton::clicked, this, &RobotControlPanel::refreshPorts);
@@ -1075,9 +1074,9 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     m_trackWidth = makeDouble(10.0, 2000.0, 1.0, 1, mapping);
     m_ratio = makeDouble(0.001, 1000.0, 0.01, 4, mapping);
     m_ratio->setToolTip(QStringLiteral("只填写输出轴到车轮的外部传动比；直接带轮填 1，不包含电机内部减速比"));
-    mappingForm->addRow(QStringLiteral("轮半径 (mm)"), m_wheelRadius);
-    mappingForm->addRow(QStringLiteral("轮距 (mm)"), m_trackWidth);
-    mappingForm->addRow(QStringLiteral("输出轴到车轮传动比"), m_ratio);
+    mappingForm->addRow(QStringLiteral("轮半径 (mm)"), SliderInput::wrap(m_wheelRadius));
+    mappingForm->addRow(QStringLiteral("轮距 (mm)"), SliderInput::wrap(m_trackWidth));
+    mappingForm->addRow(QStringLiteral("输出轴到车轮传动比"), SliderInput::wrap(m_ratio));
     addConfigurationLock(mapping);
     compactGroup(mapping);
     rightColumn->addWidget(mapping);
@@ -1177,7 +1176,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     usbForm1->addRow(QStringLiteral("连接方式"), m_usbCameraUi[0].source);
     usbForm1->addRow(QStringLiteral("设备"), m_usbCameraUi[0].device);
     usbForm1->addRow(QStringLiteral("网络摄像头地址"), m_usbCameraUi[0].networkUrl);
-    usbForm1->addRow(QStringLiteral("帧率 (fps)"), m_usbCameraUi[0].fps);
+    usbForm1->addRow(QStringLiteral("帧率 (fps)"),
+                     SliderInput::wrap(m_usbCameraUi[0].fps));
     usbForm1->addRow(QString(), buttonRow({m_usbCameraUi[0].scan, m_usbCameraUi[0].connect, m_usbCameraUi[0].disconnect}));
     auto *opts1 = new QWidget;
     auto *opts1Layout = new QHBoxLayout(opts1);
@@ -1235,7 +1235,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     usbForm2->addRow(QStringLiteral("连接方式"), m_usbCameraUi[1].source);
     usbForm2->addRow(QStringLiteral("设备"), m_usbCameraUi[1].device);
     usbForm2->addRow(QStringLiteral("网络摄像头地址"), m_usbCameraUi[1].networkUrl);
-    usbForm2->addRow(QStringLiteral("帧率 (fps)"), m_usbCameraUi[1].fps);
+    usbForm2->addRow(QStringLiteral("帧率 (fps)"),
+                     SliderInput::wrap(m_usbCameraUi[1].fps));
     usbForm2->addRow(QString(), buttonRow({m_usbCameraUi[1].scan, m_usbCameraUi[1].connect, m_usbCameraUi[1].disconnect}));
     auto *opts2 = new QWidget;
     auto *opts2Layout = new QHBoxLayout(opts2);
@@ -1376,10 +1377,11 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     m_feedbackTimeout->setMinimum(crawling::DriveSettings::kMinimumFeedbackTimeoutMs);
     m_armingTimeout->setMinimum(crawling::DriveSettings::kMinimumFeedbackTimeoutMs);
     m_laserInputTimeout->setRange(50, 5000);
-    safetyForm->addRow(QStringLiteral("命令超时"), m_commandTimeout);
-    safetyForm->addRow(QStringLiteral("反馈超时"), m_feedbackTimeout);
-    safetyForm->addRow(QStringLiteral("使能等待超时"), m_armingTimeout);
-    safetyForm->addRow(QStringLiteral("激光轮廓输入超时"), m_laserInputTimeout);
+    safetyForm->addRow(QStringLiteral("命令超时"), SliderInput::wrap(m_commandTimeout));
+    safetyForm->addRow(QStringLiteral("反馈超时"), SliderInput::wrap(m_feedbackTimeout));
+    safetyForm->addRow(QStringLiteral("使能等待超时"), SliderInput::wrap(m_armingTimeout));
+    safetyForm->addRow(QStringLiteral("激光轮廓输入超时"),
+                       SliderInput::wrap(m_laserInputTimeout));
     auto *save = actionButton(QStringLiteral("保存并应用全部参数"), "primary");
     save->setProperty("configLockExempt", true);
     safetyForm->addRow(QString(), save);

@@ -25,6 +25,7 @@ SOURCES += \
     src/mainwindow.cpp \
     src/devicecontroller.cpp \
     src/ultrasoundconfigsanitizer.cpp \
+    src/sliderinput.cpp \
     src/pulseloadguard.cpp \
     src/parameterpresetstore.cpp \
     src/framedecoderworker.cpp \
@@ -79,6 +80,8 @@ HEADERS += \
     src/framedecoderworker.h \
     src/scanwaveformcache.h \
     src/packetdecoder.h \
+    src/sliderinput.h \
+    src/scanpalette.h \
     src/scanwidgets.h \
     src/parameterpanel.h \
     src/framerecorder.h \
