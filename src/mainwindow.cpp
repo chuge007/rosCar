@@ -434,8 +434,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             m_recorder, &QObject::deleteLater);
     m_recorderThread->start(QThread::LowPriority);
     m_player = new FramePlayer(this);
-    m_scanCachePath = QDir(QCoreApplication::applicationDirPath())
-                          .filePath(QStringLiteral("scan_cache/latest_scan_ascan.bin"));
+    const QString defaultCacheDirectory =
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("scan_cache"));
+    QSettings cacheSettings;
+    QString cacheDirectory =
+        cacheSettings.value(QStringLiteral("data/cacheDirectory"), defaultCacheDirectory)
+            .toString().trimmed();
+    if (cacheDirectory.isEmpty())
+        cacheDirectory = defaultCacheDirectory;
+    cacheDirectory = QDir::cleanPath(QFileInfo(cacheDirectory).absoluteFilePath());
+    m_scanCachePath = QDir(cacheDirectory)
+                          .filePath(QStringLiteral("latest_scan_ascan.bin"));
     buildUi();
     buildMenus();
 
@@ -1005,12 +1014,15 @@ void MainWindow::buildUi()
     cacheLayout->addLayout(cacheForm);
 
     auto *cacheActions = new QHBoxLayout;
+    auto *changeCacheFolder = new QPushButton(QStringLiteral("修改缓存目录…"));
+    changeCacheFolder->setToolTip(QStringLiteral("选择扫描缓存文件保存的文件夹；扫描运行时不可修改"));
     auto *openCacheFolder = new QPushButton(QStringLiteral("打开缓存目录"));
     auto *copyCachePath = new QPushButton(QStringLiteral("复制文件路径"));
     auto *refreshCache = new QPushButton(QStringLiteral("刷新统计"));
     cacheActions->addWidget(openCacheFolder);
     cacheActions->addWidget(copyCachePath);
     cacheActions->addWidget(refreshCache);
+    cacheLayout->addWidget(changeCacheFolder);
     cacheLayout->addLayout(cacheActions);
     dataLayout->addWidget(cacheGroup);
 
@@ -1144,6 +1156,49 @@ void MainWindow::buildUi()
     connect(m_connect, &QPushButton::clicked, this, &MainWindow::connectDevice);
     connect(m_record, &QPushButton::clicked, this, &MainWindow::toggleRecording);
     connect(playback, &QPushButton::clicked, this, &MainWindow::openRecording);
+    connect(changeCacheFolder, &QPushButton::clicked, this, [this] {
+        if (m_scanSessionActive) {
+            showMessage(QStringLiteral("请先停止扫描缓存，再修改缓存目录。"), true);
+            return;
+        }
+
+        QString initialDirectory = QFileInfo(m_scanCachePath).absolutePath();
+        if (!QDir(initialDirectory).exists())
+            initialDirectory = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        const QString selectedDirectory = QFileDialog::getExistingDirectory(
+            this, QStringLiteral("选择扫描缓存目录"), initialDirectory,
+            QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+        if (selectedDirectory.isEmpty())
+            return;
+
+        const QString normalizedDirectory =
+            QDir::cleanPath(QFileInfo(selectedDirectory).absoluteFilePath());
+        const QString newCachePath = QDir(normalizedDirectory)
+                                         .filePath(QStringLiteral("latest_scan_ascan.bin"));
+        bool changed = false;
+        const bool invoked = QMetaObject::invokeMethod(
+            m_waveformCache, "setFilePath", Qt::BlockingQueuedConnection,
+            Q_RETURN_ARG(bool, changed), Q_ARG(QString, newCachePath));
+        if (!invoked || !changed) {
+            showMessage(QStringLiteral("缓存目录修改失败，请检查目录是否可写。"), true);
+            return;
+        }
+
+        m_scanCachePath = newCachePath;
+        if (m_cachePathLabel) {
+            m_cachePathLabel->setText(QDir::toNativeSeparators(m_scanCachePath));
+            m_cachePathLabel->setToolTip(QDir::toNativeSeparators(m_scanCachePath));
+        }
+        QSettings settings;
+        settings.setValue(QStringLiteral("data/cacheDirectory"), normalizedDirectory);
+        settings.sync();
+        if (settings.status() != QSettings::NoError) {
+            showMessage(QStringLiteral("缓存目录已切换，但无法保存设置；下次启动将恢复原目录。"), true);
+            return;
+        }
+        showMessage(QStringLiteral("缓存目录已修改为：%1")
+                        .arg(QDir::toNativeSeparators(normalizedDirectory)), false);
+    });
     connect(openCacheFolder, &QPushButton::clicked, this, [this] {
         const QString directory = QFileInfo(m_scanCachePath).absolutePath();
         if (!QDesktopServices::openUrl(QUrl::fromLocalFile(directory)))

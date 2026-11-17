@@ -40,6 +40,7 @@ public:
 public slots:
     void initialize();
     void close();
+    bool setFilePath(const QString &filePath);
     void setCachingEnabled(bool enabled);
     void enqueueBatch(const GroupScanFrameBatch &batch, int deviceId);
     void storeBatch(GroupScanFrameBatch batch, int deviceId);
