@@ -2,6 +2,7 @@
 
 #include "clamp_motor_controller.h"
 #include "clamp_motor_widgets.h"
+#include "paramsliderfield.h"
 #include "robot_app_logger.h"
 #include "services/remote_workbench_session.h"
 #include "services/robot_json_codec.h"
@@ -99,7 +100,7 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(
     m_minSpacingSpin->setRange(0, 1000);
     m_minSpacingSpin->setDecimals(2);
     m_minSpacingSpin->setValue(10.0);
-    minRow->addWidget(m_minSpacingSpin);
+    minRow->addWidget(pa1664::ui::paramSliderField(m_minSpacingSpin), 1);
     m_resetZeroButton = new QPushButton(QStringLiteral("重置零点"));
     minRow->addWidget(m_resetZeroButton);
     minRow->addStretch();
@@ -110,7 +111,7 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(
     m_targetSpacingSpin->setRange(0, 1000);
     m_targetSpacingSpin->setDecimals(2);
     m_targetSpacingSpin->setValue(50.0);
-    targetRow->addWidget(m_targetSpacingSpin);
+    targetRow->addWidget(pa1664::ui::paramSliderField(m_targetSpacingSpin), 1);
     m_moveToSpacingButton = new QPushButton(QStringLiteral("移动到间距"));
     targetRow->addWidget(m_moveToSpacingButton);
     targetRow->addStretch();

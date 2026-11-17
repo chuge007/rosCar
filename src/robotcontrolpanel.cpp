@@ -2,6 +2,7 @@
 
 #include "robot_profile_view.h"
 #include "robot_app_logger.h"
+#include "paramsliderfield.h"
 #include "profile_weld_detector.h"
 #include "robot_sensor_controller.h"
 #include "robot_usb_camera_controller.h"
@@ -51,6 +52,7 @@
 #include <QTabWidget>
 #include <QThread>
 #include <QTimer>
+#include <QTouchEvent>
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QResizeEvent>
@@ -91,26 +93,14 @@ QDoubleSpinBox *makeDouble(double minimum, double maximum, double step,
     return box;
 }
 
+// 统一改成滑轨拖动后，原来覆盖在数值框上的提示会挡住滑轨，改为滑轨下方的说明行。
 QWidget *wrapWithHint(QDoubleSpinBox *box, const QString &hint)
 {
-    auto *container = new QWidget(box->parentWidget());
-    auto *stack = new QStackedLayout(container);
-    stack->setStackingMode(QStackedLayout::StackAll);
-    stack->setContentsMargins(0, 0, 0, 0);
-    stack->addWidget(box);
     const QString range = QStringLiteral("%1~%2")
                               .arg(box->minimum(), 0, 'f', box->decimals())
                               .arg(box->maximum(), 0, 'f', box->decimals());
-    auto *label = new QLabel(QStringLiteral("范围 %1；%2").arg(range, hint), container);
-    label->setObjectName(QStringLiteral("spinHint"));
-    label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    label->setContentsMargins(0, 0, 26, 0);
-    label->setAttribute(Qt::WA_TransparentForMouseEvents);
-    label->setStyleSheet(QStringLiteral("color:#8a94a6;background:transparent;font-size:11px;"));
-    stack->addWidget(label);
-    // StackAll raises the current widget above the others; keep the hint on top.
-    stack->setCurrentIndex(1);
-    return container;
+    return pa1664::ui::paramSliderField(
+        box, QStringLiteral("范围 %1；%2").arg(range, hint));
 }
 
 void populateBaudRates(QComboBox *box)
@@ -391,7 +381,13 @@ RobotControlPanel::RobotControlPanel(
                 [this](const QString &detail) {
                     appendLog(QStringLiteral("远程协议错误：%1").arg(detail));
                 });
-        updateConnection(false, QStringLiteral("等待远程小车主机链路"));
+        updateConnection(
+            false,
+            m_remoteSession
+                ? QStringLiteral("等待远程小车主机链路 %1:%2")
+                      .arg(m_remoteSession->host())
+                      .arg(m_remoteSession->controlPort())
+                : QStringLiteral("等待远程小车主机链路"));
         appendLog(QStringLiteral("小车控制已切换为远程模式：本机不创建底盘、IMU、激光和相机硬件线程"));
     } else {
         m_driveThread = new QThread(this);
@@ -2052,25 +2048,16 @@ void RobotControlPanel::buildUi()
         button->setAutoRepeat(false);
         button->setFocusPolicy(Qt::NoFocus);
         button->setToolTip(QStringLiteral("按住3秒可锁定该方向"));
-        connect(button, &QPushButton::pressed, this, [this, button, flag] {
-            clearJogLatch();
-            m_pressedJogButton = button;
-            m_pressedJogFlag = flag;
-            m_jogHoldTimer->start();
-            setMotion(*flag, true);
-        });
-        connect(button, &QPushButton::released, this, [this, button, flag] {
-            if (m_pressedJogButton == button) {
-                m_jogHoldTimer->stop();
-                m_pressedJogButton = nullptr;
-                m_pressedJogFlag = nullptr;
-                if (!m_jogLatched)
-                    setMotion(*flag, false);
-                return;
-            }
-            if (!m_jogLatched)
-                setMotion(*flag, false);
-        });
+        // 触屏一体机上手指输入不一定被 Qt 合成为鼠标事件（有的屏报成“笔”，
+        // 有的触摸被容器吃掉），方向键必须自己接受触摸并走同一套按下/松开
+        // 逻辑，否则鼠标能开车、手指按住毫无反应。见 eventFilter。
+        button->setAttribute(Qt::WA_AcceptTouchEvents, true);
+        button->installEventFilter(this);
+        m_jogAxisFlags.insert(button, flag);
+        connect(button, &QPushButton::pressed, this,
+                [this, button, flag] { beginJog(button, flag); });
+        connect(button, &QPushButton::released, this,
+                [this, button, flag] { endJog(button, flag); });
     };
     bindJog(forward, &m_forward);
     bindJog(reverse, &m_reverse);
@@ -2116,7 +2103,10 @@ QWidget *RobotControlPanel::buildConfigurationPage()
         return row;
     };
     QList<QCheckBox *> configurationLocks;
-    const auto addConfigurationLock = [&configurationLocks](QGroupBox *group) {
+    // 锁定是操作端界面偏好：勾选/取消时立刻写进 config/drive_settings.ini，
+    // 下次启动由 buildConfigurationPage 末尾统一恢复，避免"重启后又变回未锁定"。
+    const auto addConfigurationLock = [&configurationLocks](QGroupBox *group,
+                                                           const QString &lockId) {
         auto *row = new QWidget(group);
         auto *rowLayout = new QHBoxLayout(row);
         rowLayout->setContentsMargins(0, 0, 0, 0);
@@ -2126,13 +2116,16 @@ QWidget *RobotControlPanel::buildConfigurationPage()
         rowLayout->addWidget(lock);
         row->setProperty("configLockExempt", true);
 
+        const QString storageKey = QStringLiteral("robotConfigLocks/%1").arg(lockId);
+        lock->setProperty("configLockKey", storageKey);
+
         if (auto *form = qobject_cast<QFormLayout *>(group->layout()))
             form->insertRow(0, row);
         else if (auto *box = qobject_cast<QBoxLayout *>(group->layout()))
             box->insertWidget(0, row);
 
         configurationLocks.append(lock);
-        QObject::connect(lock, &QCheckBox::toggled, group, [group, row](bool locked) {
+        QObject::connect(lock, &QCheckBox::toggled, group, [group, row, storageKey](bool locked) {
             const auto children = group->findChildren<QWidget *>(
                 QString(), Qt::FindDirectChildrenOnly);
             for (QWidget *child : children) {
@@ -2147,6 +2140,10 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                     child->setProperty("configLockWasEnabled", QVariant());
                 }
             }
+            QSettings persistent(crawling::DriveSettings::persistentFilePath(),
+                                 QSettings::IniFormat);
+            persistent.setValue(storageKey, locked);
+            persistent.sync();
         });
         return lock;
     };
@@ -2203,11 +2200,12 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                     &m_wheelCanRows);
     addTransportRow(QStringLiteral("左轮串口"), m_leftPort, &m_wheelRs485Rows);
     addTransportRow(QStringLiteral("左轮波特率"), m_leftBaud, &m_wheelRs485Rows);
-    adapterForm->addRow(QStringLiteral("左轮 ID"), m_leftId);
+    // 电机 ID 是整数寻址，必须是整数滑轨（不能出现 1.5 号电机）。
+    adapterForm->addRow(QStringLiteral("左轮 ID"), pa1664::ui::paramSliderField(m_leftId));
     adapterForm->addRow(QStringLiteral("左轮方向"), m_leftSign);
     addTransportRow(QStringLiteral("右轮串口"), m_rightPort, &m_wheelRs485Rows);
     addTransportRow(QStringLiteral("右轮波特率"), m_rightBaud, &m_wheelRs485Rows);
-    adapterForm->addRow(QStringLiteral("右轮 ID"), m_rightId);
+    adapterForm->addRow(QStringLiteral("右轮 ID"), pa1664::ui::paramSliderField(m_rightId));
     adapterForm->addRow(QStringLiteral("右轮方向"), m_rightSign);
     adapterForm->addRow(QString(), buttonRow({refresh, connectButton, disconnectButton}));
     connect(refresh, &QPushButton::clicked, this, &RobotControlPanel::refreshPorts);
@@ -2225,7 +2223,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     connect(m_wheelCommunicationMode, &QComboBox::currentIndexChanged,
             this, [updateWheelTransportUi](int) { updateWheelTransportUi(); });
     updateWheelTransportUi();
-    addConfigurationLock(adapter);
+    addConfigurationLock(adapter, QStringLiteral("wheel_adapter"));
     compactGroup(adapter);
     leftColumn->addWidget(adapter);
 
@@ -2235,10 +2233,13 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     m_trackWidth = makeDouble(10.0, 2000.0, 1.0, 1, mapping);
     m_ratio = makeDouble(0.001, 1000.0, 0.01, 4, mapping);
     m_ratio->setToolTip(QStringLiteral("只填写输出轴到车轮的外部传动比；直接带轮填 1，不包含电机内部减速比"));
-    mappingForm->addRow(QStringLiteral("轮半径 (mm)"), m_wheelRadius);
-    mappingForm->addRow(QStringLiteral("轮距 (mm)"), m_trackWidth);
-    mappingForm->addRow(QStringLiteral("输出轴到车轮传动比"), m_ratio);
-    addConfigurationLock(mapping);
+    mappingForm->addRow(QStringLiteral("轮半径 (mm)"),
+                        pa1664::ui::paramSliderField(m_wheelRadius));
+    mappingForm->addRow(QStringLiteral("轮距 (mm)"),
+                        pa1664::ui::paramSliderField(m_trackWidth));
+    mappingForm->addRow(QStringLiteral("输出轴到车轮传动比"),
+                        pa1664::ui::paramSliderField(m_ratio));
+    addConfigurationLock(mapping, QStringLiteral("chassis_geometry"));
     compactGroup(mapping);
     rightColumn->addWidget(mapping);
 
@@ -2259,7 +2260,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     imuForm->addRow(QStringLiteral("输出分频"), m_imuDivider);
     imuForm->addRow(QString(), buttonRow({imuScan, imuDisconnect}));
     imuForm->addRow(QStringLiteral("连接状态"), m_imuConfigState);
-    addConfigurationLock(imu);
+    addConfigurationLock(imu, QStringLiteral("imu"));
     connect(imuScan, &QPushButton::clicked, this, &RobotControlPanel::connectConfiguredImu);
     connect(imuDisconnect, &QPushButton::clicked, this, [this] {
         if (m_remoteSession) {
@@ -2311,7 +2312,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
         if (index >= 0)
             m_laserSerial->setText(m_laserDevice->itemText(index).section(QStringLiteral(" | "), 0, 0));
     });
-    addConfigurationLock(laser);
+    addConfigurationLock(laser, QStringLiteral("laser_camera"));
     compactGroup(laser);
     rightColumn->addWidget(laser);
 
@@ -2346,7 +2347,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     usbForm1->addRow(QStringLiteral("连接方式"), m_usbCameraUi[0].source);
     usbForm1->addRow(QStringLiteral("设备"), m_usbCameraUi[0].device);
     usbForm1->addRow(QStringLiteral("网络摄像头地址"), m_usbCameraUi[0].networkUrl);
-    usbForm1->addRow(QStringLiteral("帧率 (fps)"), m_usbCameraUi[0].fps);
+    usbForm1->addRow(QStringLiteral("帧率 (fps)"),
+                     pa1664::ui::paramSliderField(m_usbCameraUi[0].fps));
     usbForm1->addRow(QString(), buttonRow({m_usbCameraUi[0].scan, m_usbCameraUi[0].connect, m_usbCameraUi[0].disconnect}));
     auto *opts1 = new QWidget;
     auto *opts1Layout = new QHBoxLayout(opts1);
@@ -2412,7 +2414,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     usbForm2->addRow(QStringLiteral("连接方式"), m_usbCameraUi[1].source);
     usbForm2->addRow(QStringLiteral("设备"), m_usbCameraUi[1].device);
     usbForm2->addRow(QStringLiteral("网络摄像头地址"), m_usbCameraUi[1].networkUrl);
-    usbForm2->addRow(QStringLiteral("帧率 (fps)"), m_usbCameraUi[1].fps);
+    usbForm2->addRow(QStringLiteral("帧率 (fps)"),
+                     pa1664::ui::paramSliderField(m_usbCameraUi[1].fps));
     usbForm2->addRow(QString(), buttonRow({m_usbCameraUi[1].scan, m_usbCameraUi[1].connect, m_usbCameraUi[1].disconnect}));
     auto *opts2 = new QWidget;
     auto *opts2Layout = new QHBoxLayout(opts2);
@@ -2455,7 +2458,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     // The outer box only wraps the two channel groups, so let it grow with them
     // instead of collapsing to a single row like the leaf configuration groups.
     usb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    addConfigurationLock(usb);
+    addConfigurationLock(usb, QStringLiteral("usb_camera"));
     leftColumn->addWidget(usb);
 
     auto *clamp = new QGroupBox(QStringLiteral("夹子电机通信"), page);
@@ -2507,7 +2510,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
                                       Qt::QueuedConnection);
         }
     });
-    addConfigurationLock(clamp);
+    addConfigurationLock(clamp, QStringLiteral("clamp_motor"));
     compactGroup(clamp);
     rightColumn->addWidget(clamp);
 
@@ -2549,7 +2552,7 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     limitsForm->addRow(QStringLiteral("同步最小受控速度 (mm/s)"),
                        wrapWithHint(m_syncMinSpeed,
                                     QStringLiteral("调大低速不同步；调小低速仍同步")));
-    addConfigurationLock(limits);
+    addConfigurationLock(limits, QStringLiteral("speed_limits"));
     compactGroup(limits);
     rightColumn->insertWidget(1, limits);
 
@@ -2567,14 +2570,18 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     m_feedbackTimeout->setMinimum(crawling::DriveSettings::kMinimumFeedbackTimeoutMs);
     m_armingTimeout->setMinimum(crawling::DriveSettings::kMinimumFeedbackTimeoutMs);
     m_laserInputTimeout->setRange(50, 5000);
-    safetyForm->addRow(QStringLiteral("命令超时"), m_commandTimeout);
-    safetyForm->addRow(QStringLiteral("反馈超时"), m_feedbackTimeout);
-    safetyForm->addRow(QStringLiteral("使能等待超时"), m_armingTimeout);
-    safetyForm->addRow(QStringLiteral("激光轮廓输入超时"), m_laserInputTimeout);
+    safetyForm->addRow(QStringLiteral("命令超时"),
+                       pa1664::ui::paramSliderField(m_commandTimeout));
+    safetyForm->addRow(QStringLiteral("反馈超时"),
+                       pa1664::ui::paramSliderField(m_feedbackTimeout));
+    safetyForm->addRow(QStringLiteral("使能等待超时"),
+                       pa1664::ui::paramSliderField(m_armingTimeout));
+    safetyForm->addRow(QStringLiteral("激光轮廓输入超时"),
+                       pa1664::ui::paramSliderField(m_laserInputTimeout));
     auto *save = actionButton(QStringLiteral("保存并应用全部参数"), "primary");
     save->setProperty("configLockExempt", true);
     safetyForm->addRow(QString(), save);
-    addConfigurationLock(safety);
+    addConfigurationLock(safety, QStringLiteral("safety_watchdog"));
     m_laserConfigState->setWordWrap(true);
     m_laserFrameState->setWordWrap(true);
     m_imuConfigState->setWordWrap(true);
@@ -2642,6 +2649,26 @@ QWidget *RobotControlPanel::buildConfigurationPage()
         button->setMinimumHeight(26);
         button->setMaximumHeight(30);
         button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    }
+    // 所有子项都建好后再统一恢复锁定状态：提前恢复会把后面才创建的控件漏掉。
+    // 正向遍历即可：本页各锁定组之间没有嵌套关系（摄像头分组只由外层锁统一管）。
+    {
+        QSettings persistent(crawling::DriveSettings::persistentFilePath(),
+                             QSettings::IniFormat);
+        QStringList restored;
+        for (QCheckBox *lock : configurationLocks) {
+            const QString key = lock->property("configLockKey").toString();
+            if (key.isEmpty() || !persistent.value(key, false).toBool())
+                continue;
+            lock->setChecked(true);
+            restored.append(key.section(QLatin1Char('/'), -1));
+        }
+        if (!restored.isEmpty()) {
+            crawling::AppLogger::write(
+                QStringLiteral("ROBOT.CONFIG"),
+                QStringLiteral("event=restore_locks groups=%1")
+                    .arg(restored.join(QLatin1Char(','))));
+        }
     }
     scroll->setWidget(page);
     return scroll;
@@ -3722,6 +3749,33 @@ void RobotControlPanel::setMotion(bool &flag, bool active)
         return;
     flag = active;
     sendMotionCommand();
+}
+
+void RobotControlPanel::beginJog(QPushButton *button, bool *flag)
+{
+    if (!button || !flag)
+        return;
+    clearJogLatch();
+    m_pressedJogButton = button;
+    m_pressedJogFlag = flag;
+    m_jogHoldTimer->start();
+    setMotion(*flag, true);
+}
+
+void RobotControlPanel::endJog(QPushButton *button, bool *flag)
+{
+    if (!button || !flag)
+        return;
+    if (m_pressedJogButton == button) {
+        m_jogHoldTimer->stop();
+        m_pressedJogButton = nullptr;
+        m_pressedJogFlag = nullptr;
+        if (!m_jogLatched)
+            setMotion(*flag, false);
+        return;
+    }
+    if (!m_jogLatched)
+        setMotion(*flag, false);
 }
 
 void RobotControlPanel::clearJogLatch()
@@ -4830,7 +4884,36 @@ QWidget *RobotControlPanel::vehicleControlWidget() const
 
 bool RobotControlPanel::eventFilter(QObject *watched, QEvent *event)
 {
-    if (event && event->type() == QEvent::Resize) {
+    if (!event)
+        return QWidget::eventFilter(watched, event);
+    // 方向键自己接受触摸事件后，Qt 就不再为它合成鼠标事件，按下/松开必须
+    // 由这里补上；逻辑与鼠标的 pressed/released 共用 beginJog/endJog。
+    auto *jogButton = qobject_cast<QPushButton *>(watched);
+    if (jogButton && m_jogAxisFlags.contains(jogButton)) {
+        const QEvent::Type type = event->type();
+        if (type == QEvent::TouchBegin) {
+            const auto *touch = static_cast<QTouchEvent *>(event);
+            for (const QEventPoint &point : touch->points()) {
+                if (!jogButton->rect().contains(point.position().toPoint()))
+                    continue;
+                qInfo().noquote() << "JOG_TOUCH event=press"
+                                  << jogButton->text().remove(QLatin1Char(' '));
+                if (m_pressedJogButton != jogButton)
+                    beginJog(jogButton, m_jogAxisFlags.value(jogButton));
+                event->accept();
+                return true;
+            }
+        } else if (type == QEvent::TouchEnd || type == QEvent::TouchCancel) {
+            if (m_pressedJogButton == jogButton) {
+                qInfo().noquote() << "JOG_TOUCH event=release"
+                                  << jogButton->text().remove(QLatin1Char(' '));
+                endJog(jogButton, m_jogAxisFlags.value(jogButton));
+                event->accept();
+                return true;
+            }
+        }
+    }
+    if (event->type() == QEvent::Resize) {
         for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot) {
             if (!m_usbViews[slot] || watched != m_usbViews[slot])
                 continue;

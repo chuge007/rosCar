@@ -420,10 +420,17 @@ void UltrasoundHostService::claimSession(quint64 sessionId) {
 
 void UltrasoundHostService::releaseSession(quint64 sessionId) {
   if (ownerSessionId_ != sessionId) return;
-  // A disconnected operator must not leave the transducer transmitting or
-  // filling the reliable scan queue with nobody able to consume it.
-  if (device_ && (device_->capturing() || device_->startPending()))
-    device_->stop();
+  // 采集属于主机自己的硬件（initialize() 里本来就会自启动），操作端断开
+  // 只解除推流订阅，不停采集。
+  //
+  // 这里原来调 device_->stop()，代价是每断一次就要重新走
+  // 「SDK 停止 → 自动启动 → 重新枚举 USB」这条路径，而它成功率很低：
+  // 之后任何操作端连上来都会看到 hardwareOnline=false / capturing=false，
+  // 表现为超声“自己掉线”，工作台连上也卡在初始化。
+  // 实测：无客户端时 fps 稳定 350~375；用任何客户端连一次再断开后
+  // fps 立刻归零并需要重新枚举 USB 才能恢复。
+  //
+  // 停止发射仍保留给 shutdown() 与 abortAcquisition() 使用。
   if (encoder_) {
     QMetaObject::invokeMethod(encoder_, "clearPending", Qt::QueuedConnection);
   }

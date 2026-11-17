@@ -14,17 +14,26 @@
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileInfo>
+#include <QAbstractSocket>
+#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMessageBox>
+#include <QMouseEvent>
+#include <QNetworkInterface>
 #include <QNetworkProxy>
 #include <QPalette>
 #include <QRegularExpression>
 #include <QSettings>
-#include <QStyleHints>
-#include <QUrl>
+#include <QSharedMemory>
 #include <QSet>
+#include <QStyleHints>
+#include <QTabletEvent>
 #include <QTimer>
+#include <QTouchEvent>
+#include <QUrl>
+#include <QWidget>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -196,9 +205,91 @@ bool isLocalTestMode(const QStringList &arguments)
     return false;
 }
 
-QString configuredRemoteEndpoint(const QStringList &arguments)
+// 远程模式下连回环地址等价于“连本机自己”：只有当本机确实跑着
+// PA1664RobotHost 时才有意义。历史配置一旦被写成 127.0.0.1，之后每次启动
+// 都会连一个空端口（Connection refused），界面上只显示“等待小车主机”，
+// 看不出是地址错了还是主机没开。这里把“残留的回环地址”和“用户显式指定”
+// 区分开，前者自动回退到上次真正连通过的小车主机。
+bool parseRemoteEndpoint(const QString &text, QString *host, quint16 *port);
+
+bool isLoopbackRemoteHost(const QString &host)
+{
+    const QString normalized = host.trimmed().toLower();
+    if (normalized.isEmpty()) return false;
+    return normalized == QStringLiteral("localhost")
+           || normalized == QStringLiteral("::1")
+           || normalized == QStringLiteral("[::1]")
+           || normalized.startsWith(QStringLiteral("127."));
+}
+
+// 现场最常见的“没数据”不是软件问题：USB 网卡掉线、网线松了以后本机就掉出
+// 192.168.1.x，界面只显示“等待小车主机”，和“主机没开机”完全混淆。启动时把
+// 本机有哪些可用地址、和目标是否同网段直接写进日志，事后不用再猜。
+QString describeLocalNetworkFor(const QString &remoteHost)
+{
+    const QHostAddress target(remoteHost);
+    QStringList sameSubnet;
+    QStringList others;
+    const auto interfaces = QNetworkInterface::allInterfaces();
+    for (const QNetworkInterface &iface : interfaces) {
+        const auto flags = iface.flags();
+        if (!(flags & QNetworkInterface::IsUp) || (flags & QNetworkInterface::IsLoopBack))
+            continue;
+        for (const QNetworkAddressEntry &entry : iface.addressEntries()) {
+            const QHostAddress ip = entry.ip();
+            if (ip.protocol() != QAbstractSocket::IPv4Protocol || ip.isLoopback())
+                continue;
+            const QString text = QStringLiteral("%1/%2(%3)")
+                                     .arg(ip.toString())
+                                     .arg(entry.prefixLength())
+                                     .arg(iface.humanReadableName());
+            if (!target.isNull() && entry.prefixLength() > 0
+                && target.isInSubnet(ip, entry.prefixLength())) {
+                sameSubnet << text;
+            } else {
+                others << text;
+            }
+        }
+    }
+    if (!sameSubnet.isEmpty()) {
+        return QStringLiteral("本机与 %1 同网段：%2")
+            .arg(remoteHost, sameSubnet.join(QStringLiteral(", ")));
+    }
+    if (others.isEmpty()) {
+        return QStringLiteral("本机没有任何可用 IPv4 地址，%1 必然不可达")
+            .arg(remoteHost);
+    }
+    return QStringLiteral("本机没有与 %1 同网段的地址（当前只有 %2），"
+                          "USB 网卡或网线可能未连接")
+        .arg(remoteHost, others.join(QStringLiteral(", ")));
+}
+
+// 本机是否有与目标同网段的可用 IPv4 地址（回环不算）。
+bool hasSameSubnetLocalAddress(const QString &remoteHost)
+{
+    const QHostAddress target(remoteHost);
+    if (target.isNull()) return false;
+    const auto interfaces = QNetworkInterface::allInterfaces();
+    for (const QNetworkInterface &iface : interfaces) {
+        const auto flags = iface.flags();
+        if (!(flags & QNetworkInterface::IsUp) || (flags & QNetworkInterface::IsLoopBack))
+            continue;
+        for (const QNetworkAddressEntry &entry : iface.addressEntries()) {
+            const QHostAddress ip = entry.ip();
+            if (ip.protocol() != QAbstractSocket::IPv4Protocol || ip.isLoopback())
+                continue;
+            if (entry.prefixLength() > 0 && target.isInSubnet(ip, entry.prefixLength()))
+                return true;
+        }
+    }
+    return false;
+}
+
+QString configuredRemoteEndpoint(const QStringList &arguments,
+                                 bool *explicitlyRequested = nullptr)
 {
     QString endpoint;
+    bool explicitRequest = false;
     for (int i = 0; i < arguments.size(); ++i) {
         if (arguments.at(i) == QStringLiteral("--remote")) {
             if (i + 1 < arguments.size()) endpoint = arguments.at(i + 1);
@@ -209,12 +300,65 @@ QString configuredRemoteEndpoint(const QStringList &arguments)
             break;
         }
     }
-    if (endpoint.isEmpty()) endpoint = qEnvironmentVariable("PA1664_REMOTE_HOST");
+    if (!endpoint.isEmpty()) explicitRequest = true;
+    if (endpoint.isEmpty()) {
+        endpoint = qEnvironmentVariable("PA1664_REMOTE_HOST");
+        if (!endpoint.isEmpty()) explicitRequest = true;
+    }
     if (endpoint.isEmpty()) {
         QSettings settings;
         endpoint = settings.value(QStringLiteral("remote/endpoint")).toString();
+        // 上次真正连通过的非回环地址；仅在当前配置是回环残留时兜底。
+        const QString remembered =
+            settings.value(QStringLiteral("remote/lastRemoteEndpoint")).toString();
+        QString storedHost;
+        quint16 storedPort = 0;
+        // 空配置和“配置里是回环地址”是一回事：换电脑（注册表是空的）或
+        // 旧版本把 127.0.0.1 写进配置后，两种情况下连的都是本机自己，
+        // 而本机通常没有 PA1664RobotHost，界面只会一直“等待小车主机”。
+        const bool loopbackOrEmpty =
+            endpoint.trimmed().isEmpty()
+            || (parseRemoteEndpoint(endpoint, &storedHost, &storedPort)
+                && isLoopbackRemoteHost(storedHost));
+        if (loopbackOrEmpty && !remembered.trimmed().isEmpty()) {
+            QString fallbackHost;
+            quint16 fallbackPort = 0;
+            if (parseRemoteEndpoint(remembered, &fallbackHost, &fallbackPort)
+                && !isLoopbackRemoteHost(fallbackHost)) {
+                qWarning().noquote()
+                    << "REMOTE_ENDPOINT_LOOPBACK_FALLBACK" << endpoint << "->"
+                    << remembered
+                    << "（配置里的回环地址只能连本机小车主机，已改用上次连通的地址）";
+                endpoint = remembered;
+            }
+        }
+        // 仍然没有可用地址（或仍是回环）：小车主机固定在 192.168.1.20，
+        // 直接连它。连回环在这套系统里没有诊断价值，只会让人以为软件坏了；
+        // 真要本机联调，用 start_workbench_localhost.bat（显式 --remote）启动。
+        QString finalHost;
+        quint16 finalPort = 0;
+        if (endpoint.trimmed().isEmpty()
+            || (parseRemoteEndpoint(endpoint, &finalHost, &finalPort)
+                && isLoopbackRemoteHost(finalHost))) {
+            const QString defaultRobotEndpoint =
+                QStringLiteral("192.168.1.20:43100");
+            QString defaultHost;
+            quint16 defaultPort = 0;
+            if (parseRemoteEndpoint(defaultRobotEndpoint, &defaultHost, &defaultPort)) {
+                const bool sameSubnet = hasSameSubnetLocalAddress(defaultHost);
+                qWarning().noquote()
+                    << "REMOTE_ENDPOINT_AUTODETECT" << endpoint << "->"
+                    << defaultRobotEndpoint
+                    << (sameSubnet
+                            ? QStringLiteral("（本机与小车同网段，直接连小车）")
+                            : QStringLiteral("（本机不在小车网段，请先把网卡配到 "
+                                             "192.168.1.x 再重连）"));
+                endpoint = defaultRobotEndpoint;
+            }
+        }
     }
     if (endpoint.isEmpty()) endpoint = QStringLiteral("127.0.0.1:43100");
+    if (explicitlyRequested) *explicitlyRequested = explicitRequest;
     return endpoint;
 }
 
@@ -300,6 +444,92 @@ void applyLightColorScheme()
     palette.setColor(QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
     QGuiApplication::setPalette(palette);
 }
+
+// 触屏一体机上手指常被 Windows 报成“笔”，Qt 6 会把这类输入派发成
+// QTabletEvent。QPushButton/QWidget 都不处理笔事件，也不会像触摸那样合成
+// 鼠标，现场表现就是：鼠标点方向键小车能动，手指按住同一个按钮毫无反应。
+// 这里把笔尖的按下/抬起按左键翻译成鼠标事件发给坐标命中的控件，鼠标与
+// 触摸的默认路径完全不动；同时把触摸/笔的命中信息写进日志，换机器后能
+// 直接从日志判断这台屏报的是哪种输入。
+class TabletMouseBridge : public QObject
+{
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        const QEvent::Type type = event->type();
+        if (type != QEvent::TabletPress && type != QEvent::TabletRelease
+            && type != QEvent::TouchBegin && type != QEvent::TouchEnd)
+            return QObject::eventFilter(watched, event);
+
+        const QPoint globalPoint = pointerGlobalPosition(event);
+        QWidget *target = QApplication::widgetAt(globalPoint);
+        const QString targetName =
+            target ? QStringLiteral("%1#%2")
+                         .arg(QString::fromLatin1(target->metaObject()->className()),
+                              target->objectName())
+                   : QStringLiteral("none");
+        const bool isTablet = type == QEvent::TabletPress || type == QEvent::TabletRelease;
+        const bool pressed = type == QEvent::TabletPress || type == QEvent::TouchBegin;
+        logInput(type, isTablet ? QStringLiteral("tablet") : QStringLiteral("touch"),
+                 targetName, globalPoint);
+
+        if (!isTablet || !target)
+            return QObject::eventFilter(watched, event);
+
+        auto *tablet = static_cast<QTabletEvent *>(event);
+        const bool primary = tablet->button() == Qt::LeftButton
+                             || (tablet->buttons() & Qt::LeftButton);
+        if (!primary)
+            return QObject::eventFilter(watched, event);
+
+        QMouseEvent mouse(pressed ? QEvent::MouseButtonPress
+                                       : QEvent::MouseButtonRelease,
+                                target->mapFromGlobal(globalPoint), tablet->globalPosition(),
+                                Qt::LeftButton, pressed ? Qt::LeftButton : Qt::NoButton,
+                                QGuiApplication::keyboardModifiers());
+        QApplication::sendEvent(target, &mouse);
+        logInput(type, QStringLiteral("tablet->mouse"), targetName, globalPoint);
+        return true;
+    }
+
+private:
+    static QPoint pointerGlobalPosition(QEvent *event)
+    {
+        if (event->type() == QEvent::TabletPress || event->type() == QEvent::TabletRelease)
+            return static_cast<QTabletEvent *>(event)->globalPosition().toPoint();
+        const auto &points = static_cast<QTouchEvent *>(event)->points();
+        if (points.isEmpty())
+            return QPoint();
+        return points.first().globalPosition().toPoint();
+    }
+
+    static void logInput(QEvent::Type type, const QString &kind, const QString &target,
+                         const QPoint &globalPoint)
+    {
+        // 触摸会持续产生事件，限流到每 200 ms 一条，日志里只留判定需要的信息。
+        static qint64 lastMs = 0;
+        static int suppressed = 0;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (now - lastMs < 200) {
+            ++suppressed;
+            return;
+        }
+        const QString name = type == QEvent::TabletPress     ? QStringLiteral("press")
+                             : type == QEvent::TabletRelease ? QStringLiteral("release")
+                             : type == QEvent::TouchBegin    ? QStringLiteral("touch_begin")
+                                                             : QStringLiteral("touch_end");
+        qInfo().noquote() << "INPUT_POINTER" << kind << name << target
+                          << QStringLiteral("%1,%2").arg(globalPoint.x()).arg(globalPoint.y())
+                          << (suppressed > 0
+                                  ? QStringLiteral("suppressed=%1").arg(suppressed)
+                                  : QString());
+        lastMs = now;
+        suppressed = 0;
+    }
+};
 }
 
 int main(int argc, char *argv[])
@@ -316,7 +546,25 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("PA1664");
     QCoreApplication::setApplicationName("PA1664Workbench");
     QDir::setCurrent(QCoreApplication::applicationDirPath());
+    // 小车主机只接受一个控制会话。以前同时开两个 Workbench，后连上的会把先
+    // 连上的踢成 not_session_owner，两边都表现为“连上了但没有任何数据”，
+    // 主机日志里只留下 CONTROL_SESSION_BUSY。这里用跨进程共享内存互斥，
+    // 不同副本目录之间同样生效；自动化测试模式除外。
+    const bool testModeArgument = isLocalTestMode(app.arguments());
+    QSharedMemory singleInstanceGuard(QStringLiteral("PA1664Workbench-SingleInstance"));
+    if (!testModeArgument && !singleInstanceGuard.create(1)) {
+        QMessageBox::warning(
+            nullptr, QStringLiteral("PA-1664 超声检测工作台"),
+            QStringLiteral("已经有一个操作台在运行。\n\n"
+                           "小车主机只接受一个控制会话，同时打开多个会让先启动的那个"
+                           "失去控制权，界面表现就是“连上了但没有任何数据”。\n\n"
+                           "请切换到已经打开的窗口；确实要重开，请先关闭它。"));
+        return 3;
+    }
     installDiagnosticHooks(&app);
+    // 触屏一体机的手指输入可能被报成“笔”，转成鼠标事件后才能点动方向键。
+    auto *pointerBridge = new TabletMouseBridge(&app);
+    app.installEventFilter(pointerBridge);
     crawling::AppLogger::write(
         QStringLiteral("SESSION"),
         QStringLiteral("event=app_start pid=%1 exe=\"%2\" args=\"%3\" qt=%4")
@@ -330,15 +578,33 @@ int main(int argc, char *argv[])
     QString remoteHost;
     quint16 remotePort = static_cast<quint16>(pa1664::remote::kDefaultControlPort);
     if (!localMode) {
-        const QString endpoint = configuredRemoteEndpoint(app.arguments());
+        bool endpointExplicit = false;
+        const QString endpoint =
+            configuredRemoteEndpoint(app.arguments(), &endpointExplicit);
         if (!parseRemoteEndpoint(endpoint, &remoteHost, &remotePort)) {
             qCritical().noquote() << "REMOTE_ENDPOINT_INVALID" << endpoint;
             return 2;
         }
         QSettings settings;
-        settings.setValue(QStringLiteral("remote/endpoint"),
-                          QStringLiteral("%1:%2").arg(remoteHost).arg(remotePort));
-        qInfo().noquote() << "REMOTE_MODE" << remoteHost << remotePort;
+        // 写回是为了下次少打字，但回环地址只在本机联调时成立，不能当成
+        // “这台操作台平时连哪台小车”记下来，否则下次启动必然空连。
+        const QString resolved =
+            QStringLiteral("%1:%2").arg(remoteHost).arg(remotePort);
+        settings.setValue(QStringLiteral("remote/endpoint"), resolved);
+        if (!isLoopbackRemoteHost(remoteHost))
+            settings.setValue(QStringLiteral("remote/lastRemoteEndpoint"), resolved);
+        qInfo().noquote() << "REMOTE_MODE" << remoteHost << remotePort
+                          << (endpointExplicit ? "explicit" : "remembered");
+        const QString networkHint = describeLocalNetworkFor(remoteHost);
+        if (networkHint.contains(QStringLiteral("同网段：")))
+            qInfo().noquote() << "REMOTE_NETWORK" << networkHint;
+        else
+            qWarning().noquote() << "REMOTE_NETWORK" << networkHint;
+        if (isLoopbackRemoteHost(remoteHost))
+            qWarning().noquote()
+                << "REMOTE_ENDPOINT_LOOPBACK" << resolved
+                << "远程模式正在连本机回环地址：本机没有 PA1664RobotHost 时会一直"
+                   "Connection refused；连小车端请用 --remote <小车IP>:43100 启动";
     } else {
         QString usbPreparationWarning;
         UsbBootstrap::prepare(app, &usbPreparationWarning);
@@ -499,6 +765,13 @@ int main(int argc, char *argv[])
         QTabBar::tab:selected { background: white; color: #087dcc; font-weight: 600; }
         QScrollArea { background: white; }
         QScrollArea > QWidget > QWidget { background: white; }
+        /* 统一滑轨数值输入的样式（objectName = paramSlider） */
+        QSlider#paramSlider { min-height: 20px; max-height: 22px; }
+        QSlider#paramSlider::groove:horizontal { height: 6px; background: #d7e2ee; border-radius: 3px; }
+        QSlider#paramSlider::sub-page:horizontal { height: 6px; background: #9dc3e6; border-radius: 3px; }
+        QSlider#paramSlider::handle:horizontal { width: 14px; margin: -5px 0; border-radius: 7px; background: #2586c8; }
+        QSlider#paramSlider::handle:horizontal:hover { background: #1c6fa8; }
+        QSlider#paramSlider::handle:horizontal:disabled { background: #b6c3d1; }
     )");
     if (app.arguments().contains("--channel-ui-test")) {
         ParameterPanel panel;

@@ -15,6 +15,7 @@ namespace pa1664::remote {
 
 class BulkServer;
 class ControlServer;
+class HostRestartServer;
 class UltrasoundHostService;
 class MediaServer;
 class RealtimeServer;
@@ -71,6 +72,8 @@ class HostApplication final : public QObject {
   RobotHostService* robot_ = nullptr;
   RobotPeripheralHostService* peripheral_ = nullptr;
   UltrasoundHostService* ultrasound_ = nullptr;
+  // 运维重启通道：自有 std::thread，不是 QObject，生命周期由本类手工管理。
+  HostRestartServer* restartServer_ = nullptr;
   QThread* ultrasoundThread_ = nullptr;
   QTimer* bulkDrainTimer_ = nullptr;
   QHostAddress listenAddress_;

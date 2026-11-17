@@ -90,6 +90,11 @@ protected:
     // 把新尺寸同步给采集端并按新尺寸重绘当前帧。
     bool eventFilter(QObject *watched, QEvent *event) override;
 
+private:
+    // 方向键的按下/松开逻辑，鼠标、触摸、笔三条输入路径共用一份实现。
+    void beginJog(QPushButton *button, bool *flag);
+    void endJog(QPushButton *button, bool *flag);
+
 private slots:
     void refreshPorts();
     void connectDrive();
@@ -253,6 +258,8 @@ private:
     QPushButton *m_latchedJogButton = nullptr;
     bool *m_latchedJogFlag = nullptr;
     QTimer *m_jogHoldTimer = nullptr;
+    // 方向键 -> 对应方向标志，触摸事件里按控件反查用。
+    QHash<QPushButton *, bool *> m_jogAxisFlags;
     bool m_forward = false;
     bool m_reverse = false;
     bool m_left = false;

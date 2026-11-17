@@ -1,6 +1,7 @@
 #include "parameterpanel.h"
 
 #include "client.h"
+#include "paramsliderfield.h"
 #include "services/ultrasound_parameter_service.h"
 #include "parameterpresetstore.h"
 #include "pulseloadguard.h"
@@ -302,7 +303,7 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     m_tofdDepthFraction->setValue(2.0 / 3.0);
     m_tofdDepthFraction->setKeyboardTracking(false);
     m_tofdDepthFraction->setToolTip(QStringLiteral("交汇深度 = 比例 × 工件厚度（TOFD 常用 2/3 板厚）"));
-    probe->addRow(QStringLiteral("交汇深度比例"), m_tofdDepthFraction);
+    probe->addRow(QStringLiteral("交汇深度比例"), pa1664::ui::paramSliderField(m_tofdDepthFraction));
     connect(m_tofdDepthFraction, &QDoubleSpinBox::valueChanged,
             this, &ParameterPanel::recomputeTofdPcs);
 
@@ -362,7 +363,8 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     m_longitudinalAngleInput->setKeyboardTracking(false);
     m_longitudinalAngleInput->setToolTip(QStringLiteral(
         "输入楔块标称的钢中纵波折射角；软件会按楔块声速和工件声速反算楔块内入射角。"));
-    wedge->addRow(QStringLiteral("纵波楔块标称角（钢内）"), m_longitudinalAngleInput);
+    wedge->addRow(QStringLiteral("纵波楔块标称角（钢内）"),
+                  pa1664::ui::paramSliderField(m_longitudinalAngleInput));
     m_wedgeAngleStatus = new QLabel;
     m_wedgeAngleStatus->setWordWrap(true);
     wedge->addRow(m_wedgeAngleStatus);
@@ -400,7 +402,7 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     m_wheelDiameter->setValue(500.0);
     m_wheelDiameter->setSuffix(QStringLiteral(" mm"));
     m_wheelDiameter->setKeyboardTracking(false);
-    other->addRow(QStringLiteral("编码器轮子直径"), m_wheelDiameter);
+    other->addRow(QStringLiteral("编码器轮子直径"), pa1664::ui::paramSliderField(m_wheelDiameter));
     connect(m_wheelDiameter, &QDoubleSpinBox::valueChanged,
             this, [this] {
         updateEncoderCalibrationSummary();
@@ -411,7 +413,8 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     m_encoderResolution->setValue(4096);
     m_encoderResolution->setSuffix(QStringLiteral(" 计数/圈"));
     m_encoderResolution->setKeyboardTracking(false);
-    other->addRow(QStringLiteral("编码器有效计数/圈"), m_encoderResolution);
+    other->addRow(QStringLiteral("编码器有效计数/圈"),
+                  pa1664::ui::paramSliderField(m_encoderResolution));
     connect(m_encoderResolution, &QSpinBox::valueChanged,
             this, [this] {
         updateEncoderCalibrationSummary();
@@ -443,7 +446,8 @@ ParameterPanel::ParameterPanel(QWidget *parent) : QWidget(parent)
     m_encoderDebugDistance->setValue(1000.0);
     m_encoderDebugDistance->setSuffix(QStringLiteral(" mm"));
     m_encoderDebugDistance->setKeyboardTracking(false);
-    debugForm->addRow(QStringLiteral("实际移动距离"), m_encoderDebugDistance);
+    debugForm->addRow(QStringLiteral("实际移动距离"),
+                      pa1664::ui::paramSliderField(m_encoderDebugDistance));
     m_encoderDebugStartLabel = new QLabel(QStringLiteral("--"));
     debugForm->addRow(QStringLiteral("起点计数"), m_encoderDebugStartLabel);
     m_encoderDebugResult = new QLabel(QStringLiteral("请先记录起点"));
@@ -655,7 +659,7 @@ void ParameterPanel::addDouble(QFormLayout *form, const QString &name, double mi
     auto *w = new QDoubleSpinBox;
     w->setProperty("parameterName", name);
     w->setRange(min, max); w->setDecimals(decimals); w->setSuffix(suffix); w->setKeyboardTracking(false);
-    form->addRow(name, w);
+    form->addRow(name, pa1664::ui::paramSliderField(w));
     m_fields.push_back({name, w, [getter] { return getter(); }, [setter](const QVariant &v) { return setter(v.toDouble()); }, {}});
     connect(w, &QDoubleSpinBox::valueChanged, this, &ParameterPanel::scheduleAutoApply);
 }
@@ -667,7 +671,7 @@ void ParameterPanel::addInt(QFormLayout *form, const QString &name, int min, int
     auto *w = new QSpinBox;
     w->setProperty("parameterName", name);
     w->setRange(min, max); w->setSuffix(suffix); w->setKeyboardTracking(false);
-    form->addRow(name, w);
+    form->addRow(name, pa1664::ui::paramSliderField(w));
     m_fields.push_back({name, w, [getter] { return getter(); }, [setter](const QVariant &v) { return setter(v.toInt()); }, {}});
     connect(w, &QSpinBox::valueChanged, this, &ParameterPanel::scheduleAutoApply);
 }
@@ -811,9 +815,12 @@ void ParameterPanel::addGateTab(QTabWidget *tabs)
     m_surfaceHold = new QCheckBox(QStringLiteral("漏检时保持上一有效表面"));
     m_surfaceHold->setChecked(true);
     surfaceForm->addRow(m_surfaceEnabled);
-    surfaceForm->addRow(QStringLiteral("搜索起点"), m_surfaceStart);
-    surfaceForm->addRow(QStringLiteral("搜索长度"), m_surfaceLength);
-    surfaceForm->addRow(QStringLiteral("触发阈值"), m_surfaceThreshold);
+    surfaceForm->addRow(QStringLiteral("搜索起点"),
+                        pa1664::ui::paramSliderField(m_surfaceStart));
+    surfaceForm->addRow(QStringLiteral("搜索长度"),
+                        pa1664::ui::paramSliderField(m_surfaceLength));
+    surfaceForm->addRow(QStringLiteral("触发阈值"),
+                        pa1664::ui::paramSliderField(m_surfaceThreshold));
     surfaceForm->addRow(m_surfaceHold);
     surfaceLayout->addLayout(surfaceForm);
 
@@ -890,8 +897,11 @@ void ParameterPanel::addTcgTab(QTabWidget *tabs)
     form->addRow(QStringLiteral("编辑范围"), scope);
     auto *beam = new QSpinBox;
     beam->setRange(0, 4095);
-    form->addRow(QStringLiteral("声束索引（从 0 开始）"), beam);
-    connect(scope, &QComboBox::currentIndexChanged, beam, [scope, beam] { beam->setEnabled(scope->currentData().toInt() == 1); });
+    form->addRow(QStringLiteral("声束索引（从 0 开始）"), pa1664::ui::paramSliderField(beam));
+    connect(scope, &QComboBox::currentIndexChanged, beam, [scope, beam] {
+        beam->setEnabled(scope->currentData().toInt() == 1);
+        pa1664::ui::refreshParamSlider(beam);
+    });
     connect(scope, &QComboBox::currentIndexChanged, this, &ParameterPanel::reload);
     connect(beam, &QSpinBox::editingFinished, this, &ParameterPanel::reload);
     beam->setEnabled(false);

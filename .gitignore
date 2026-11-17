@@ -78,3 +78,27 @@ MWD--MCF302CB/DebugConfig/
 *.lst
 *.map
 *.htm
+
+# 一次性排障脚本（不进仓库，需要时随现场重新生成）
+/auto_capture_on_up.ps1
+/capture_neighbor.ps1
+/dahua_discover.ps1
+/disable_extra_nics.ps1
+/find_camera.ps1
+/find_camera2.ps1
+/fix_multihoming.ps1
+/harden_nic.ps1
+/pin_arp.bat
+/rescue_rollback.ps1
+/rollback_net.bat
+
+# 本机诊断产物
+/harden_nic_report.txt
+/net_diag.txt
+/neighbor_capture.log
+/arp_watch.log
+
+# 上游比对副本与二进制安装包
+/.upstream/
+/intsall/
+/.codebuddy/

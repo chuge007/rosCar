@@ -30,6 +30,7 @@ SOURCES += \
     src/common/transport/media_channel.cpp \
     src/common/transport/bulk_channel.cpp \
     src/common/services/remote_workbench_session.cpp \
+    src/common/services/host_restart_client.cpp \
     src/common/services/robot_json_codec.cpp \
     src/common/services/workbench_data_codec.cpp \
     src/services/ultrasound_parameter_service.cpp \
@@ -45,6 +46,7 @@ SOURCES += \
     src/packetdecoder.cpp \
     src/scanwidgets.cpp \
     src/parameterpanel.cpp \
+    src/paramsliderfield.cpp \
     src/framerecorder.cpp \
     src/frameplayer.cpp \
     src/usbbootstrap.cpp \
@@ -94,6 +96,7 @@ HEADERS += \
     src/common/transport/media_channel.h \
     src/common/transport/bulk_channel.h \
     src/common/services/remote_workbench_session.h \
+    src/common/services/host_restart_client.h \
     src/common/services/robot_json_codec.h \
     src/common/services/workbench_data_codec.h \
     src/common/services/parameter_key.h \
@@ -107,8 +110,10 @@ HEADERS += \
     src/framedecoderworker.h \
     src/scanwaveformcache.h \
     src/packetdecoder.h \
+    src/scanpalette.h \
     src/scanwidgets.h \
     src/parameterpanel.h \
+    src/paramsliderfield.h \
     src/framerecorder.h \
     src/frameplayer.h \
     src/rawpacket.h \
