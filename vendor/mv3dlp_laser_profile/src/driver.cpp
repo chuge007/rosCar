@@ -647,7 +647,9 @@ void Driver::connectBySerial(const std::string& serial_number) {
     impl_->connected = true;
     impl_->registerExceptionCallbackLocked();
     impl_->registerImageCallbackLocked();
-    impl_->registerProfileCallbackLocked();
+    // 1.3.4.2 起 profile 回调不再被驱动（callbackCounts 恒为 0），注册它却会把
+    // 设备的逐轮廓推送通道占住，图像回调只剩「攒满整幅」的零星帧。这里不注册，
+    // 让图像回调走正常的整幅出图路径。
 }
 
 void Driver::connectByIp(const std::string& ip_address) {
@@ -671,7 +673,7 @@ void Driver::connectByIp(const std::string& ip_address) {
     impl_->connected = true;
     impl_->registerExceptionCallbackLocked();
     impl_->registerImageCallbackLocked();
-    impl_->registerProfileCallbackLocked();
+    // 同 connectBySerial：不注册 profile 回调。
 }
 
 void Driver::disconnect() {
@@ -773,6 +775,29 @@ void Driver::setBoolParam(std::string_view key, bool value) {
     auto param = makeBoolParam(value);
     const std::string key_string{key};
     throwIfError(impl_->sdk.setParam(impl_->handle, key_string.c_str(), &param), "MV3D_LP_SetParam failed");
+}
+
+Driver::IntParamRange Driver::getIntParamRange(std::string_view key) const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->ensureConnected();
+    vendor::ParamRaw param{};
+    const std::string key_string{key};
+    throwIfError(impl_->sdk.getParam(impl_->handle, key_string.c_str(), &param),
+                 "MV3D_LP_GetParam failed");
+    if (param.enParamType != vendor::ParamType::int_value) {
+        throw std::runtime_error("Parameter is not an integer: " + key_string);
+    }
+    const auto& values = param.ParamInfo.stIntParam;
+    IntParamRange range;
+    range.current = values.nCurValue;
+    range.minimum = values.nMin;
+    range.maximum = values.nMax;
+    range.increment = values.nInc;
+    return range;
+}
+
+std::int64_t Driver::getIntParam(std::string_view key) const {
+    return getIntParamRange(key).current;
 }
 
 void Driver::setIntParam(std::string_view key, std::int64_t value) {

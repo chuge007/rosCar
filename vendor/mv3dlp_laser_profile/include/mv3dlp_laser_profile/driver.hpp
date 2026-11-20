@@ -82,6 +82,14 @@ public:
     std::vector<std::uint32_t> supportedAcquisitionModes() const;
     void setBoolParam(std::string_view key, bool value);
     std::int64_t getIntParam(std::string_view key) const;
+    // Integer parameter limit reported by the SDK (nMin/nMax/nInc).
+    struct IntParamRange {
+        std::int64_t current = 0;
+        std::int64_t minimum = 0;
+        std::int64_t maximum = 0;
+        std::int64_t increment = 0;
+    };
+    IntParamRange getIntParamRange(std::string_view key) const;
     void setIntParam(std::string_view key, std::int64_t value);
     void setFloatParam(std::string_view key, float value);
     void setEnumParam(std::string_view key, std::uint32_t value);

@@ -133,6 +133,7 @@ bool applySimpleWeldDetection(LaserGapDetection& detection,
   double scanMaximumX = 0.0;
   double previousX = 0.0;
   bool haveScanRange = false;
+  int backwardRun = 0;
   for (int index = 0; index < points.size(); ++index) {
     const QVector3D& point = points[index];
     if (!std::isfinite(point.x()) || !std::isfinite(point.z()) ||
@@ -140,10 +141,14 @@ bool applySimpleWeldDetection(LaserGapDetection& detection,
       continue;
     }
     if (haveScanRange && point.x() <= previousX) {
-      if (previousX - point.x() > 100.0)
-        break;
+      // A single non-monotonic sample is SDK row noise, not the end of the
+      // scan. Breaking on the first backward step truncated the measured scan
+      // envelope, and a centred weld was then reported as seam_outside_scan.
+      // Only a sustained reverse run means the row really folded back.
+      if (previousX - point.x() > 100.0 && ++backwardRun >= 8) break;
       continue;
     }
+    backwardRun = 0;
     if (!haveScanRange) {
       scanMinimumX = scanMaximumX = point.x();
       lineStartPx = index;
@@ -4445,9 +4450,14 @@ void LaserCorrectionController::updateScanBoundaryObservation(
   // is then not a physical scan edge, so do not let that artificial margin
   // latch seam_outside_scan. Genuine source loss remains covered by the image
   // and detection watchdogs. Keep the last reliable envelope while the stripe
-  // coverage recovers.
+  // coverage recovers, and drop the reliability flag as well: the stop gate
+  // reads the cached margin, so a truncated row that already wrote margin 0
+  // would otherwise keep parking a centred weld forever.
   if (boundaryObservationReliable_ && previousLineSpan > 0.20 &&
-      lineSpan < previousLineSpan * 0.65) return;
+      lineSpan < previousLineSpan * 0.65) {
+    boundaryObservationReliable_ = false;
+    return;
+  }
   const bool measured = identityConfirmed &&
       (!detection.edgeBreakFallback || detection.contourFallback) &&
       detection.confidence >= 0.060 && !reacquisitionPending_;

@@ -317,6 +317,18 @@ void RobotSensorController::connectCamera(const QString& serialNumber) {
       AppLogger::warning(QStringLiteral("CAMERA.CONFIG"),
                          QStringLiteral("event=set_trigger_mode result=UNSUPPORTED fallback=camera_default"));
     }
+    // 「使能采集帧率控制」一旦打开会存进设备，后续每个会话都只回空点
+    // （3200x2，全部 0x8000）。这里显式关掉，保持设备默认出图节奏，
+    // 否则轮廓会一直是空数据。
+    try {
+      camera_->setBoolParam("AcquisitionFrameRateEnable", false);
+      AppLogger::write(QStringLiteral("CAMERA.CONFIG"),
+                       QStringLiteral("event=set_frame_rate_enable result=OK enable=0"));
+    } catch (const std::exception& e) {
+      AppLogger::warning(QStringLiteral("CAMERA.CONFIG"),
+                         QStringLiteral("event=set_frame_rate_enable result=UNSUPPORTED error=%1")
+                             .arg(QString::fromLocal8Bit(e.what())));
+    }
     try {
       camera_->setFloatParam(mv3dlp::param_keys::kAcquisitionFrameRate, 30.0F);
       AppLogger::write(QStringLiteral("CAMERA.CONFIG"),
@@ -376,6 +388,35 @@ void RobotSensorController::startProfilePreview() {
     throw std::runtime_error("Camera does not advertise per-profile ImageMode=4");
   cameraTimer_->stop();
   if (camera_->isAcquiring()) camera_->stopAcquisition();
+  // 相机线阵 3200 点，实际出多少列由设备与 SDK 版本决定：1.3.0.3 只回 2048
+  // 列（右侧 36% 丢失），1.3.4.2 回整条 3200 列。这里只在启动时读一次
+  // Width 范围并记录；能放宽就放宽，设不上就保持设备默认，不影响取流。
+  constexpr std::int64_t kProfileLinePoints = 3200;
+  try {
+    const auto widthRange = camera_->getIntParamRange(mv3dlp::param_keys::kWidth);
+    const std::int64_t targetWidth =
+        std::min(kProfileLinePoints, widthRange.maximum);
+    std::int64_t appliedWidth = widthRange.current;
+    if (targetWidth > widthRange.current) {
+      camera_->setIntParam(mv3dlp::param_keys::kWidth, targetWidth);
+      appliedWidth = targetWidth;
+    }
+    AppLogger::write(QStringLiteral("CAMERA.CONFIG"),
+        QStringLiteral("event=set_line_width current=%1 min=%2 max=%3 inc=%4 "
+                       "requested=%5 applied=%6")
+            .arg(widthRange.current).arg(widthRange.minimum)
+            .arg(widthRange.maximum).arg(widthRange.increment)
+            .arg(kProfileLinePoints).arg(appliedWidth));
+  } catch (const std::exception& e) {
+    AppLogger::warning(QStringLiteral("CAMERA.CONFIG"),
+        QStringLiteral("event=set_line_width result=UNSUPPORTED requested=%1 "
+                       "fallback=device_default error=%2")
+            .arg(kProfileLinePoints)
+            .arg(QString::fromLocal8Bit(e.what())));
+  }
+  // 采样率瓶颈在「整幅图凑满 Height 行才回传」：3200x2000 要 3.5 s 一帧，
+  // 3200x5 也要 10 s。把图像行数压到最小（设备下限 32，步进 4），
+  // 3200x32 按 571 行/s 计算约 56 ms 一帧，才能喂得上纠偏闭环。
   camera_->setAcquisitionMode(mv3dlp::AcquisitionMode::point_cloud_image);
   camera_->startAcquisition();
   correctionProfileMode_ = true;

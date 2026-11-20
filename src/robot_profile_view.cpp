@@ -17,6 +17,10 @@
 namespace {
 // 底部状态行的行高：宽度不够时把「X/Z 范围」与「SDK 帧号/点数/耗时」分成两行。
 constexpr int kStatusLineHeight = 14;
+// 相机「采集范围详细设定」：X 方向间距 31.74 μm/像素，实测约 10.6 个原始
+// count 为一列，故 1 count ≈ 3 μm；Z 方向尺度 2.0 μm/count。
+constexpr double kXMmPerCount = 0.003;
+constexpr double kZMmPerCount = 0.002;
 }
 
 RobotProfileView::RobotProfileView(QWidget *parent) : QWidget(parent)
@@ -121,8 +125,7 @@ void RobotProfileView::clear()
     m_receivedAtEpochMs = 0;
     m_displayRangeInitialized = false;
     m_displayHalfSpanX = 0.0;
-    m_displayMinHorizontal = 0.0;
-    m_displayMaxHorizontal = 0.0;
+    m_displayHalfSpanXSmooth = 0.0;
     m_profileUpdatePending = false;
     m_profileCacheValid = false;
     m_cachedValidPoints.clear();
@@ -358,56 +361,56 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
             m_displayHalfSpanX = std::max(
                 m_displayHalfSpanX,
                 std::max(std::abs(minHorizontal), std::abs(maxHorizontal)));
+        // X 轴必须以视野零点（激光线中心）为对称轴。此前按「真实扫描范围 +
+        // 把零点留在画面内」铺满绘图区，框内中心因此变成数据范围的中点：
+        // 数据不对称时（例如 -17610..4941），线上实际 32% 位置的焊道会在框里
+        // 显示成居中，与激光线打到的位置对不上。判定侧绝对位置也按
+        // absoluteCenterRatio = 0.5 + x/(2*halfSpanX) 计算，两边必须共用
+        // 同一套映射，屏内位置才等于激光线上的实际位置。
+        const double halfSpanX = std::max(
+            m_displayHalfSpanX,
+            std::max(std::abs(minHorizontal), std::abs(maxHorizontal)));
         if (!m_displayRangeInitialized) {
-            m_displayMinHorizontal = minHorizontal;
-            m_displayMaxHorizontal = maxHorizontal;
+            m_displayHalfSpanXSmooth = halfSpanX;
             m_displayMinVertical = minVertical;
             m_displayMaxVertical = maxVertical;
             m_displayRangeInitialized = true;
         } else {
             constexpr double rangeAlpha = 0.20;
-            m_displayMinHorizontal +=
-                rangeAlpha * (minHorizontal - m_displayMinHorizontal);
-            m_displayMaxHorizontal +=
-                rangeAlpha * (maxHorizontal - m_displayMaxHorizontal);
             m_displayMinVertical +=
                 rangeAlpha * (minVertical - m_displayMinVertical);
             m_displayMaxVertical +=
                 rangeAlpha * (maxVertical - m_displayMaxVertical);
+            // 数据扩到比例尺之外立即跟上，否则轮廓被裁；数据收缩时慢收，
+            // 避免比例尺抖动把焊道在屏内左右拖着走。
+            if (halfSpanX >= m_displayHalfSpanXSmooth)
+                m_displayHalfSpanXSmooth = halfSpanX;
+            else
+                m_displayHalfSpanXSmooth += 0.05 * (halfSpanX - m_displayHalfSpanXSmooth);
         }
-        // X 轴按真实扫描范围铺满绘图区。旧实现把范围对称成
-        // ±max(|minX|,|maxX|)：轮廓只覆盖视野一侧时另一半全是空白，看起来
-        // 像数据没传全。零点（视野基准）必须留在画面内，否则操作员无法从
-        // 图形判断焊道相对视野中心的偏移。
-        double displayMinX = std::min(m_displayMinHorizontal, 0.0);
-        double displayMaxX = std::max(m_displayMaxHorizontal, 0.0);
-        const double spanX = displayMaxX - displayMinX;
-        if (std::isfinite(spanX) && spanX > 1e-9) {
-            const double padX = spanX * 0.02;
-            displayMinX -= padX;
-            displayMaxX += padX;
-        } else {
-            const double halfSpanX = std::max(
-                m_displayHalfSpanX,
-                std::max(std::abs(minHorizontal), std::abs(maxHorizontal)));
-            displayMinX = -std::max(halfSpanX, 1e-3);
-            displayMaxX = std::max(halfSpanX, 1e-3);
-        }
-        minHorizontal = displayMinX;
-        maxHorizontal = displayMaxX;
+        const double symmetricHalfSpanX = std::max(m_displayHalfSpanXSmooth, 1e-3);
+        minHorizontal = -symmetricHalfSpanX;
+        maxHorizontal = symmetricHalfSpanX;
         minVertical = std::min(minVertical, m_displayMinVertical);
         maxVertical = std::max(maxVertical, m_displayMaxVertical);
         if (m_lastPaintDiagnosticMs == diagnosticNow) {
+            const double screenRatio =
+                m_hasDetection && std::isfinite(m_detection.profileCenterX)
+                    ? (m_detection.profileCenterX + symmetricHalfSpanX) /
+                          (2.0 * symmetricHalfSpanX)
+                    : -1.0;
             crawling::AppLogger::write(QStringLiteral("CAMERA.UI"),
                 QStringLiteral("event=profile_xz_range frame=%1 display_x=%2,%3 "
-                               "data_x=%4,%5 zero_line_ratio=%6")
+                               "data_x=%4,%5 half_span_x=%6 center_screen_ratio=%7 "
+                               "center_ratio=%8")
                     .arg(m_frameNumber)
                     .arg(minHorizontal, 0, 'g', 9)
                     .arg(maxHorizontal, 0, 'g', 9)
                     .arg(m_cachedMinHorizontal, 0, 'g', 9)
                     .arg(m_cachedMaxHorizontal, 0, 'g', 9)
-                    .arg(-minHorizontal / std::max(1e-9, maxHorizontal - minHorizontal),
-                         0, 'f', 4));
+                    .arg(symmetricHalfSpanX, 0, 'g', 9)
+                    .arg(screenRatio, 0, 'f', 4)
+                    .arg(m_detection.absoluteCenterRatio, 0, 'f', 4));
         }
     }
 
@@ -427,14 +430,27 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
     }
     // 窄宽度下把底部状态行拆成两行，保证 X/Z 范围与帧号信息都完整可见。
     const QFontMetrics metrics(painter.font());
-    const QString rangeText =
-        QStringLiteral("%1 %2 .. %3    %4 %5 .. %6")
+    // X/Z 轮廓用的是 SDK 原始计数：按相机「采集范围详细设定」给的标定，
+    // X 方向间距 31.74 μm/像素（实测约 10.6 counts/列 → 1 count ≈ 3 μm），
+    // Z 方向尺度 2.0 μm/count。状态行按毫米显示，原始计数只留在日志里。
+    QString rangeText;
+    if (m_viewMode == ViewMode::XZ) {
+        rangeText = QStringLiteral("%1 %2 .. %3 mm    %4 %5 .. %6 mm")
+            .arg(horizontalName)
+            .arg(minHorizontal * kXMmPerCount, 0, 'f', 1)
+            .arg(maxHorizontal * kXMmPerCount, 0, 'f', 1)
+            .arg(verticalName)
+            .arg(minVertical * kZMmPerCount, 0, 'f', 1)
+            .arg(maxVertical * kZMmPerCount, 0, 'f', 1);
+    } else {
+        rangeText = QStringLiteral("%1 %2 .. %3    %4 %5 .. %6")
             .arg(horizontalName)
             .arg(minHorizontal, 0, 'f', 2)
             .arg(maxHorizontal, 0, 'f', 2)
             .arg(verticalName)
             .arg(minVertical, 0, 'f', 2)
             .arg(maxVertical, 0, 'f', 2);
+    }
     const QString frameText =
         QStringLiteral("SDK #%1 | %2/%3 | %4 ms")
             .arg(m_frameNumber)
@@ -473,6 +489,24 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
         const double zeroX = mapPoint(QPointF(0.0, minVertical)).x();
         painter.setPen(QPen(QColor(QStringLiteral("#9aa5af")), 1, Qt::DashLine));
         painter.drawLine(QPointF(zeroX, plot.top()), QPointF(zeroX, plot.bottom()));
+        painter.setPen(QColor(QStringLiteral("#7d8b99")));
+        painter.drawText(QPointF(zeroX + 4, plot.top() + 34),
+                         QStringLiteral("视野中心"));
+        // 比例尺以视野零点对称，没有数据的那一侧会留成空白；标出来，
+        // 免得被当成轮廓数据没传全。
+        const double dataLeftX =
+            mapPoint(QPointF(m_cachedMinHorizontal, minVertical)).x();
+        const double dataRightX =
+            mapPoint(QPointF(m_cachedMaxHorizontal, minVertical)).x();
+        const double blankLeftWidth = dataLeftX - plot.left();
+        const double blankRightWidth = plot.right() - dataRightX;
+        painter.setPen(QColor(QStringLiteral("#5f707f")));
+        if (blankLeftWidth > plot.width() * 0.12)
+            painter.drawText(QRectF(plot.left(), plot.top(), blankLeftWidth, plot.height()),
+                             Qt::AlignCenter, QStringLiteral("未采集"));
+        if (blankRightWidth > plot.width() * 0.12)
+            painter.drawText(QRectF(dataRightX, plot.top(), blankRightWidth, plot.height()),
+                             Qt::AlignCenter, QStringLiteral("未采集"));
     }
 
     painter.save();
@@ -507,15 +541,21 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
         }
     }
     if (m_viewMode == ViewMode::XZ && m_detection.profileNoise > 0.0) {
-        painter.setPen(QPen(QColor(QStringLiteral("#f6cb54")), 1,
-                            Qt::DashLine));
-        painter.drawLine(
-            mapPoint(QPointF(minHorizontal,
-                             m_detection.profileBaselineOffset +
-                                 m_detection.profileBaselineSlope * minHorizontal)),
-            mapPoint(QPointF(maxHorizontal,
-                             m_detection.profileBaselineOffset +
-                                 m_detection.profileBaselineSlope * maxHorizontal)));
+        // 比例尺对零对称后两侧可能没有回波，基线只画到实际数据范围，
+        // 否则空白区里也会有一条线，看着像那里有轮廓。
+        const double baselineLeft = std::max(minHorizontal, m_cachedMinHorizontal);
+        const double baselineRight = std::min(maxHorizontal, m_cachedMaxHorizontal);
+        if (baselineRight > baselineLeft) {
+            painter.setPen(QPen(QColor(QStringLiteral("#f6cb54")), 1,
+                                Qt::DashLine));
+            painter.drawLine(
+                mapPoint(QPointF(baselineLeft,
+                                 m_detection.profileBaselineOffset +
+                                     m_detection.profileBaselineSlope * baselineLeft)),
+                mapPoint(QPointF(baselineRight,
+                                 m_detection.profileBaselineOffset +
+                                     m_detection.profileBaselineSlope * baselineRight)));
+        }
     }
 
     painter.setPen(QPen(fresh ? QColor(QStringLiteral("#59d8ff"))
@@ -565,7 +605,27 @@ void RobotProfileView::paintProfile(QPainter &painter, const QRect &area)
                                      : m_detection.profileDetectionMode == crawling::ProfileDetectionMode::TemplateOnly
                                          ? QStringLiteral("本帧模板未匹配")
                                          : QStringLiteral("本帧未确认焊道"));
-    painter.drawText(plot.left() + 6, plot.top() + 18, algorithm + QStringLiteral("：") + state);
+    QString positionText;
+    if (located && m_detection.profileAxisHalfSpanX > 0.0 &&
+        std::isfinite(m_detection.profileCenterX)) {
+        // 与判定用的 absoluteCenterRatio 同一个口径，便于和激光线上的
+        // 实际位置核对。
+        positionText = QStringLiteral("线上位置 %1%")
+            .arg(100.0 * (0.5 + m_detection.profileCenterX /
+                                    (2.0 * m_detection.profileAxisHalfSpanX)),
+                 0, 'f', 1);
+    }
+    const QString stateText = algorithm + QStringLiteral("：") + state;
+    painter.drawText(plot.left() + 6, plot.top() + 18, stateText);
+    // 位置读数靠右单独放，避免和左侧状态文字压在一起。
+    if (!positionText.isEmpty()) {
+        const int leftWidth = metrics.horizontalAdvance(stateText) + 6;
+        const int rightWidth = metrics.horizontalAdvance(positionText);
+        if (leftWidth + rightWidth + 18 < plot.width()) {
+            painter.drawText(QRect(plot.left(), plot.top() + 6, plot.width() - 6, 16),
+                             Qt::AlignRight | Qt::AlignVCenter, positionText);
+        }
+    }
     painter.drawText(8, 18, viewTitle);
     int statusY = height() - 8 -
                   kStatusLineHeight * static_cast<int>(statusLines.size() - 1);
