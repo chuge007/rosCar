@@ -20,12 +20,16 @@ INCLUDEPATH += $$PWD/vendor/phaselink/include $$PWD/src $$PWD/src/common $$ROBOT
 INCLUDEPATH += $$MV3DLP_SOURCE_ROOT/include
 LIBS += -L$$PWD/vendor/phaselink/lib -lclient
 win32-msvc*: QMAKE_CXXFLAGS += /utf-8
-win32: LIBS += Setupapi.lib Winusb.lib
+# ole32/shell32/advapi32: 自启动自愈需要 IShellLink、SHGetKnownFolderPath 与
+# 令牌查询（判断是否以 SYSTEM 身份运行）。
+win32: LIBS += Setupapi.lib Winusb.lib ole32.lib shell32.lib advapi32.lib
 win32-msvc*: QMAKE_LFLAGS_RELEASE += /MAP:$$shell_path($$PWD/bin/PA1664RobotHost.map)
 
 SOURCES += \
     src/backend/main.cpp \
     src/backend/host_application.cpp \
+    src/backend/host_autostart.cpp \
+    src/backend/host_restart_server.cpp \
     src/backend/robot_host_service.cpp \
     src/backend/robot_peripheral_host_service.cpp \
     src/backend/ultrasound_host_service.cpp \
@@ -71,6 +75,7 @@ SOURCES += \
     $$ROBOT_SOURCE_ROOT/wheel_synchronizer.cpp \
     $$ROBOT_SOURCE_ROOT/servo_protocol.cpp \
     $$ROBOT_SOURCE_ROOT/mwd_rs485_protocol.cpp \
+    $$ROBOT_SOURCE_ROOT/mwd_can_protocol.cpp \
     $$ROBOT_SOURCE_ROOT/mwd_modbus_protocol.cpp \
     $$ROBOT_SOURCE_ROOT/rim302_protocol.cpp \
     $$ROBOT_SOURCE_ROOT/wheel_motor_controller.cpp \
@@ -81,6 +86,8 @@ SOURCES += \
 
 HEADERS += \
     src/backend/host_application.h \
+    src/backend/host_autostart.h \
+    src/backend/host_restart_server.h \
     src/backend/robot_host_service.h \
     src/backend/robot_peripheral_host_service.h \
     src/backend/ultrasound_host_service.h \
@@ -129,6 +136,7 @@ HEADERS += \
     $$ROBOT_SOURCE_ROOT/wheel_synchronizer.h \
     $$ROBOT_SOURCE_ROOT/servo_protocol.h \
     $$ROBOT_SOURCE_ROOT/mwd_rs485_protocol.h \
+    $$ROBOT_SOURCE_ROOT/mwd_can_protocol.h \
     $$ROBOT_SOURCE_ROOT/mwd_modbus_protocol.h \
     $$ROBOT_SOURCE_ROOT/rim302_protocol.h \
     $$ROBOT_SOURCE_ROOT/hardware_discovery.h \

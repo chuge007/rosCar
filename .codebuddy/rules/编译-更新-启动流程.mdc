@@ -56,14 +56,14 @@ cd d:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmpSeparate
 copy /Y bin\PA1664RobotHost.exe startup_deploy\robot_host\app\PA1664RobotHost.exe
 
 # 2) 远程停旧进程并清运行标记（不清 lock 会起不来）
-ssh a@192.168.1.20 "chcp 65001 >nul && taskkill /F /IM PA1664RobotHost.exe & del /Q C:\Users\a\Desktop\robot_host\app\robot_host.lock"
+ssh a@192.168.66.10 "chcp 65001 >nul && taskkill /F /IM PA1664RobotHost.exe & del /Q C:\Users\a\Desktop\robot_host\app\robot_host.lock"
 
 # 3) 备份旧 exe 后上传新 exe
-ssh a@192.168.1.20 "chcp 65001 >nul && copy /Y C:\Users\a\Desktop\robot_host\app\PA1664RobotHost.exe C:\Users\a\Desktop\robot_host\app\PA1664RobotHost.exe.bak"
-scp bin\PA1664RobotHost.exe a@192.168.1.20:C:/Users/a/Desktop/robot_host/app/PA1664RobotHost.exe
+ssh a@192.168.66.10 "chcp 65001 >nul && copy /Y C:\Users\a\Desktop\robot_host\app\PA1664RobotHost.exe C:\Users\a\Desktop\robot_host\app\PA1664RobotHost.exe.bak"
+scp bin\PA1664RobotHost.exe a@192.168.66.10:C:/Users/a/Desktop/robot_host/app/PA1664RobotHost.exe
 
 # 4) 校验上传结果（时间戳与字节数必须是刚编的那份）
-ssh a@192.168.1.20 "chcp 65001 >nul && dir C:\Users\a\Desktop\robot_host\app\PA1664RobotHost.exe"
+ssh a@192.168.66.10 "chcp 65001 >nul && dir C:\Users\a\Desktop\robot_host\app\PA1664RobotHost.exe"
 ```
 
 判断依据是 `bin\PA1664RobotHost.exe` 的 LastWriteTime：现网 exe 时间戳比它旧，就等于修复没生效，必须推。
@@ -72,7 +72,7 @@ ssh a@192.168.1.20 "chcp 65001 >nul && dir C:\Users\a\Desktop\robot_host\app\PA1
 
 ```powershell
 # 小车端 Host
-ssh a@192.168.1.20 "chcp 65001 >nul && cd /d C:\Users\a\Desktop\robot_host && start \"\" StartRobotHost.cmd"
+ssh a@192.168.66.10 "chcp 65001 >nul && cd /d C:\Users\a\Desktop\robot_host && start \"\" StartRobotHost.cmd"
 
 # 本地 Workbench（即使是只改 Host，也要打开，方便看界面与联调）
 start .\bin\PA1664Workbench.exe

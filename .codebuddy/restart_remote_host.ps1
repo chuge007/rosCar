@@ -5,5 +5,5 @@ if (Test-Path C:\Users\a\Desktop\robot_host\app\robot_host.lock) { Remove-Item C
 "stopped"
 '@
 $b64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($stop))
-ssh a@192.168.1.20 powershell -NoProfile -EncodedCommand $b64
+ssh a@192.168.66.10 powershell -NoProfile -EncodedCommand $b64
 powershell -NoProfile -ExecutionPolicy Bypass -File d:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmpSeparate\.codebuddy\start_remote_host.ps1

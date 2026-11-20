@@ -133,7 +133,7 @@ class RobotCommTester : public QObject {
     Q_OBJECT
 public:
     struct Options {
-        QString host = QStringLiteral("192.168.1.20");
+        QString host = QStringLiteral("192.168.66.10");
         quint16 port = 43100;
         QString iniPath;
         QString laserSerial;
@@ -1057,7 +1057,7 @@ int main(int argc, char* argv[]) {
     parser.addHelpOption();
 
     QCommandLineOption hostOpt(QStringList() << "H" << "host", "Robot IP", "host",
-                               "192.168.1.20");
+                               "192.168.66.10");
     QCommandLineOption portOpt(QStringList() << "p" << "port", "Control port", "port",
                                "43100");
     QCommandLineOption iniOpt(QStringList() << "i" << "ini",

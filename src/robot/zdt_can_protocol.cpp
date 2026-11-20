@@ -52,4 +52,8 @@ QVector<ZdtCanFrame> ZdtCanProtocol::stopCommand(int address) {
   return packetize(address, QByteArray::fromHex("FE98006B"));
 }
 
+QVector<ZdtCanFrame> ZdtCanProtocol::releaseStallCommand(int address) {
+  return packetize(address, QByteArray::fromHex("0E016B"));
+}
+
 } // namespace crawling

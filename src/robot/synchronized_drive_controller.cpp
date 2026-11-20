@@ -17,6 +17,15 @@ namespace {
 constexpr int kMotorCommunicationIntervalMs = 100;
 constexpr double kMotionEpsilonMps = 1e-9;
 constexpr bool kMotorOutputEnabled = true;
+// 使能后先等抱闸脱开再放行速度指令。实测 0x77 从下发到 rlyCtrlRslt 变 1
+// 约需 1~2 秒（继电器 + 闸瓦机械动作），所以窗口给 3 秒。
+constexpr int kBrakeReleaseGuardMs = 3000;
+// 0x76 系统复位后驱动器重启所需时间，之后才补 0x77 松闸。
+constexpr int kSystemResetRestartMs = 2500;
+// 窗口内查询抱闸位的间隔。
+constexpr int kBrakeStatusQueryIntervalMs = 200;
+// 状态帧超过这个年龄就不再采信，避免用静止时的旧值误判。
+constexpr int kBrakeStatusMaxAgeMs = 1500;
 
 double approachVectorComponent(double current, double target, double scale) {
   return current + (target - current) * scale;
@@ -267,6 +276,8 @@ void SynchronizedDriveController::requestEnable(bool enabled) {
              CRAWLING_TEXT("\xE5\xba\x95\xE7\x9B\x98\xE8\xbe\x93\xE5\x87\xba\xE5\xb7\xb2\xE7\xa6\x81\xE7\x94\xa8"));
     if (wheelMotors_.isInitialized()) {
       sendStopPair(true);
+      // 不再主动发 0x78 锁抱闸：抱闸本来由驱动器按运行状态控制，人工锁闸
+      // 一旦碰上驱动器的故障锁存，就再也松不开（现场右轮的自锁就是这么来的）。
     }
     return;
   }
@@ -277,12 +288,24 @@ void SynchronizedDriveController::requestEnable(bool enabled) {
   resetMotionState();
   input_.valid = true;
   input_.receivedAtMs = nowMs();
+  brakeGuardUntilMs_ = nowMs() + kBrakeReleaseGuardMs;
+  lastBrakeQueryMs_ = -1;
   setState(DriveState::Enabled,
            CRAWLING_TEXT("\xE5\xba\x95\xE7\x9B\x98\xE5\xb7\xb2\xE4\xbd\xbf\xE8\x83\xbd\xEF\xbc\x8C\xE5\x8F\xaf\xE6\x8E\xa7\xE5\x88\xb6"));
   emit logMessage(QStringLiteral("Drive enabled: wheel speed control is active"));
   // The motor bus is already stopped and holding the current position after
   // connect/reset. Enabling only arms command processing; avoid a duplicate
   // position-hold transaction that can fail on a transient serial reply.
+  //
+  // 抱闸必须在这里显式释放（官方 0x77）：CAN 伺服上电/复位后抱闸保持 LOCKED，
+  // 此时速度指令只会把电流顶到限幅而输出轴不动（现场就是一侧轮子不转、整车跑偏）。
+  // 驱动器执行抱闸动作需要时间，所以使能后还有 brakeGuardUntilMs_ 窗口挡着速度。
+  if (wheelMotors_.supportsBrakeControl()) {
+    const bool brakeOk = wheelMotors_.setBrakeReleased(true);
+    emit logMessage(QStringLiteral("Wheel brake_release(0x77) result=%1")
+                        .arg(brakeOk ? QStringLiteral("OK")
+                                     : QStringLiteral("FAILED")));
+  }
 }
 
 void SynchronizedDriveController::emergencyStop() {
@@ -290,6 +313,7 @@ void SynchronizedDriveController::emergencyStop() {
   setState(DriveState::EmergencyStop,
            CRAWLING_TEXT("\xE5\xb7\xb2\xE8\xaf\xb7\xE6\xb1\x82\xE7\xb4\xA7\xE6\x80\xa5\xE5\x81\x9C\xE6\xad\xa2"));
   sendStopPair(true);
+  // 急停不主动锁抱闸，交回驱动器按运行状态控制（避免制造新的抱闸锁存）。
 }
 
 void SynchronizedDriveController::systemReset() {
@@ -309,9 +333,25 @@ void SynchronizedDriveController::clearAlarm() {
     emit logMessage(QStringLiteral("Clear alarm skipped: wheel motor bus is disconnected"));
     return;
   }
-  emit logMessage(QStringLiteral("Wheel motor clear alarm/stop result=%1")
-                      .arg(wheelMotors_.reset() ? QStringLiteral("OK")
-                                                 : QStringLiteral("FAILED")));
+  resetMotionState();
+  setState(DriveState::Idle, QStringLiteral("Wheel motor clear alarm"));
+  // 官方协议：0x76 系统复位才是"重启程序"，一级故障（过流/堵转/缺相）只能靠它
+  // 或断电解除；0x80 只是"电机关闭"。驱动器收到 0x76 后不返回应答并重启，
+  // 重启后抱闸回到锁死状态，所以这里延时补一次 0x77 才能恢复可驱动。
+  const bool resetOk = wheelMotors_.reset();
+  emit logMessage(QStringLiteral("Wheel system_reset(0x76) result=%1")
+                      .arg(resetOk ? QStringLiteral("OK")
+                                   : QStringLiteral("FAILED")));
+  if (!wheelMotors_.supportsBrakeControl()) {
+    return;
+  }
+  QTimer::singleShot(kSystemResetRestartMs, this, [this] {
+    if (!wheelMotors_.isInitialized()) return;
+    const bool brakeOk = wheelMotors_.setBrakeReleased(true);
+    emit logMessage(
+        QStringLiteral("Wheel brake_release(0x77) after reset result=%1")
+            .arg(brakeOk ? QStringLiteral("OK") : QStringLiteral("FAILED")));
+  });
 }
 
 void SynchronizedDriveController::shutdown() {
@@ -324,8 +364,32 @@ void SynchronizedDriveController::shutdown() {
 
 void SynchronizedDriveController::controlTick() {
   const qint64 now = nowMs();
+  const qint64 tickGapMs = lastTickMs_ >= 0 ? now - lastTickMs_ : 0;
   const double deltaSeconds = std::clamp((now - lastTickMs_) / 1000.0, 0.001, 0.050);
   lastTickMs_ = now;
+
+  // A 20 ms PreciseTimer that fires late means this thread was descheduled or
+  // blocked inside the CAN exchange. publishTelemetry() runs in the same loop,
+  // so downstream the operator only sees "wheel feedback went stale": log the
+  // gap here, where the cause is still visible.
+  if (tickGapMs > 150 &&
+      (lastTickDelayDiagnosticMs_ < 0 ||
+       now - lastTickDelayDiagnosticMs_ >= 200)) {
+    lastTickDelayDiagnosticMs_ = now;
+    emit logMessage(
+        QStringLiteral("event=drive_loop_delay tick_gap_ms=%1 tick_period_ms=%2 "
+                       "can_poll_ms=%3 can_write_ms=%4 speed_write_age_ms=%5 "
+                       "state=%6 can_mode=%7")
+            .arg(tickGapMs)
+            .arg(controlTimer_.interval())
+            .arg(lastCanPollMs_)
+            .arg(lastCanWriteMs_)
+            .arg(lastSpeedWriteMs_ < 0 ? -1 : now - lastSpeedWriteMs_)
+            .arg(driveStateText(state_))
+            .arg(settings_.wheelCommunicationMode == WheelCommunicationMode::Can
+                     ? QStringLiteral("CAN_A2_9C")
+                     : QStringLiteral("RS485_A2_9C")));
+  }
 
   if (wheelMotors_.isInitialized()) {
     const bool zeroInput = std::abs(input_.linearMps) <= kMotionEpsilonMps &&
@@ -354,7 +418,9 @@ void SynchronizedDriveController::controlTick() {
     if (requestStatus) {
       lastMotorCommunicationMs_ = now;
     }
+    const qint64 pollStartedMs = nowMs();
     wheelMotors_.pollFeedback(&feedback, requestStatus);
+    lastCanPollMs_ = nowMs() - pollStartedMs;
     if (feedback.leftUpdated) {
       leftFeedback_.valid = true;
       leftFeedback_.wheelSpeedMps = feedback.leftSpeedMps;
@@ -431,6 +497,50 @@ void SynchronizedDriveController::controlTick() {
   }
 
   if (state_ == DriveState::Enabled) {
+    // 松闸窗口：使能后先不发速度，持续催 0x9A 状态帧，确认抱闸真的脱开再放行。
+    // 窗口内发速度会让电机顶着闸启动，瞬间顶到限幅并触发过载锁存，之后闸就
+    // 再也松不开（现场右轮的自锁就是这样形成的）。
+    if (brakeGuardUntilMs_ >= 0) {
+      if (wheelMotors_.supportsBrakeControl() &&
+          (lastBrakeQueryMs_ < 0 ||
+           now - lastBrakeQueryMs_ >= kBrakeStatusQueryIntervalMs)) {
+        lastBrakeQueryMs_ = now;
+        wheelMotors_.queryStatusNow();
+      }
+      const auto brake = wheelMotors_.brakeStatus();
+      const bool leftFresh = brake.leftValid && brake.leftAgeMs >= 0 &&
+                             brake.leftAgeMs <= kBrakeStatusMaxAgeMs;
+      const bool rightFresh = brake.rightValid && brake.rightAgeMs >= 0 &&
+                              brake.rightAgeMs <= kBrakeStatusMaxAgeMs;
+      const bool leftStuck = leftFresh && !brake.leftReleased;
+      const bool rightStuck = rightFresh && !brake.rightReleased;
+      if (now < brakeGuardUntilMs_) {
+        appliedLinearMps_ = 0.0;
+        appliedAngularRadps_ = 0.0;
+        if (!wheelMotors_.isStopped()) {
+          sendStopPair(false);
+        }
+        publishTelemetry();
+        return;
+      }
+      brakeGuardUntilMs_ = -1;
+      if (leftStuck || rightStuck) {
+        emit logMessage(QStringLiteral(
+                            "event=brake_not_released left_released=%1 "
+                            "left_age_ms=%2 right_released=%3 right_age_ms=%4")
+                            .arg(brake.leftReleased ? 1 : 0)
+                            .arg(brake.leftAgeMs)
+                            .arg(brake.rightReleased ? 1 : 0)
+                            .arg(brake.rightAgeMs));
+        enterFault(QStringLiteral(
+            "抱闸未松开（rlyCtrlRslt=0），已停止输出以免堵转锁存"));
+        return;
+      }
+      emit logMessage(
+          QStringLiteral("event=brake_release_confirmed left=%1 right=%2")
+              .arg(brake.leftReleased ? 1 : 0)
+              .arg(brake.rightReleased ? 1 : 0));
+    }
     const double effectiveWheelSpeedLimitMps =
         wheelMotors_.maximumCommandableWheelSpeedMps();
     if (input_.preserveLinearSpeed &&
@@ -703,7 +813,12 @@ void SynchronizedDriveController::sendSpeedPair(double leftMps, double rightMps,
     return;
   }
   lastMotorCommunicationMs_ = now;
+  const qint64 writeStartedMs = nowMs();
   const bool sent = wheelMotors_.setWheelSpeeds(leftMps, rightMps);
+  // Stamp the real send, not the throttled log line, so drive_loop_delay can
+  // tell "the loop never ran" apart from "the CAN write itself blocked".
+  lastSpeedWriteMs_ = writeStartedMs;
+  lastCanWriteMs_ = nowMs() - writeStartedMs;
   if (!sent && !wheelCommandFailureActive_) {
     wheelCommandFailureActive_ = true;
     emit logMessage(QStringLiteral("event=wheel_speed_write result=FAILED module=DRIVE.MOTOR left_mps=%1 right_mps=%2")
@@ -804,6 +919,7 @@ void SynchronizedDriveController::resetMotionState() {
   lastRightCommandScale_ = 1.0;
   lastCorrectionSteeringLimited_ = false;
   correctionCommandActive_ = false;
+  brakeGuardUntilMs_ = -1;
   synchronizer_.reset();
   input_ = {};
 }

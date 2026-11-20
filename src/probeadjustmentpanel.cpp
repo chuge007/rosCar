@@ -2,6 +2,7 @@
 
 #include "clamp_motor_controller.h"
 #include "clamp_motor_widgets.h"
+#include "paramsliderfield.h"
 #include "robot_app_logger.h"
 #include "services/remote_workbench_session.h"
 #include "services/robot_json_codec.h"
@@ -50,25 +51,25 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(
     auto *body = new QWidget;
     auto *layout = new QVBoxLayout(body);
     auto *hint = new QLabel(QStringLiteral(
-        "按轴配置每台夹子电机，保存后分别点动。与小车页共用配置；松开按钮或滑块即停止该电机。"));
+        "按轴配置每台前架电机，保存后分别点动。与小车页共用配置；松开按钮或滑块即停止该电机。"));
     hint->setWordWrap(true);
     layout->addWidget(hint);
 
-    auto *configuration = new QGroupBox(QStringLiteral("夹子电机配置"));
+    auto *configuration = new QGroupBox(QStringLiteral("前架电机配置"));
     auto *configurationLayout = new QVBoxLayout(configuration);
     m_motorSettings = new crawling::ClampMotorSettingsWidget;
     configurationLayout->addWidget(m_motorSettings);
     auto *buttons = new QHBoxLayout;
     auto *refresh = new QPushButton(QStringLiteral("刷新串口"));
-    auto *save = new QPushButton(QStringLiteral("保存夹子配置"));
-    auto *connectButton = new QPushButton(QStringLiteral("连接夹子电机"));
+    auto *save = new QPushButton(QStringLiteral("保存前架配置"));
+    auto *connectButton = new QPushButton(QStringLiteral("连接前架电机"));
     auto *disconnect = new QPushButton(QStringLiteral("断开"));
     for (auto *button : {refresh, save})
         buttons->addWidget(button);
     configurationLayout->addLayout(buttons);
     configuration->hide();
 
-    auto *manual = new QGroupBox(QStringLiteral("探头夹子电机手动控制"));
+    auto *manual = new QGroupBox(QStringLiteral("探头前架电机手动控制"));
     auto *manualLayout = new QVBoxLayout(manual);
     m_motorControls = new crawling::ClampMotorControlWidget(m_controller.data());
     auto *connectionRow = new QHBoxLayout;
@@ -99,7 +100,7 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(
     m_minSpacingSpin->setRange(0, 1000);
     m_minSpacingSpin->setDecimals(2);
     m_minSpacingSpin->setValue(10.0);
-    minRow->addWidget(m_minSpacingSpin);
+    minRow->addWidget(pa1664::ui::paramSliderField(m_minSpacingSpin), 1);
     m_resetZeroButton = new QPushButton(QStringLiteral("重置零点"));
     minRow->addWidget(m_resetZeroButton);
     minRow->addStretch();
@@ -110,7 +111,7 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(
     m_targetSpacingSpin->setRange(0, 1000);
     m_targetSpacingSpin->setDecimals(2);
     m_targetSpacingSpin->setValue(50.0);
-    targetRow->addWidget(m_targetSpacingSpin);
+    targetRow->addWidget(pa1664::ui::paramSliderField(m_targetSpacingSpin), 1);
     m_moveToSpacingButton = new QPushButton(QStringLiteral("移动到间距"));
     targetRow->addWidget(m_moveToSpacingButton);
     targetRow->addStretch();
@@ -262,8 +263,8 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(
                             m_status->setText(
                                 snapshot.value(QStringLiteral("clampStatus"))
                                     .toString(m_remoteClampConnected
-                                                  ? QStringLiteral("远程夹子电机已连接")
-                                                  : QStringLiteral("远程夹子电机未连接")));
+                                                  ? QStringLiteral("远程前架电机已连接")
+                                                  : QStringLiteral("远程前架电机未连接")));
                         }
                     };
                     if (name == QStringLiteral("host.ready")) {
@@ -279,7 +280,7 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(
                     if (name == QStringLiteral("host.peripheralsReleased")) {
                         m_remoteClampConnected = false;
                         m_motorControls->setRemoteConnected(false);
-                        m_status->setText(QStringLiteral("远程主机已释放夹子电机"));
+                        m_status->setText(QStringLiteral("远程主机已释放前架电机"));
                         return;
                     }
                     if (name == QStringLiteral("robot.clamp.position")) {
@@ -298,8 +299,8 @@ ProbeAdjustmentPanel::ProbeAdjustmentPanel(
                         m_status->setText(
                             data.value(QStringLiteral("message")).toString(
                                 m_remoteClampConnected
-                                    ? QStringLiteral("远程夹子电机已连接")
-                                    : QStringLiteral("远程夹子电机未连接")));
+                                    ? QStringLiteral("远程前架电机已连接")
+                                    : QStringLiteral("远程前架电机未连接")));
                         return;
                     }
                     if (name == QStringLiteral("robot.clamp.status")) {
@@ -398,7 +399,7 @@ void ProbeAdjustmentPanel::loadSettings()
     refreshSpacingMotors();
     if (m_remoteSession) {
         m_motorControls->setEnabled(true);
-        m_status->setText(QStringLiteral("远程夹子控制待命"));
+        m_status->setText(QStringLiteral("远程前架控制待命"));
         return;
     }
     applySettings();
@@ -445,7 +446,7 @@ void ProbeAdjustmentPanel::saveSettings()
         m_motorControls->setRemoteSettings(m_settings.clampMotors,
                                            m_settings.clampMotorSyncEnabled);
         m_motorControls->setEnabled(true);
-        m_status->setText(QStringLiteral("正在保存远程夹子配置"));
+        m_status->setText(QStringLiteral("正在保存远程前架配置"));
         return;
     }
     QSettings store(crawling::DriveSettings::persistentFilePath(), QSettings::IniFormat);
@@ -455,12 +456,12 @@ void ProbeAdjustmentPanel::saveSettings()
     latest.save(store);
     store.sync();
     if (store.status() != QSettings::NoError) {
-        m_status->setText(QStringLiteral("夹子配置保存失败"));
+        m_status->setText(QStringLiteral("前架配置保存失败"));
         return;
     }
     m_settings = latest;
     applySettings();
-    m_status->setText(QStringLiteral("夹子配置已保存，两个页面已同步"));
+    m_status->setText(QStringLiteral("前架配置已保存，两个页面已同步"));
 }
 
 const crawling::ClampMotorSettings *ProbeAdjustmentPanel::spacingMotor() const
@@ -598,7 +599,7 @@ void ProbeAdjustmentPanel::onMoveToSpacing()
         return;
     }
     if (motor->gearRatio <= 0.0) {
-        m_status->setText(QStringLiteral("传动比必须大于 0，请在夹子电机配置中设置"));
+        m_status->setText(QStringLiteral("传动比必须大于 0，请在前架电机配置中设置"));
         return;
     }
     const double minimum = m_minSpacingSpin->value();

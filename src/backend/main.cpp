@@ -1,4 +1,5 @@
 #include "host_application.h"
+#include "host_autostart.h"
 #include "robot_app_logger.h"
 #include "usbbootstrap.h"
 
@@ -9,15 +10,24 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSet>
 #include <QHostAddress>
 #include <QLockFile>
 #include <QMutex>
 #include <QProcess>
 #include <QTextStream>
+#include <QThread>
 #include <QTimer>
 
 #include <cstdio>
+
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -103,6 +113,59 @@ bool openHostLog(QString* error) {
   return true;
 }
 
+// 进程内重启（操作端“重启小车端程序”按钮触发）的第二半：替代进程必须先等
+// 旧进程放掉单实例锁、四个监听端口与 USB/CAN 设备句柄再初始化，否则会以
+// “已有实例运行”或端口占用直接退出。旧进程可能被主线程卡死拖住，这里给出
+// 等待预算后强制结束它，保证主机的自愈闭环一定能走完。
+void waitForPreviousHost(qint64 previousPid) {
+  using pa1664::remote::kAdminDeviceReleaseGraceMs;
+  using pa1664::remote::kAdminForcedKillMs;
+  using pa1664::remote::kAdminPreviousExitMs;
+  if (previousPid <= 0) return;
+  qInfo().noquote() << "HOST_RESTART_WAIT: previous pid" << previousPid;
+#ifdef Q_OS_WIN
+  HANDLE handle = OpenProcess(
+      SYNCHRONIZE | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+      static_cast<DWORD>(previousPid));
+  if (!handle) {
+    qInfo().noquote() << "HOST_RESTART_WAIT: previous pid already gone";
+  } else {
+    // PID 会被系统快速复用：确认它确实是 RobotHost 才等待/结束，避免误杀
+    // 一个恰好拿到同号 PID 的无关进程。
+    bool sameImage = true;
+    wchar_t imagePath[4096] = {};
+    DWORD imageChars = 4096;
+    if (QueryFullProcessImageNameW(handle, 0, imagePath, &imageChars)) {
+      sameImage = QFileInfo(QString::fromWCharArray(imagePath,
+                                                   static_cast<int>(imageChars)))
+                      .fileName()
+                      .compare(QStringLiteral("PA1664RobotHost.exe"),
+                               Qt::CaseInsensitive) == 0;
+    }
+    if (!sameImage) {
+      qWarning().noquote()
+          << "HOST_RESTART_WAIT: pid reused by another process, skip waiting";
+      CloseHandle(handle);
+      return;
+    }
+    if (WaitForSingleObject(handle, kAdminPreviousExitMs) != WAIT_OBJECT_0) {
+      qWarning().noquote()
+          << "HOST_RESTART_WAIT: timeout, terminating previous instance";
+      TerminateProcess(handle, 1);
+      WaitForSingleObject(handle, kAdminForcedKillMs);
+    }
+    CloseHandle(handle);
+  }
+#else
+  // 当前部署目标只有 Windows（MSVC + Qt）；其它平台保留原有单实例逻辑，
+  // 不做跨进程等待。
+  Q_UNUSED(previousPid);
+#endif
+  // 设备句柄不是随进程退出同步回收的（USB 相机/超声设备驱动尤甚），
+  // 留一点余量再初始化，避免新进程第一次打开设备就失败。
+  QThread::msleep(kAdminDeviceReleaseGraceMs);
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -159,11 +222,29 @@ int main(int argc, char* argv[]) {
   const QCommandLineOption bulkPortOption(
       QStringLiteral("bulk-port"), QStringLiteral("可靠批量 TCP 端口。"),
       QStringLiteral("port"), QString::number(pa1664::remote::kDefaultBulkPort));
+  // 内部参数：由上一实例在“重启小车端程序”流程中带入。不放进任何 UI，
+  // 手工启动主机时不需要它。
+  const QCommandLineOption restartAfterPidOption(
+      QStringLiteral("restart-after-pid"),
+      QStringLiteral("内部使用：等待指定 PID 的旧主机进程退出后再接管。"),
+      QStringLiteral("pid"));
+  const QCommandLineOption autostartOption(
+      QStringLiteral("autostart"),
+      QStringLiteral("强制登记开机自启动（忽略关闭标记与部署形态判断）。"));
+  const QCommandLineOption noAutostartOption(
+      QStringLiteral("no-autostart"), QStringLiteral("本次不处理开机自启动项。"));
+  const QCommandLineOption removeAutostartOption(
+      QStringLiteral("remove-autostart"),
+      QStringLiteral("删除开机自启动项并写入关闭标记。"));
+  parser.addOption(autostartOption);
+  parser.addOption(noAutostartOption);
+  parser.addOption(removeAutostartOption);
   parser.addOption(listenOption);
   parser.addOption(controlPortOption);
   parser.addOption(realtimePortOption);
   parser.addOption(mediaPortOption);
   parser.addOption(bulkPortOption);
+  parser.addOption(restartAfterPidOption);
   parser.process(app);
 
   bool portOk = false;
@@ -199,8 +280,42 @@ int main(int argc, char* argv[]) {
     return 2;
   }
 
+  // 纯运维命令：只卸载自启动，不启动服务。放在单实例锁之前，
+  // 这样主机正在运行时执行也能生效（否则会被“已有实例运行”挡在前面）。
+  if (parser.isSet(removeAutostartOption)) {
+    QString removeDetail;
+    const bool removed = pa1664::remote::HostAutostart::apply(
+        pa1664::remote::HostAutostartMode::Remove, &removeDetail);
+    if (removed)
+      qInfo().noquote() << "HOST_AUTOSTART REMOVED" << removeDetail;
+    else
+      qCritical().noquote() << "HOST_AUTOSTART REMOVE_FAILED" << removeDetail;
+    return removed ? 0 : 1;
+  }
+
+  // --autostart 同样在锁之前处理：现场点 InstallAutoStart 时主机往往已经在跑，
+  // 若把登记放在锁之后会被“已有实例运行”挡掉，脚本看起来什么都没做。
+  const bool autostartForced =
+      parser.isSet(autostartOption) && !parser.isSet(noAutostartOption);
+  if (autostartForced) {
+    QString forceDetail;
+    if (pa1664::remote::HostAutostart::apply(
+            pa1664::remote::HostAutostartMode::Force, &forceDetail)) {
+      qInfo().noquote() << "HOST_AUTOSTART OK" << forceDetail;
+    } else {
+      qWarning().noquote() << "HOST_AUTOSTART NOT_INSTALLED" << forceDetail;
+    }
+  }
+
   const QString lockPath = QDir(QCoreApplication::applicationDirPath())
-                              .filePath(QStringLiteral("robot_host.lock"));
+                             .filePath(QStringLiteral("robot_host.lock"));
+  if (parser.isSet(restartAfterPidOption)) {
+    waitForPreviousHost(parser.value(restartAfterPidOption).toLongLong());
+    // 被强制结束的旧进程不会执行 QLockFile 的析构，锁文件会留在盘上。
+    // 此时旧进程已确认退出，直接清掉比让 tryLock 的 stale 判定去猜更可靠。
+    if (QFile::exists(lockPath) && QFile::remove(lockPath))
+      qInfo().noquote() << "清理进程内重启留下的单实例锁:" << lockPath;
+  }
   QLockFile instanceLock(lockPath);
   instanceLock.setStaleLockTime(15000);
   bool haveInstanceLock = instanceLock.tryLock(100);
@@ -235,6 +350,26 @@ int main(int argc, char* argv[]) {
   if (!haveInstanceLock) {
     qCritical() << "已有 PA1664RobotHost 实例运行";
     return 3;
+  }
+
+  // 自启动自愈：第一次运行即登记，之后覆盖 exe 也不需要重装。
+  // 放在单实例锁之后，避免多个实例同时改同一个快捷方式。
+  // 任何失败只记录原因，绝不阻塞主机主服务。
+  // --remove-autostart 与 --autostart 都已在单实例锁之前处理，
+  // 这里只剩默认的 Ensure 与 --no-autostart。
+  if (!autostartForced) {
+    using pa1664::remote::HostAutostartMode;
+    const bool skipped = parser.isSet(noAutostartOption);
+    QString autostartDetail;
+    const bool installed = pa1664::remote::HostAutostart::apply(
+        skipped ? HostAutostartMode::Skip : HostAutostartMode::Ensure,
+        &autostartDetail);
+    if (skipped)
+      qInfo().noquote() << "HOST_AUTOSTART SKIPPED" << autostartDetail;
+    else if (installed)
+      qInfo().noquote() << "HOST_AUTOSTART OK" << autostartDetail;
+    else
+      qWarning().noquote() << "HOST_AUTOSTART NOT_INSTALLED" << autostartDetail;
   }
 
   pa1664::remote::HostApplication host;

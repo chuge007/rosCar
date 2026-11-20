@@ -3,4 +3,4 @@ $cmd = "cmd /c cd /d C:\Users\a\Desktop\robot_host\app && PA1664RobotHost.exe --
 Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd } | Select-Object ProcessId,ReturnValue
 '@
 $b64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
-ssh a@192.168.1.20 powershell -NoProfile -EncodedCommand $b64
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL a@192.168.66.10 powershell -NoProfile -EncodedCommand $b64

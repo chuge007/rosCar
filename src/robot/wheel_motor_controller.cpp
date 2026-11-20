@@ -53,13 +53,14 @@ QString canFrameTrace(const char* direction, const CanFrame& frame) {
     case 0x83: op = QStringLiteral("MODE_CLOSED_LOOP_83"); break;
     case 0x82: op = QStringLiteral("MODE_OPEN_LOOP_82"); break;
     case ServoProtocol::kMotorStop: op = QStringLiteral("STOP_81"); break;
-    case ServoProtocol::kMotorRun: op = QStringLiteral("RUN_88"); break;
-    case ServoProtocol::kBrakeControl: op = QStringLiteral("BRAKE_8C"); break;
+    case ServoProtocol::kMotorOff: op = QStringLiteral("OFF_80"); break;
+    case ServoProtocol::kBrakeRelease: op = QStringLiteral("BRAKE_RELEASE_77"); break;
+    case ServoProtocol::kBrakeLock: op = QStringLiteral("BRAKE_LOCK_78"); break;
     case ServoProtocol::kStatusQuery: op = QStringLiteral("QUERY_STATUS_9A"); break;
     case ServoProtocol::kSpeedFeedbackQuery: op = QStringLiteral("QUERY_SPEED_9C"); break;
     case 0x35: op = QStringLiteral("QUERY_35"); break;
     case 0x30: op = QStringLiteral("QUERY_FW_30"); break;
-    case ServoProtocol::kSystemReset: op = QStringLiteral("RESET_80"); break;
+    case ServoProtocol::kSystemReset: op = QStringLiteral("RESET_76"); break;
     case 0xF3: op = QStringLiteral("SPEED_V4_F3"); break;
     default: break;
   }
@@ -477,6 +478,66 @@ bool WheelMotorController::reset() {
   return leftSent && rightSent;
 }
 
+WheelMotorController::BrakeStatus WheelMotorController::brakeStatus() const {
+  BrakeStatus status;
+  const qint64 now = feedbackClock_.isValid() ? feedbackClock_.elapsed() : 0;
+  if (leftStatus_.has_value()) {
+    status.leftValid = true;
+    status.leftReleased = leftStatus_->brakeReleased;
+    status.leftAgeMs = leftStatusAtMs_ >= 0 ? now - leftStatusAtMs_ : -1;
+  }
+  if (rightStatus_.has_value()) {
+    status.rightValid = true;
+    status.rightReleased = rightStatus_->brakeReleased;
+    status.rightAgeMs = rightStatusAtMs_ >= 0 ? now - rightStatusAtMs_ : -1;
+  }
+  return status;
+}
+
+bool WheelMotorController::queryStatusNow() {
+  if (!initialized_ || !canMode_) {
+    return false;
+  }
+  const bool leftSent =
+      sendCanFrame(ServoProtocol::statusQuery(config_.leftMotorId));
+  const bool rightSent =
+      sendCanFrame(ServoProtocol::statusQuery(config_.rightMotorId));
+  return leftSent && rightSent;
+}
+
+bool WheelMotorController::setBrakeReleased(bool release) {
+  if (!initialized_) {
+    return false;
+  }
+  bool leftSent = false;
+  bool rightSent = false;
+  if (canMode_) {
+    leftSent =
+        sendCanFrame(ServoProtocol::brakeCommand(config_.leftMotorId, release));
+    rightSent =
+        sendCanFrame(ServoProtocol::brakeCommand(config_.rightMotorId, release));
+  } else {
+    // RS485 版走 V3.8 的 0x3E 帧，抱闸命令码同为 0x77 释放 / 0x78 锁死。
+    const std::uint8_t brakeCommand = release
+        ? MwdRs485Protocol::kBrakeRelease
+        : MwdRs485Protocol::kBrakeLock;
+    leftSent = sendCommand(true, brakeCommand, config_.leftMotorId);
+    rightSent = sendCommand(false, brakeCommand, config_.rightMotorId);
+  }
+  AppLogger::write(
+      QStringLiteral("WHEEL.BRAKE"),
+      QStringLiteral("event=brake_control action=%1 left_id=%2 left_tx=%3 "
+                     "right_id=%4 right_tx=%5 mode=%6")
+          .arg(release ? QStringLiteral("release") : QStringLiteral("lock"))
+          .arg(int(config_.leftMotorId))
+          .arg(leftSent ? QStringLiteral("OK") : QStringLiteral("FAILED"))
+          .arg(int(config_.rightMotorId))
+          .arg(rightSent ? QStringLiteral("OK") : QStringLiteral("FAILED"))
+          .arg(canMode_ ? QStringLiteral("CAN_0x77_0x78")
+                        : QStringLiteral("RS485_0x77_0x78")));
+  return leftSent && rightSent;
+}
+
 bool WheelMotorController::pollFeedback(WheelMotorFeedback* feedback,
                                         bool requestStatus) {
   if (canMode_) {
@@ -654,10 +715,14 @@ bool WheelMotorController::pollCanFeedback(bool requestStatus,
       }
       if (const auto status = ServoProtocol::parseStatus(frame);
           status.has_value()) {
+        const qint64 statusNow =
+            feedbackClock_.isValid() ? feedbackClock_.elapsed() : 0;
         if (status->motorId == config_.leftMotorId) {
           leftStatus_ = status;
+          leftStatusAtMs_ = statusNow;
         } else if (status->motorId == config_.rightMotorId) {
           rightStatus_ = status;
+          rightStatusAtMs_ = statusNow;
         }
         continue;
       }

@@ -34,6 +34,9 @@ class ClampMotorController final : public QObject {
   void setXSpeed(int percent); void setYSpeed(int percent); void setZSpeed(int percent);
   void stopX(); void stopY(); void stopZ();
   void stop();
+  // 按每台已配置电机自己的协议发送清错/复位指令：
+  // MWD-CAN 0x80 系统复位、MWD-RS485 停机、ZDT 0x0E 解除堵转、TT CANopen 0x6040 故障复位。
+  void clearAlarms();
   void requestPosition(int axis, int index);
   void moveToPosition(int axis, int index, double targetDegrees);
  public:

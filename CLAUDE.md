@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **rosCar** (44274 symbols, 57014 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **pa1664-workbench** (45568 symbols, 58850 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -25,10 +25,10 @@ This project is indexed by GitNexus as **rosCar** (44274 symbols, 57014 relation
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/rosCar/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/rosCar/clusters` | All functional areas |
-| `gitnexus://repo/rosCar/processes` | All execution flows |
-| `gitnexus://repo/rosCar/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/pa1664-workbench/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/pa1664-workbench/clusters` | All functional areas |
+| `gitnexus://repo/pa1664-workbench/processes` | All execution flows |
+| `gitnexus://repo/pa1664-workbench/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
@@ -78,4 +78,4 @@ This project is indexed by GitNexus as **rosCar** (44274 symbols, 57014 relation
 
 - 通道：TCP 43100 命令 / UDP 43101 实时 / UDP 43102 媒体 / TCP 43103 批量；实时通道 200 ms 租约，`realtime_codec` 属运动安全路径。
 - 日志落盘在 exe 所在目录：`bin\logs\`（本地）、`C:\Users\a\Desktop\robot_host\app\logs\`（小车端）。`robot_console.log` = Workbench，`robot_host.log` = Host，`comm/<category>.log` = `COMM.*`，`profile_weld_detection.log` = 焊缝诊断。**超声没有专属日志文件**。
-- 小车端直连 `ssh a@192.168.1.20`，部署目录 `C:\Users\a\Desktop\robot_host`，远程原生命令输出 GBK，需前置 `chcp 65001 >nul`；换 EXE 前要删 `app\robot_host.lock`。
+- 小车端直连 `ssh a@192.168.66.10`，部署目录 `C:\Users\a\Desktop\robot_host`，远程原生命令输出 GBK，需前置 `chcp 65001 >nul`；换 EXE 前要删 `app\robot_host.lock`。

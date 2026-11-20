@@ -28,6 +28,9 @@ class MwdRs485Protocol final {
   static constexpr std::uint8_t kMotorOff = 0x80;
   static constexpr std::uint8_t kMotorStop = 0x81;
   static constexpr std::uint8_t kSystemReset = 0x76;
+  // 系统抱闸释放 0x77 / 锁死 0x78（《伺服电机控制协议 V3.8》2.27/2.28）。
+  static constexpr std::uint8_t kBrakeRelease = 0x77;
+  static constexpr std::uint8_t kBrakeLock = 0x78;
   static constexpr std::uint8_t kReadMultiTurnEncoder = 0x60;
   static constexpr std::uint8_t kReadMultiTurnAngle = 0x92;
   static constexpr std::uint8_t kSpeedClosedLoop = 0xA2;

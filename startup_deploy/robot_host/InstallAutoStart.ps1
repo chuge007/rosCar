@@ -2,57 +2,23 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
-$startScript = Join-Path $root 'StartRobotHost.ps1'
-$appExe = Join-Path $root 'app\PA1664RobotHost.exe'
-$shortcutName = 'PA1664 Robot Host.lnk'
-$powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-if (-not (Test-Path -LiteralPath $powerShellExe -PathType Leaf)) {
-    $powerShellExe = Join-Path $PSHOME 'powershell.exe'
-}
-if (-not (Test-Path -LiteralPath $powerShellExe -PathType Leaf)) {
-    throw 'Windows PowerShell executable was not found.'
-}
 
-if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) {
-    throw ('Missing start script: ' + $startScript)
+$root = $PSScriptRoot
+$appExe = Join-Path $root 'app\PA1664RobotHost.exe'
+if (-not (Test-Path -LiteralPath $appExe -PathType Leaf)) {
+    $appExe = Join-Path $root 'PA1664RobotHost.exe'
 }
 if (-not (Test-Path -LiteralPath $appExe -PathType Leaf)) {
-    throw ('Deploy the complete Host runtime first. Missing: ' + $appExe)
+    throw 'PA1664RobotHost.exe was not found next to this script.'
 }
 
-$startupFolder = [Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
-$desktopFolder = [Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
-if ([string]::IsNullOrWhiteSpace($startupFolder) -or
-    [string]::IsNullOrWhiteSpace($desktopFolder)) {
-    throw 'Unable to resolve the current user Startup or Desktop folder.'
-}
+# The startup shortcut is owned by the host itself now: every launch verifies it
+# and rewrites it when it is missing or points somewhere else. This script only
+# forces a refresh and brings the host up right away. If a host is already
+# running, the new process exits on the single-instance lock and nothing breaks.
+Start-Process -FilePath $appExe -ArgumentList '--autostart' `
+    -WorkingDirectory (Split-Path -Parent $appExe) -WindowStyle Hidden
 
-function New-HostShortcut([string]$shortcutPath) {
-    $shell = New-Object -ComObject WScript.Shell
-    try {
-        $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = $powerShellExe
-        $shortcut.Arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $startScript + '"'
-        $shortcut.WorkingDirectory = $root
-        $shortcut.WindowStyle = 7
-        $shortcut.IconLocation = $appExe + ',0'
-        $shortcut.Description = 'Start the PA1664 robot host at user logon.'
-        $shortcut.Save()
-    }
-    finally {
-        if ($null -ne $shell) {
-            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)
-        }
-    }
-}
-
-$startupShortcut = Join-Path $startupFolder $shortcutName
-$desktopShortcut = Join-Path $desktopFolder $shortcutName
-New-HostShortcut $startupShortcut
-New-HostShortcut $desktopShortcut
-
-Write-Host 'PA1664 Robot Host autostart installed.'
-Write-Host ('Logon shortcut: ' + $startupShortcut)
-Write-Host ('Desktop shortcut: ' + $desktopShortcut)
+Write-Host 'PA1664 Robot Host started with --autostart.'
+Write-Host 'The logon shortcut is maintained by the host itself; no manual reinstall is needed after replacing the exe.'
 exit 0

@@ -10,6 +10,7 @@
 #include <QSet>
 #include <QStorageInfo>
 #include <QStringList>
+#include <QTemporaryFile>
 #include <QTimer>
 #include <algorithm>
 #include <cmath>
@@ -124,6 +125,56 @@ void ScanWaveformCache::close()
         m_file.flush();
         m_file.close();
     }
+}
+
+bool ScanWaveformCache::setFilePath(const QString &filePath)
+{
+    if (m_cachingEnabled) {
+        emit warning(QStringLiteral("扫描缓存正在运行，请先停止后再修改缓存目录。"));
+        return false;
+    }
+
+    const QString normalizedPath = QDir::cleanPath(QFileInfo(filePath).absoluteFilePath());
+    if (normalizedPath.isEmpty()) {
+        emit warning(QStringLiteral("缓存文件路径不能为空。"));
+        return false;
+    }
+    if (normalizedPath == QDir::cleanPath(QFileInfo(m_filePath).absoluteFilePath())) {
+        emitStatistics(true);
+        return true;
+    }
+
+    const QFileInfo targetInfo(normalizedPath);
+    if (!QDir().mkpath(targetInfo.absolutePath())) {
+        emit warning(QStringLiteral("无法建立缓存目录：%1")
+                         .arg(QDir::toNativeSeparators(targetInfo.absolutePath())));
+        return false;
+    }
+
+    QTemporaryFile writeProbe(
+        QDir(targetInfo.absolutePath()).filePath(QStringLiteral(".pa1664_cache_write_test_XXXXXX")));
+    if (!writeProbe.open()) {
+        emit warning(QStringLiteral("缓存目录不可写：%1")
+                         .arg(QDir::toNativeSeparators(targetInfo.absolutePath())));
+        return false;
+    }
+    writeProbe.close();
+
+    const QString oldPath = m_filePath;
+    close();
+    m_filePath = normalizedPath;
+    m_file.setFileName(m_filePath);
+    initialize();
+    if (!m_file.isOpen() || m_disabled) {
+        m_filePath = oldPath;
+        m_file.setFileName(m_filePath);
+        initialize();
+        return false;
+    }
+
+    if (oldPath != m_filePath)
+        QFile::remove(oldPath);
+    return true;
 }
 
 quint64 ScanWaveformCache::bKey(int groupId, int column)

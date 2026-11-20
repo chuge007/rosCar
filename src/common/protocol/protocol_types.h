@@ -13,6 +13,33 @@ inline constexpr quint32 kDefaultControlPort = 43100;
 inline constexpr quint16 kDefaultRealtimePort = 43101;
 inline constexpr quint16 kDefaultMediaPort = 43102;
 inline constexpr quint32 kDefaultBulkPort = 43103;
+// 运维重启通道（S 共享层）。刻意从控制端口偏移得到，两端用同一公式：
+// 操作端只知道 control 端口，主机也按同一个偏移监听。这条通道由主机用
+// 一个不经过 Qt 事件循环的线程处理，主线程卡死时控制通道已经失联，它仍然
+// 能把主机进程换掉。端口冲突时主机只记警告，不影响主服务。
+inline constexpr quint16 kAdminPortOffset = 4;
+inline constexpr quint16 kDefaultAdminPort =
+    static_cast<quint16>(kDefaultControlPort + kAdminPortOffset);
+// 握手（逐字节固定，两端必须一致）：
+//   host   -> "PA1664-RESTART <nonce-hex>\n"
+//   client -> "RESTART <hmac-hex>\n"    hmac = HMAC-SHA256(secret, nonce-hex)
+//   host   -> "OK <pid>\n" | "ERR <code>\n"
+inline constexpr char kAdminRestartGreeting[] = "PA1664-RESTART";
+inline constexpr char kAdminRestartCommand[] = "RESTART";
+inline constexpr char kAdminRestartSecret[] = "PA1664-host-restart-v1";
+inline constexpr int kAdminNonceBytes = 16;
+inline constexpr int kAdminHandshakeTimeoutMs = 2000;
+inline constexpr int kAdminClientTimeoutMs = 5000;
+// 旧进程给事件循环留的优雅退出时间，超时直接结束自身。超声 SDK、相机与
+// CAN 适配器的正常关闭在实测里就要 5 s 以上，预算必须留够：走完优雅关闭
+// 才能干净放开 USB/CAN 句柄，强杀会把设备留在半初始化的状态。
+inline constexpr int kAdminGracefulStopMs = 15000;
+// 新进程等待旧进程（含强制结束后）释放锁与端口的预算，要比上面的优雅退出
+// 时间更长，否则新进程会先于旧进程放弃等待。
+inline constexpr int kAdminPreviousExitMs = 30000;
+inline constexpr int kAdminForcedKillMs = 4000;
+// USB/CAN 设备句柄在进程退出后不是同步回收的，新进程初始化前留出余量。
+inline constexpr int kAdminDeviceReleaseGraceMs = 600;
 inline constexpr int kControlHeaderBytes = 50;
 inline constexpr int kMaxControlPayloadBytes = 1024 * 1024;
 // Preset files are Base64-wrapped in a JSON control request.  Keep the

@@ -44,6 +44,9 @@ class RemoteWorkbenchSession final : public QObject {
   WorkbenchConnectionState state() const { return state_; }
   bool isReady() const { return state_ == WorkbenchConnectionState::Online; }
   QString host() const { return host_; }
+  // 控制端口是运维重启端口的基准（control + kAdminPortOffset），
+  // 操作端重连时也要用回同一个值。
+  quint16 controlPort() const { return controlPort_; }
   quint64 sessionId() const;
   QString statusText() const { return statusText_; }
   QStringList capabilities() const;

@@ -31,7 +31,7 @@ provider:
 1. 归类（U / R / L / S），判定不了就问，不要猜。
 2. 圈定文件 + 影响面（改符号前先查全部调用点；GitNexus `impact` 可用时优先用）。
 3. 只改本类文件，越界先声明。
-4. 编对应目标并验证：本地看 `bin\logs\`，小车端 `ssh a@192.168.1.20` 看 `C:\Users\a\Desktop\robot_host\app\logs\`。
+4. 编对应目标并验证：本地看 `bin\logs\`，小车端 `ssh a@192.168.66.10` 看 `C:\Users\a\Desktop\robot_host\app\logs\`。
 5. 判断日志不能靠想象：超声无专属日志文件，只能从 `robot_console.log` / `robot_host.log` 按内容找；`COMM.*`、`CAMERA.*`、`PROFILE.*`、`PROBE.SPACING` 是小车/通信侧的类别前缀。
 
 # 原始项目对照

@@ -7,21 +7,24 @@
 #include "framedecoderworker.h"
 #include "frameplayer.h"
 #include "parameterpanel.h"
+#include "paramsliderfield.h"
 #include "parameterpresetstore.h"
 #include "probeadjustmentpanel.h"
 #include "remotecontrolserver.h"
 #include "robotcontrolpanel.h"
 #include "scanwidgets.h"
 #include "scanwaveformcache.h"
+#include "services/host_restart_client.h"
 #include "services/remote_ultrasound_source.h"
 #include "services/remote_workbench_session.h"
 #include "services/ultrasound_parameter_service.h"
 #include <QAction>
 #include <QActionGroup>
-#include <QWidgetAction>
+#include <QAbstractSocket>
+#include <QHostAddress>
+#include <QNetworkInterface>
 #include <QApplication>
 #include <QClipboard>
-#include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -68,7 +71,21 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QUrl>
+#include <QAbstractItemView>
+#include <QColorDialog>
+#include <QFrame>
+#include <QHeaderView>
+#include <QInputDialog>
+#include <QJsonArray>
+#include <QListWidget>
+#include <QPainter>
+#include <QPixmap>
+#include <QTableWidget>
+#include <QUuid>
+#include <QtMath>
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace {
 QString readableBytes(qint64 bytes)
@@ -99,6 +116,49 @@ bool copyDeviceBytes(QIODevice &source, QIODevice &target, qint64 byteCount)
     return true;
 }
 
+// 本机是否存在与远程目标同网段的 IPv4 地址。USB 网卡掉线后本机会直接掉出
+// 小车所在的 192.168.66.x，此时“连不上”和“主机没开机”必须能区分开。
+// 带 3 秒缓存：未连接时 updateStatus() 会被周期调用，枚举网卡不算便宜。
+bool localSubnetReachable(const QString &remoteHost)
+{
+    static qint64 lastCheckMs = 0;
+    static QString lastHost;
+    static bool lastResult = false;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (remoteHost == lastHost && now - lastCheckMs < 3000)
+        return lastResult;
+    const QHostAddress target(remoteHost);
+    // 回环目标不需要同网段：127.0.0.1 永远“可达”，连不上只可能是本机
+    // PA1664RobotHost 没启动。以前在这里直接回 false，换电脑首次运行时
+    // 配置回落成 127.0.0.1，界面就误报“本机无同网段地址”，把人引到网卡排查。
+    bool result = !target.isNull() && target.isLoopback();
+    if (!target.isNull()) {
+        const auto interfaces = QNetworkInterface::allInterfaces();
+        for (const QNetworkInterface &iface : interfaces) {
+            const auto flags = iface.flags();
+            if (!(flags & QNetworkInterface::IsUp)
+                || (flags & QNetworkInterface::IsLoopBack))
+                continue;
+            for (const QNetworkAddressEntry &entry : iface.addressEntries()) {
+                const QHostAddress ip = entry.ip();
+                if (ip.protocol() != QAbstractSocket::IPv4Protocol
+                    || ip.isLoopback())
+                    continue;
+                if (entry.prefixLength() > 0
+                    && target.isInSubnet(ip, entry.prefixLength())) {
+                    result = true;
+                    break;
+                }
+            }
+            if (result) break;
+        }
+    }
+    lastCheckMs = now;
+    lastHost = remoteHost;
+    lastResult = result;
+    return result;
+}
+
 int waveformScore(const GroupScanFrame &item)
 {
     if (item.frame.beams.isEmpty())
@@ -107,6 +167,241 @@ int waveformScore(const GroupScanFrame &item)
     for (qint16 sample : item.frame.beams.first())
         score = qMax(score, qAbs(int(sample)));
     return score;
+}
+
+struct CustomPaletteEntry
+{
+    QString name;
+    QColor startColor;
+    QColor endColor;
+};
+
+QVector<CustomPaletteEntry> loadCustomPalettes()
+{
+    QVector<CustomPaletteEntry> palettes;
+    QSettings settings;
+    const int count = settings.beginReadArray(QStringLiteral("palette/customPalettes"));
+    for (int i = 0; i < count; ++i) {
+        settings.setArrayIndex(i);
+        CustomPaletteEntry entry;
+        entry.name = settings.value(QStringLiteral("name")).toString().trimmed();
+        entry.startColor = settings.value(QStringLiteral("startColor")).value<QColor>();
+        entry.endColor = settings.value(QStringLiteral("endColor")).value<QColor>();
+        if (!entry.name.isEmpty() && entry.startColor.isValid()
+            && entry.endColor.isValid()) {
+            palettes.append(entry);
+        }
+    }
+    settings.endArray();
+    return palettes;
+}
+
+void saveCustomPalettes(const QVector<CustomPaletteEntry> &palettes)
+{
+    QSettings settings;
+    settings.remove(QStringLiteral("palette/customPalettes"));
+    settings.beginWriteArray(QStringLiteral("palette/customPalettes"), palettes.size());
+    for (int i = 0; i < palettes.size(); ++i) {
+        settings.setArrayIndex(i);
+        settings.setValue(QStringLiteral("name"), palettes.at(i).name);
+        settings.setValue(QStringLiteral("startColor"), palettes.at(i).startColor);
+        settings.setValue(QStringLiteral("endColor"), palettes.at(i).endColor);
+    }
+    settings.endArray();
+    settings.sync();
+}
+
+QString nextCustomPaletteName(const QVector<CustomPaletteEntry> &palettes)
+{
+    int maximum = 0;
+    const QString prefix = QStringLiteral("自定义色带");
+    for (const CustomPaletteEntry &entry : palettes) {
+        if (!entry.name.startsWith(prefix))
+            continue;
+        bool ok = false;
+        const int number = entry.name.mid(prefix.size()).toInt(&ok);
+        if (ok)
+            maximum = qMax(maximum, number);
+    }
+    return prefix + QString::number(maximum + 1);
+}
+
+struct ThresholdPaletteScheme {
+    QString id;
+    QString name;
+    double startValue = 0.0;
+    double endValue = 100.0;
+    double stepValue = 20.0;
+    int paletteMode = BScanWidget::HeatPalette;
+    QColor customStart;
+    QColor customEnd;
+    QVector<ScanPalette::ThresholdColorBand> bands;
+};
+
+QVector<ThresholdPaletteScheme> loadThresholdPaletteSchemes()
+{
+    QVector<ThresholdPaletteScheme> result;
+    QSettings settings;
+    const QByteArray stored = settings.value(
+        QStringLiteral("palette/thresholdSchemes")).toByteArray();
+    const QJsonArray array = QJsonDocument::fromJson(stored).array();
+    for (const QJsonValue &value : array) {
+        const QJsonObject object = value.toObject();
+        ThresholdPaletteScheme scheme;
+        scheme.id = object.value(QStringLiteral("id")).toString();
+        scheme.name = object.value(QStringLiteral("name")).toString();
+        scheme.startValue = object.value(QStringLiteral("start")).toDouble(0.0);
+        scheme.endValue = object.value(QStringLiteral("end")).toDouble(100.0);
+        scheme.stepValue = object.value(QStringLiteral("step")).toDouble(20.0);
+        scheme.paletteMode = object.value(QStringLiteral("paletteMode")).toInt(
+            BScanWidget::HeatPalette);
+        scheme.customStart = QColor(object.value(QStringLiteral("customStart")).toString());
+        scheme.customEnd = QColor(object.value(QStringLiteral("customEnd")).toString());
+        for (const QJsonValue &bandValue : object.value(QStringLiteral("bands")).toArray()) {
+            const QJsonObject bandObject = bandValue.toObject();
+            ScanPalette::ThresholdColorBand band;
+            band.lower = bandObject.value(QStringLiteral("lower")).toDouble();
+            band.upper = bandObject.value(QStringLiteral("upper")).toDouble();
+            band.color = QColor(bandObject.value(QStringLiteral("color")).toString());
+            if (band.color.isValid() && band.upper > band.lower)
+                scheme.bands.append(band);
+        }
+        if (!scheme.id.isEmpty() && !scheme.name.isEmpty() && !scheme.bands.isEmpty())
+            result.append(scheme);
+    }
+    return result;
+}
+
+void saveThresholdPaletteSchemes(const QVector<ThresholdPaletteScheme> &schemes)
+{
+    QJsonArray array;
+    for (const ThresholdPaletteScheme &scheme : schemes) {
+        QJsonObject object;
+        object.insert(QStringLiteral("id"), scheme.id);
+        object.insert(QStringLiteral("name"), scheme.name);
+        object.insert(QStringLiteral("start"), scheme.startValue);
+        object.insert(QStringLiteral("end"), scheme.endValue);
+        object.insert(QStringLiteral("step"), scheme.stepValue);
+        object.insert(QStringLiteral("paletteMode"), scheme.paletteMode);
+        object.insert(QStringLiteral("customStart"), scheme.customStart.name(QColor::HexArgb));
+        object.insert(QStringLiteral("customEnd"), scheme.customEnd.name(QColor::HexArgb));
+        QJsonArray bands;
+        for (const ScanPalette::ThresholdColorBand &band : scheme.bands) {
+            QJsonObject bandObject;
+            bandObject.insert(QStringLiteral("lower"), band.lower);
+            bandObject.insert(QStringLiteral("upper"), band.upper);
+            bandObject.insert(QStringLiteral("color"), band.color.name(QColor::HexArgb));
+            bands.append(bandObject);
+        }
+        object.insert(QStringLiteral("bands"), bands);
+        array.append(object);
+    }
+    QSettings settings;
+    settings.setValue(QStringLiteral("palette/thresholdSchemes"),
+                      QJsonDocument(array).toJson(QJsonDocument::Compact));
+}
+
+QColor thresholdBandColorForBands(const QVector<ScanPalette::ThresholdColorBand> &bands,
+                                  double value)
+{
+    if (bands.isEmpty())
+        return Qt::black;
+    for (int index = 0; index < bands.size(); ++index) {
+        const ScanPalette::ThresholdColorBand &band = bands.at(index);
+        const bool lastBand = index == bands.size() - 1;
+        if (value >= band.lower && (value < band.upper || (lastBand && value <= band.upper)))
+            return band.color;
+    }
+    if (value < bands.first().lower)
+        return bands.first().color;
+    if (value > bands.last().upper)
+        return bands.last().color;
+    QColor nearestColor = Qt::black;
+    double nearestDistance = std::numeric_limits<double>::max();
+    for (const ScanPalette::ThresholdColorBand &band : bands) {
+        const double distance = value < band.lower ? band.lower - value : value - band.upper;
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestColor = band.color;
+        }
+    }
+    return nearestColor;
+}
+
+QPixmap thresholdPreviewPixmap(const QVector<ScanPalette::ThresholdColorBand> &bands,
+                               int valueMode, int width, int height)
+{
+    QPixmap pixmap(qMax(1, width), qMax(1, height));
+    QPainter painter(&pixmap);
+    const double span = valueMode == ScanPalette::AbsoluteThresholdValues ? 100.0 : 1.0;
+    for (int x = 0; x < pixmap.width(); ++x) {
+        const double value = double(x) / qMax(1, pixmap.width() - 1) * span;
+        painter.setPen(thresholdBandColorForBands(bands, value));
+        painter.drawLine(x, 0, x, pixmap.height());
+    }
+    return pixmap;
+}
+
+QColor paletteColorAt(int mode, const QColor &customStart,
+                      const QColor &customEnd, double position)
+{
+    const double n = qBound(0.0, position, 1.0);
+    if (mode == BScanWidget::GrayscalePalette) {
+        const int gray = qRound(n * 255.0);
+        return QColor(gray, gray, gray);
+    }
+    if (mode == BScanWidget::RfPalette) {
+        const double signedValue = n * 2.0 - 1.0;
+        const double magnitude = qAbs(signedValue);
+        return signedValue < 0.0
+            ? QColor::fromRgbF(1.0 - magnitude, 1.0 - magnitude, 1.0)
+            : QColor::fromRgbF(1.0, 1.0 - magnitude, 1.0 - magnitude);
+    }
+    if (mode == BScanWidget::CustomPalette) {
+        const QColor start = customStart.isValid() ? customStart : QColor(0, 8, 70);
+        const QColor end = customEnd.isValid() ? customEnd : QColor(255, 255, 255);
+        return QColor(qRound(start.red() + (end.red() - start.red()) * n),
+                      qRound(start.green() + (end.green() - start.green()) * n),
+                      qRound(start.blue() + (end.blue() - start.blue()) * n));
+    }
+    if (n < 0.22) {
+        const double t = n / 0.22;
+        return QColor(0, qRound(8 + t * 67), qRound(70 + t * 185));
+    }
+    if (n < 0.45) {
+        const double t = (n - 0.22) / 0.23;
+        return QColor(0, qRound(75 + t * 180), 255);
+    }
+    if (n < 0.68) {
+        const double t = (n - 0.45) / 0.23;
+        return QColor(qRound(t * 255), 255, qRound(255 - t * 220));
+    }
+    if (n < 0.86) {
+        const double t = (n - 0.68) / 0.18;
+        return QColor(255, qRound(255 - t * 210), 0);
+    }
+    const double t = (n - 0.86) / 0.14;
+    return QColor(qRound(255 - t * 105), qRound(45 - t * 40), 0);
+}
+
+QPixmap palettePreviewPixmap(int mode, const QColor &customStart,
+                             const QColor &customEnd, double lowerPercent,
+                             double upperPercent, double gamma,
+                             int width, int height)
+{
+    QPixmap pixmap(qMax(1, width), qMax(1, height));
+    QPainter painter(&pixmap);
+    const double lower = qBound(0.0, lowerPercent / 100.0, 0.99);
+    const double upper = qBound(lower + 0.01, upperPercent / 100.0, 1.0);
+    const double levelSpan = qMax(0.01, upper - lower);
+    for (int x = 0; x < pixmap.width(); ++x) {
+        double normalized = double(x) / qMax(1, pixmap.width() - 1);
+        normalized = qBound(0.0, (normalized - lower) / levelSpan, 1.0);
+        normalized = qPow(normalized, 1.0 / qBound(0.2, gamma, 3.0));
+        painter.setPen(paletteColorAt(mode, customStart, customEnd, normalized));
+        painter.drawLine(x, 0, x, pixmap.height());
+    }
+    return pixmap;
 }
 
 qint64 groupScanFrameBytes(const GroupScanFrame &item)
@@ -183,8 +478,17 @@ MainWindow::MainWindow(pa1664::remote::RemoteWorkbenchSession *remoteSession,
         pa1664::remote::UltrasoundParameterService::instance()
             .bindRemoteSession(m_remoteSession);
     }
-    m_scanCachePath = QDir(QCoreApplication::applicationDirPath())
-                          .filePath(QStringLiteral("scan_cache/latest_scan_ascan.bin"));
+    const QString defaultCacheDirectory =
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("scan_cache"));
+    QSettings cacheSettings;
+    QString cacheDirectory =
+        cacheSettings.value(QStringLiteral("data/cacheDirectory"), defaultCacheDirectory)
+            .toString().trimmed();
+    if (cacheDirectory.isEmpty())
+        cacheDirectory = defaultCacheDirectory;
+    cacheDirectory = QDir::cleanPath(QFileInfo(cacheDirectory).absoluteFilePath());
+    m_scanCachePath = QDir(cacheDirectory)
+                          .filePath(QStringLiteral("latest_scan_ascan.bin"));
     buildUi();
     buildMenus();
 
@@ -726,7 +1030,9 @@ void MainWindow::buildUi()
     m_beam = new QSpinBox;
     m_beam->setRange(1, 1);
     m_beam->setMinimumHeight(30);
-    aHeader->addWidget(m_beam);
+    auto *beamField = pa1664::ui::paramSliderField(m_beam);
+    beamField->setMinimumWidth(150);
+    aHeader->addWidget(beamField);
     m_measurements = new QLabel(QStringLiteral("峰值: --"));
     aHeader->addWidget(m_measurements, 1);
     aHeader->addWidget(new QLabel(QStringLiteral("采集")));
@@ -766,38 +1072,9 @@ void MainWindow::buildUi()
     bLayout->setContentsMargins(0, 0, 0, 0);
     bLayout->setSpacing(0);
 
-    // B 扫显示配置控件（统一收进「配置」下拉菜单，避免工具栏拥挤）。
-    m_bViewMode = new QComboBox;
-    m_bViewMode->addItem(QStringLiteral("幅值"), BScanWidget::AmplitudeView);
-    m_bViewMode->addItem(QStringLiteral("轮廓/厚度"), BScanWidget::ProfileView);
-    m_bPaletteMode = new QComboBox;
-    m_bPaletteMode->addItem(QStringLiteral("彩色"), BScanWidget::HeatPalette);
-    m_bPaletteMode->addItem(QStringLiteral("灰度"), BScanWidget::GrayscalePalette);
-    m_bPaletteMode->addItem(QStringLiteral("RF 双极性"), BScanWidget::RfPalette);
-    m_bScaleMode = new QComboBox;
-    m_bScaleMode->addItem(QStringLiteral("固定 100%"), BScanWidget::FixedFullScale);
-    m_bScaleMode->addItem(QStringLiteral("动态"), BScanWidget::DynamicScale);
-    m_bDisplayReject = new QDoubleSpinBox;
-    m_bDisplayReject->setRange(0.0, 99.0);
-    m_bDisplayReject->setSuffix(QStringLiteral(" %"));
-    m_bDisplayReject->setToolTip(QStringLiteral("只影响颜色显示，不修改原始幅值和闸门判定"));
-    m_bDisplayLower = new QDoubleSpinBox;
-    m_bDisplayLower->setRange(0.0, 99.0);
-    m_bDisplayLower->setSuffix(QStringLiteral(" %"));
-    m_bDisplayUpper = new QDoubleSpinBox;
-    m_bDisplayUpper->setRange(1.0, 100.0);
-    m_bDisplayUpper->setValue(100.0);
-    m_bDisplayUpper->setSuffix(QStringLiteral(" %"));
-    m_bGamma = new QDoubleSpinBox;
-    m_bGamma->setRange(0.2, 3.0);
-    m_bGamma->setDecimals(2);
-    m_bGamma->setSingleStep(0.1);
-    m_bGamma->setValue(1.0);
-    m_bInterpolateMissing = new QCheckBox(QStringLiteral("显示插补小间隙"));
-    m_bInterpolateMissing->setToolTip(QStringLiteral(
-        "仅对后续不超过 64 格的小间隙插值，并用黄色透明层标记；原始漏点仍计入质量统计。"));
+    // E/B 扫显示参数统一在「工具 → 调色盘」里设置，工具栏不再放配置入口。
 
-    // 共享工具栏：E/B 视图切换 + B 扫配置 + 精度 + 复位视图（与 A 扫 header 同高，保证深度轴对齐）。
+    // 共享工具栏：E/B 视图切换 + 精度 + 复位视图（与 A 扫 header 同高，保证深度轴对齐）。
     auto *mapBarWidget = new QWidget;
     mapBarWidget->setFixedHeight(scanHeaderHeight);
     auto *mapBar = new QHBoxLayout(mapBarWidget);
@@ -809,55 +1086,33 @@ void MainWindow::buildUi()
     connect(m_eViewButton, &QPushButton::clicked, this, [this] { setScanView(0); });
     connect(m_bViewButton, &QPushButton::clicked, this, [this] { setScanView(1); });
     m_eViewButton->setChecked(true);
-    auto *bConfigButton = new QToolButton;
-    bConfigButton->setText(QStringLiteral("配置"));
-    bConfigButton->setPopupMode(QToolButton::InstantPopup);
-    bConfigButton->setToolTip(QStringLiteral("E/B 扫显示参数"));
-    bConfigButton->setStyleSheet(QStringLiteral(
-        "QToolButton::menu-indicator { image: none; } padding:0 6px;"));
-    auto *bConfigMenu = new QMenu(bConfigButton);
-    bConfigButton->setMenu(bConfigMenu);
     mapBar->addWidget(new QLabel(QStringLiteral("精度")));
     m_cPrecision = new QDoubleSpinBox;
+    // 精度是连续量，滑轨粗调 + 数值框精确输入。
+    // 数值框允许到 100000（超出 10 的精度只能键盘输入），滑轨只映射 0.01~10：
+    // 数值超过 10 时滑块停在最右端，避免整条刻度被 10 万压缩后 0~10 拖不动。
     m_cPrecision->setRange(0.01, 100000.0);
+    m_cPrecision->setSingleStep(0.01);
     m_cPrecision->setDecimals(2);
     m_cPrecision->setValue(m_groupEncoderPrecision.value(currentGroupId(), 1.0));
     m_cPrecision->setSuffix(QStringLiteral(" mm/格"));
     m_cPrecision->setToolTip(QStringLiteral(
         "B 扫列和下方编码器路径的空间分辨率（毫米/格）。数值越小，空间采样越细。"));
     m_cPrecision->setMaximumWidth(120);
-    mapBar->addWidget(m_cPrecision);
-    mapBar->addWidget(bConfigButton);
+    auto *precisionField = pa1664::ui::paramSliderField(m_cPrecision);
+    // 滑轨只覆盖常规精度段，大数值靠输入框直接敲。
+    pa1664::ui::setParamSliderMaximum(m_cPrecision, 10.0);
+    precisionField->setMinimumWidth(210);
+    mapBar->addWidget(precisionField);
     mapBar->addWidget(m_bViewButton);
     mapBar->addWidget(m_eViewButton);
     mapBar->addStretch();
     auto *resetBView = new QPushButton(QStringLiteral("复位视图"));
     mapBar->addWidget(resetBView);
 
-    // 「配置」下拉菜单：QFormLayout 承载全部显示配置控件。
-    auto *configWidget = new QWidget;
-    auto *configForm = new QFormLayout(configWidget);
-    configForm->setContentsMargins(12, 8, 12, 8);
-    configForm->setSpacing(6);
-    configForm->addRow(QStringLiteral("视图"), m_bViewMode);
-    configForm->addRow(QStringLiteral("色带"), m_bPaletteMode);
-    configForm->addRow(QStringLiteral("刻度"), m_bScaleMode);
-    configForm->addRow(QStringLiteral("显示低切"), m_bDisplayReject);
-    auto *rangeWidget = new QWidget;
-    auto *rangeLayout = new QHBoxLayout(rangeWidget);
-    rangeLayout->setContentsMargins(0, 0, 0, 0);
-    rangeLayout->addWidget(m_bDisplayLower);
-    rangeLayout->addWidget(new QLabel(QStringLiteral("～")));
-    rangeLayout->addWidget(m_bDisplayUpper);
-    configForm->addRow(QStringLiteral("色阶"), rangeWidget);
-    configForm->addRow(QStringLiteral("Gamma"), m_bGamma);
-    configForm->addRow(QStringLiteral("显示插补小间隙"), m_bInterpolateMissing);
-    auto *configAction = new QWidgetAction(bConfigMenu);
-    configAction->setDefaultWidget(configWidget);
-    bConfigMenu->addAction(configAction);
-
-    m_bPaletteMode->setCurrentIndex(1);
-    m_eScan->setPaletteMode(m_bPaletteMode->currentData().toInt());
+    m_eScan->setPaletteSettings(m_paletteMode, m_paletteLower,
+                                m_paletteUpper, m_paletteGamma);
+    applyPaletteSettings();
     bLayout->addWidget(m_bScanStack, 1);
     m_mapTabs->addWidget(bPage);
     m_bScan->setEncoderPrecision(encoderCountsPerCellA(currentGroupId()));
@@ -919,7 +1174,7 @@ void MainWindow::buildUi()
     connectHint->setWordWrap(true);
     connectHint->setStyleSheet(QStringLiteral("color:#52606d;padding:4px 0 8px 0"));
     connectForm->addRow(QStringLiteral("服务地址"), m_address);
-    connectForm->addRow(QStringLiteral("设备 ID"), m_deviceId);
+    connectForm->addRow(QStringLiteral("设备 ID"), pa1664::ui::paramSliderField(m_deviceId));
     connectForm->addRow(m_connect);
     connectForm->addRow(connectHint);
     m_panelPages->addWidget(connectPage);
@@ -956,6 +1211,54 @@ void MainWindow::buildUi()
         m_vehicleMetrics.append(value);
     }
     statusLayout->addWidget(vehicleGroup);
+
+    // 小车端程序卡死时，操作端不必再上小车手动重启：这一组按钮连的是主机
+    // 独立线程上的运维端口（control + kAdminPortOffset），主机用它应答，
+    // 不经过 Qt 事件循环，主线程被驱动/USB 调用堵死时仍然能把进程换掉。
+    auto *restartGroup = new QGroupBox(QStringLiteral("小车端程序"));
+    auto *restartLayout = new QVBoxLayout(restartGroup);
+    auto *restartRow = new QHBoxLayout;
+    m_restartHost = new QPushButton(QStringLiteral("重启小车端程序"));
+    m_restartHost->setObjectName(QStringLiteral("restartHostButton"));
+    m_restartHost->setToolTip(QStringLiteral(
+        "向小车端主机发送重启指令：主机拉一个新进程接管，控制通道随后自动重连。"
+        "小车端界面/数据无响应（主线程卡死）时同样可用。"));
+    m_restartHost->setEnabled(m_remoteMode);
+    m_restartHostState = new QLabel(
+        m_remoteMode ? QStringLiteral("等待指令")
+                     : QStringLiteral("仅远程模式可用（本机模式没有小车端程序）"));
+    m_restartHostState->setWordWrap(true);
+    m_restartHostState->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_restartHostState->setStyleSheet(QStringLiteral("color:#52606d"));
+    // 电机报错后不必重启主机：这一键按每台电机当前选择的通讯方式，
+    // 用对应品牌的协议发清错指令。
+    m_clearMotorAlarm = new QPushButton(QStringLiteral("清除电机错误"));
+    m_clearMotorAlarm->setObjectName(QStringLiteral("clearMotorAlarmButton"));
+    m_clearMotorAlarm->setToolTip(QStringLiteral(
+        "按当前通讯方式，用对应电机品牌的协议发清错指令：\n"
+        "· 驱动轮 MD-can / MD-rs485：0x76 系统复位，2.5 秒后补 0x77 释放抱闸\n"
+        "· 前架电机 MWD-can：0x9B 清除电机错误标志\n"
+        "· 前架电机 MWD-rs485：写 6006=0 停机\n"
+        "· 前架电机 ZDT-can：0x0E 解除堵转保护\n"
+        "· 前架电机 TT-CANopen：0x6040=0x0080 故障复位\n"
+        "远程模式下由小车端主机执行，本机模式直接下本机总线。\n"
+        "清错后底盘回到未使能状态，重新点「使能」时会先松抱闸并等待确认。"));
+    m_motorAlarmState = new QLabel(QStringLiteral("等待指令"));
+    m_motorAlarmState->setWordWrap(true);
+    m_motorAlarmState->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_motorAlarmState->setStyleSheet(QStringLiteral("color:#52606d"));
+    restartRow->addWidget(m_restartHost);
+    restartRow->addWidget(m_clearMotorAlarm);
+    restartRow->addStretch();
+    restartLayout->addLayout(restartRow);
+    restartLayout->addWidget(m_restartHostState);
+    restartLayout->addWidget(m_motorAlarmState);
+    connect(m_restartHost, &QPushButton::clicked, this,
+            &MainWindow::restartRobotHost);
+    connect(m_clearMotorAlarm, &QPushButton::clicked, this,
+            &MainWindow::clearMotorAlarms);
+    statusLayout->addWidget(restartGroup);
+
     statusLayout->addStretch();
 
     // 状态页内容放入滚动区：加宽后超出高度可滚动查看。
@@ -999,12 +1302,15 @@ void MainWindow::buildUi()
     cacheLayout->addLayout(cacheForm);
 
     auto *cacheActions = new QHBoxLayout;
+    auto *changeCacheFolder = new QPushButton(QStringLiteral("修改缓存目录…"));
+    changeCacheFolder->setToolTip(QStringLiteral("选择扫描缓存文件保存的文件夹；扫描运行时不可修改"));
     auto *openCacheFolder = new QPushButton(QStringLiteral("打开缓存目录"));
     auto *copyCachePath = new QPushButton(QStringLiteral("复制文件路径"));
     auto *refreshCache = new QPushButton(QStringLiteral("刷新统计"));
     cacheActions->addWidget(openCacheFolder);
     cacheActions->addWidget(copyCachePath);
     cacheActions->addWidget(refreshCache);
+    cacheLayout->addWidget(changeCacheFolder);
     cacheLayout->addLayout(cacheActions);
     dataLayout->addWidget(cacheGroup);
 
@@ -1138,6 +1444,49 @@ void MainWindow::buildUi()
     connect(m_connect, &QPushButton::clicked, this, &MainWindow::connectDevice);
     connect(m_record, &QPushButton::clicked, this, &MainWindow::toggleRecording);
     connect(playback, &QPushButton::clicked, this, &MainWindow::openRecording);
+    connect(changeCacheFolder, &QPushButton::clicked, this, [this] {
+        if (m_scanSessionActive) {
+            showMessage(QStringLiteral("请先停止扫描缓存，再修改缓存目录。"), true);
+            return;
+        }
+
+        QString initialDirectory = QFileInfo(m_scanCachePath).absolutePath();
+        if (!QDir(initialDirectory).exists())
+            initialDirectory = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        const QString selectedDirectory = QFileDialog::getExistingDirectory(
+            this, QStringLiteral("选择扫描缓存目录"), initialDirectory,
+            QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+        if (selectedDirectory.isEmpty())
+            return;
+
+        const QString normalizedDirectory =
+            QDir::cleanPath(QFileInfo(selectedDirectory).absoluteFilePath());
+        const QString newCachePath = QDir(normalizedDirectory)
+                                         .filePath(QStringLiteral("latest_scan_ascan.bin"));
+        bool changed = false;
+        const bool invoked = QMetaObject::invokeMethod(
+            m_waveformCache, "setFilePath", Qt::BlockingQueuedConnection,
+            Q_RETURN_ARG(bool, changed), Q_ARG(QString, newCachePath));
+        if (!invoked || !changed) {
+            showMessage(QStringLiteral("缓存目录修改失败，请检查目录是否可写。"), true);
+            return;
+        }
+
+        m_scanCachePath = newCachePath;
+        if (m_cachePathLabel) {
+            m_cachePathLabel->setText(QDir::toNativeSeparators(m_scanCachePath));
+            m_cachePathLabel->setToolTip(QDir::toNativeSeparators(m_scanCachePath));
+        }
+        QSettings settings;
+        settings.setValue(QStringLiteral("data/cacheDirectory"), normalizedDirectory);
+        settings.sync();
+        if (settings.status() != QSettings::NoError) {
+            showMessage(QStringLiteral("缓存目录已切换，但无法保存设置；下次启动将恢复原目录。"), true);
+            return;
+        }
+        showMessage(QStringLiteral("缓存目录已修改为：%1")
+                        .arg(QDir::toNativeSeparators(normalizedDirectory)), false);
+    });
     connect(openCacheFolder, &QPushButton::clicked, this, [this] {
         const QString directory = QFileInfo(m_scanCachePath).absolutePath();
         if (!QDesktopServices::openUrl(QUrl::fromLocalFile(directory)))
@@ -1205,44 +1554,6 @@ void MainWindow::buildUi()
         emit waveformCacheGroupReset(groupId, 0x6);
         updateDecoderSettings();
     });
-    connect(m_bViewMode, &QComboBox::currentIndexChanged, this, [this] {
-        const int mode = m_bViewMode->currentData().toInt();
-        for (BScanWidget *widget : qAsConst(m_bScans))
-            widget->setViewMode(mode);
-    });
-    connect(m_bPaletteMode, &QComboBox::currentIndexChanged, this, [this] {
-        const int mode = m_bPaletteMode->currentData().toInt();
-        if (m_eScan)
-            m_eScan->setPaletteMode(mode);
-        for (BScanWidget *widget : qAsConst(m_bScans))
-            widget->setPaletteMode(mode);
-    });
-    connect(m_bScaleMode, &QComboBox::currentIndexChanged, this, [this] {
-        const int mode = m_bScaleMode->currentData().toInt();
-        for (BScanWidget *widget : qAsConst(m_bScans))
-            widget->setScaleMode(mode);
-    });
-    const auto applyBDisplayLevels = [this] {
-        const double lower = qMin(m_bDisplayLower->value(),
-                                  m_bDisplayUpper->value() - 1.0);
-        for (BScanWidget *widget : qAsConst(m_bScans))
-            widget->setDisplayLevels(lower, m_bDisplayUpper->value(),
-                                     m_bGamma->value());
-    };
-    connect(m_bDisplayLower, &QDoubleSpinBox::valueChanged, this,
-            [applyBDisplayLevels](double) { applyBDisplayLevels(); });
-    connect(m_bDisplayUpper, &QDoubleSpinBox::valueChanged, this,
-            [applyBDisplayLevels](double) { applyBDisplayLevels(); });
-    connect(m_bGamma, &QDoubleSpinBox::valueChanged, this,
-            [applyBDisplayLevels](double) { applyBDisplayLevels(); });
-    connect(m_bDisplayReject, &QDoubleSpinBox::valueChanged, this, [this](double value) {
-        for (BScanWidget *widget : qAsConst(m_bScans))
-            widget->setDisplayReject(value);
-    });
-    connect(m_bInterpolateMissing, &QCheckBox::toggled, this, [this](bool enabled) {
-        for (BScanWidget *widget : qAsConst(m_bScans))
-            widget->setInterpolateMissing(enabled);
-    });
     connect(resetBView, &QPushButton::clicked, this, [this] {
         if (m_bScan)
             m_bScan->resetView();
@@ -1273,6 +1584,87 @@ void MainWindow::buildUi()
     if (m_panelTitle)
         m_panelTitle->setText(QStringLiteral("超声"));
     m_panelDock->hide();
+}
+
+void MainWindow::restartRobotHost()
+{
+    if (!m_remoteSession) {
+        showMessage(QStringLiteral("本机模式没有小车端程序可重启"), true);
+        return;
+    }
+    const QString host = m_remoteSession->host();
+    if (host.isEmpty()) {
+        showMessage(QStringLiteral("未配置小车主机地址，无法重启"), true);
+        return;
+    }
+    const quint16 controlPort = m_remoteSession->controlPort();
+    const quint16 adminPort = static_cast<quint16>(
+        controlPort + pa1664::remote::kAdminPortOffset);
+
+    // 重启会掐断控制通道并让底盘掉使能，属于不可撤销的现场动作，先确认。
+    const auto answer = QMessageBox::warning(
+        this, QStringLiteral("重启小车端程序"),
+        QStringLiteral("将让小车端 PA1664RobotHost 换一个新进程：\n"
+                       "· 控制与视频通道短时中断，随后自动重连\n"
+                       "· 底盘退出使能，需要重新使能\n\n"
+                       "确认现在重启？"),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes) return;
+
+    constexpr int kReconnectDelayMs = 12000;
+    if (m_restartHost) m_restartHost->setEnabled(false);
+    if (m_restartHostState)
+        m_restartHostState->setText(
+            QStringLiteral("已向 %1:%2 发送重启指令，等待主机应答…")
+                .arg(host)
+                .arg(static_cast<int>(adminPort)));
+    qInfo().noquote() << "HOST_RESTART_REQUEST" << host << adminPort;
+
+    auto *client = new pa1664::remote::HostRestartClient(this);
+    connect(client, &pa1664::remote::HostRestartClient::finished, this,
+            [this, client, host, controlPort](bool accepted, const QString &detail) {
+                client->deleteLater();
+                if (!accepted) {
+                    if (m_restartHost) m_restartHost->setEnabled(true);
+                    if (m_restartHostState) m_restartHostState->setText(detail);
+                    showMessage(detail, true);
+                    return;
+                }
+                showMessage(detail, false);
+                // 主机退出后替代进程还要等锁与端口释放，这里主动断开再延时
+                // 重连，比让看门狗按 10 秒节奏慢慢巡检更快回到可用状态。
+                if (m_remoteSession) m_remoteSession->stop();
+                if (m_restartHostState)
+                    m_restartHostState->setText(
+                        QStringLiteral("主机重启中：控制通道将在 %1 秒内自动重连")
+                            .arg(kReconnectDelayMs / 1000));
+                QTimer::singleShot(kReconnectDelayMs, this,
+                                   [this, host, controlPort] {
+                                       if (m_remoteSession)
+                                           m_remoteSession->start(host, controlPort);
+                                       if (m_restartHost) m_restartHost->setEnabled(true);
+                                   });
+            });
+    client->request(host, adminPort);
+}
+
+void MainWindow::clearMotorAlarms()
+{
+    if (!m_robotPanel) {
+        showMessage(QStringLiteral("小车控制面板尚未就绪，无法清除电机错误"), true);
+        return;
+    }
+    if (m_remoteMode &&
+        (!m_remoteSession || !m_remoteSession->isReady())) {
+        showMessage(QStringLiteral("小车端链路未就绪，清除电机错误指令未发送"), true);
+        return;
+    }
+    m_robotPanel->clearMotorAlarms();
+    const QString text = m_remoteMode
+        ? QStringLiteral("已发送到小车端：驱动轮请求松闸、夹爪各轴清错；请重新点「使能」")
+        : QStringLiteral("已发送到本机总线：驱动轮请求松闸、夹爪各轴清错；请重新点「使能」");
+    if (m_motorAlarmState) m_motorAlarmState->setText(text);
+    showMessage(text, false);
 }
 
 void MainWindow::showPanelSection(int index)
@@ -1342,6 +1734,8 @@ void MainWindow::buildMenus()
     robotControl->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+M")));
     connect(robotControl, &QAction::triggered, this, &MainWindow::openRobotControl);
     tools->addSeparator();
+    auto *palette = tools->addAction(QStringLiteral("调色盘"));
+    connect(palette, &QAction::triggered, this, &MainWindow::showPaletteDialog);
     auto *screenLayout = tools->addAction(QStringLiteral("屏幕布局…"));
     connect(screenLayout, &QAction::triggered,
             this, &MainWindow::showScreenLayoutDialog);
@@ -1352,6 +1746,830 @@ void MainWindow::buildMenus()
         if (m_robotPanel)
             m_robotPanel->showInformationDialog(this);
     });
+}
+
+void MainWindow::applyPaletteSettings()
+{
+    if (m_eScan) {
+        m_eScan->setPaletteSettings(m_paletteMode, m_paletteLower,
+                                    m_paletteUpper, m_paletteGamma);
+        if (m_paletteMode == EScanWidget::CustomPalette)
+            m_eScan->setCustomPalette(m_customPaletteStart, m_customPaletteEnd);
+        m_eScan->setThresholdColorSettings(m_colorRuleMode, m_thresholdBands,
+                                           ScanPalette::PercentageThresholdValues);
+    }
+    for (BScanWidget *widget : qAsConst(m_bScans)) {
+        if (!widget)
+            continue;
+        if (m_paletteMode == BScanWidget::CustomPalette)
+            widget->setCustomPalette(m_customPaletteStart, m_customPaletteEnd);
+        else
+            widget->setPaletteMode(m_paletteMode);
+        widget->setScaleMode(m_paletteScaleMode);
+        widget->setFixedScaleMaximum(m_paletteFixedMaximum);
+        widget->setDisplayLevels(m_paletteLower, m_paletteUpper, m_paletteGamma);
+        widget->setThresholdColorSettings(m_colorRuleMode, m_thresholdBands,
+                                          ScanPalette::PercentageThresholdValues);
+    }
+}
+
+void MainWindow::showPaletteDialog()
+{
+    const int originalMode = m_paletteMode;
+    const int originalScaleMode = m_paletteScaleMode;
+    const double originalFixedMaximum = m_paletteFixedMaximum;
+    const double originalLower = m_paletteLower;
+    const double originalUpper = m_paletteUpper;
+    const double originalGamma = m_paletteGamma;
+    const QColor originalCustomStart = m_customPaletteStart;
+    const QColor originalCustomEnd = m_customPaletteEnd;
+    const int originalColorRuleMode = m_colorRuleMode;
+    const QVector<ScanPalette::ThresholdColorBand> originalBands = m_thresholdBands;
+    QVector<CustomPaletteEntry> customPalettes = loadCustomPalettes();
+    QVector<ThresholdPaletteScheme> thresholdSchemes = loadThresholdPaletteSchemes();
+    QSettings settings;
+    const QString originalActiveThresholdSchemeId =
+        settings.value(QStringLiteral("palette/activeThresholdSchemeId")).toString();
+
+    // 当前分段编辑状态（临时设置）。
+    QVector<ScanPalette::ThresholdColorBand> workingBands =
+        m_thresholdBands.isEmpty() ? BScanWidget::defaultThresholdColorBands()
+                                   : m_thresholdBands;
+    double workingStart = 0.0;
+    double workingEnd = 100.0;
+    double workingStep = 20.0;
+    int workingThresholdPaletteMode = BScanWidget::HeatPalette;
+    QColor workingThresholdCustomStart;
+    QColor workingThresholdCustomEnd;
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("调色盘"));
+    dialog.setModal(true);
+    dialog.setMinimumWidth(680);
+    auto *rootLayout = new QVBoxLayout(&dialog);
+    rootLayout->setContentsMargins(12, 12, 12, 12);
+    rootLayout->setSpacing(8);
+
+    auto *preview = new QLabel(&dialog);
+    preview->setFixedHeight(42);
+    preview->setFrameShape(QFrame::StyledPanel);
+    preview->setScaledContents(true);
+    rootLayout->addWidget(preview);
+
+    auto *colorRuleCombo = new QComboBox(&dialog);
+    colorRuleCombo->addItem(QStringLiteral("连续渐变"), ScanPalette::ContinuousColorRule);
+    colorRuleCombo->addItem(QStringLiteral("阈值分段"), ScanPalette::ThresholdBandsColorRule);
+    colorRuleCombo->setCurrentIndex(qMax(0, colorRuleCombo->findData(m_colorRuleMode)));
+    auto *colorRuleForm = new QFormLayout;
+    colorRuleForm->setContentsMargins(0, 0, 0, 0);
+    colorRuleForm->setVerticalSpacing(6);
+    colorRuleForm->addRow(QStringLiteral("着色方式："), colorRuleCombo);
+    rootLayout->addLayout(colorRuleForm);
+
+    auto *scaleForm = new QFormLayout;
+    scaleForm->setContentsMargins(0, 0, 0, 0);
+    scaleForm->setVerticalSpacing(6);
+    auto *valueScaleCombo = new QComboBox(&dialog);
+    valueScaleCombo->addItem(QStringLiteral("动态最大值"), BScanWidget::DynamicScale);
+    valueScaleCombo->addItem(QStringLiteral("固定最大值"), BScanWidget::FixedFullScale);
+    valueScaleCombo->setCurrentIndex(qMax(
+        0, valueScaleCombo->findData(m_paletteScaleMode)));
+    auto *fixedMaximumSpin = new QDoubleSpinBox(&dialog);
+    fixedMaximumSpin->setRange(0.01, 100.0);
+    fixedMaximumSpin->setDecimals(2);
+    fixedMaximumSpin->setSingleStep(1.0);
+    fixedMaximumSpin->setSuffix(QStringLiteral(" %"));
+    fixedMaximumSpin->setValue(m_paletteFixedMaximum);
+    fixedMaximumSpin->setEnabled(m_paletteScaleMode == BScanWidget::FixedFullScale);
+    scaleForm->addRow(QStringLiteral("幅值上限："), valueScaleCombo);
+    scaleForm->addRow(QStringLiteral("固定最大值："),
+                      pa1664::ui::paramSliderField(fixedMaximumSpin));
+    rootLayout->addLayout(scaleForm);
+
+    auto *continuousGroup = new QGroupBox(QStringLiteral("连续渐变设置"), &dialog);
+    auto *continuousForm = new QFormLayout(continuousGroup);
+    auto *paletteCombo = new QComboBox(continuousGroup);
+    auto refillPaletteCombo = [&] {
+        const int previousData = paletteCombo->currentData().toInt();
+        const QString previousText = paletteCombo->currentText();
+        const QSignalBlocker blocker(paletteCombo);
+        paletteCombo->clear();
+        paletteCombo->addItem(QStringLiteral("默认热力"), BScanWidget::HeatPalette);
+        paletteCombo->addItem(QStringLiteral("黑-灰-白"), BScanWidget::GrayscalePalette);
+        for (int i = 0; i < customPalettes.size(); ++i)
+            paletteCombo->addItem(customPalettes.at(i).name, 100 + i);
+        int index = paletteCombo->findData(previousData);
+        if (index < 0)
+            index = paletteCombo->findText(previousText);
+        if (index < 0)
+            index = paletteCombo->findData(BScanWidget::GrayscalePalette);
+        paletteCombo->setCurrentIndex(qMax(0, index));
+    };
+    refillPaletteCombo();
+    int initialPaletteIndex = paletteCombo->findData(m_paletteMode);
+    if (m_paletteMode == BScanWidget::CustomPalette) {
+        for (int i = 0; i < customPalettes.size(); ++i) {
+            if (customPalettes.at(i).startColor == m_customPaletteStart
+                && customPalettes.at(i).endColor == m_customPaletteEnd) {
+                initialPaletteIndex = paletteCombo->findData(100 + i);
+                break;
+            }
+        }
+    }
+    paletteCombo->setCurrentIndex(initialPaletteIndex >= 0
+                                      ? initialPaletteIndex
+                                      : paletteCombo->findData(BScanWidget::GrayscalePalette));
+
+    auto *managePalettes = new QPushButton(QStringLiteral("自定义色带"), continuousGroup);
+    auto *paletteRow = new QWidget(continuousGroup);
+    auto *paletteRowLayout = new QHBoxLayout(paletteRow);
+    paletteRowLayout->setContentsMargins(0, 0, 0, 0);
+    paletteRowLayout->setSpacing(6);
+    paletteRowLayout->addWidget(paletteCombo, 1);
+    paletteRowLayout->addWidget(managePalettes);
+
+    auto *lowerSpin = new QDoubleSpinBox(continuousGroup);
+    auto *upperSpin = new QDoubleSpinBox(continuousGroup);
+    for (QDoubleSpinBox *spin : {lowerSpin, upperSpin}) {
+        spin->setRange(0.0, 100.0);
+        spin->setDecimals(1);
+        spin->setSingleStep(1.0);
+        spin->setSuffix(QStringLiteral(" %"));
+    }
+    lowerSpin->setValue(m_paletteLower);
+    upperSpin->setValue(m_paletteUpper);
+    auto *gammaSpin = new QDoubleSpinBox(continuousGroup);
+    gammaSpin->setRange(0.2, 3.0);
+    gammaSpin->setDecimals(2);
+    gammaSpin->setSingleStep(0.05);
+    gammaSpin->setValue(m_paletteGamma);
+    gammaSpin->setToolTip(QStringLiteral("大于 1 提亮中间层次，小于 1 压暗中间层次"));
+    continuousForm->addRow(QStringLiteral("色带："), paletteRow);
+    continuousForm->addRow(QStringLiteral("显示下限："),
+                           pa1664::ui::paramSliderField(lowerSpin));
+    continuousForm->addRow(QStringLiteral("显示上限："),
+                           pa1664::ui::paramSliderField(upperSpin));
+    continuousForm->addRow(QStringLiteral("中间调节："),
+                           pa1664::ui::paramSliderField(gammaSpin));
+    rootLayout->addWidget(continuousGroup);
+
+    // 阈值分段方案
+    auto *thresholdGroup = new QGroupBox(QStringLiteral("阈值分段方案"), &dialog);
+    auto *thresholdLayout = new QVBoxLayout(thresholdGroup);
+    thresholdLayout->setContentsMargins(8, 8, 8, 8);
+    thresholdLayout->setSpacing(6);
+    auto *thresholdSchemeCombo = new QComboBox(thresholdGroup);
+    thresholdSchemeCombo->addItem(QStringLiteral("临时设置"), QString());
+    for (const ThresholdPaletteScheme &scheme : thresholdSchemes)
+        thresholdSchemeCombo->addItem(scheme.name, scheme.id);
+    const int activeSchemeIndex = thresholdSchemeCombo->findData(originalActiveThresholdSchemeId);
+    thresholdSchemeCombo->setCurrentIndex(activeSchemeIndex >= 0 ? activeSchemeIndex : 0);
+    auto *newSchemeButton = new QPushButton(QStringLiteral("新建方案"), thresholdGroup);
+    auto *editSchemeButton = new QPushButton(QStringLiteral("编辑方案"), thresholdGroup);
+    auto *deleteSchemeButton = new QPushButton(QStringLiteral("删除方案"), thresholdGroup);
+    auto *schemeRow = new QWidget(thresholdGroup);
+    auto *schemeRowLayout = new QHBoxLayout(schemeRow);
+    schemeRowLayout->setContentsMargins(0, 0, 0, 0);
+    schemeRowLayout->addWidget(thresholdSchemeCombo, 1);
+    schemeRowLayout->addWidget(newSchemeButton);
+    schemeRowLayout->addWidget(editSchemeButton);
+    schemeRowLayout->addWidget(deleteSchemeButton);
+    thresholdLayout->addWidget(schemeRow);
+    rootLayout->addWidget(thresholdGroup);
+
+    const auto selectedPalette = [&] (int &mode, QColor &start, QColor &end) {
+        const int data = paletteCombo->currentData().toInt();
+        if (data >= 100) {
+            const int index = data - 100;
+            mode = BScanWidget::CustomPalette;
+            if (index >= 0 && index < customPalettes.size()) {
+                start = customPalettes.at(index).startColor;
+                end = customPalettes.at(index).endColor;
+            }
+        } else {
+            mode = data;
+        }
+    };
+
+    const auto refreshPreview = [&] {
+        if (m_colorRuleMode == ScanPalette::ThresholdBandsColorRule) {
+            preview->setPixmap(thresholdPreviewPixmap(
+                m_thresholdBands, ScanPalette::PercentageThresholdValues, 560, 36));
+        } else {
+            preview->setPixmap(palettePreviewPixmap(
+                m_paletteMode, m_customPaletteStart, m_customPaletteEnd,
+                m_paletteLower, m_paletteUpper, m_paletteGamma, 560, 36));
+        }
+    };
+
+    const auto applyFromControls = [&] {
+        int mode = BScanWidget::GrayscalePalette;
+        QColor customStart = m_customPaletteStart;
+        QColor customEnd = m_customPaletteEnd;
+        selectedPalette(mode, customStart, customEnd);
+        m_paletteMode = mode;
+        m_paletteScaleMode = valueScaleCombo->currentData().toInt();
+        m_paletteFixedMaximum = fixedMaximumSpin->value();
+        m_paletteUpper = qMax(1.0, upperSpin->value());
+        m_paletteLower = qBound(0.0, lowerSpin->value(), m_paletteUpper - 0.1);
+        m_paletteGamma = gammaSpin->value();
+        m_customPaletteStart = customStart;
+        m_customPaletteEnd = customEnd;
+        m_colorRuleMode = colorRuleCombo->currentData().toInt();
+        m_thresholdBands = workingBands.isEmpty() ? BScanWidget::defaultThresholdColorBands()
+                                                  : workingBands;
+        fixedMaximumSpin->setEnabled(
+            m_paletteScaleMode == BScanWidget::FixedFullScale);
+        refreshPreview();
+        applyPaletteSettings();
+    };
+
+    const auto updateRuleUi = [&] {
+        const bool threshold = colorRuleCombo->currentData().toInt()
+                               == ScanPalette::ThresholdBandsColorRule;
+        continuousGroup->setEnabled(!threshold);
+        thresholdGroup->setEnabled(threshold);
+    };
+
+    const auto loadSchemeToWorking = [&](const ThresholdPaletteScheme &scheme) {
+        workingStart = scheme.startValue;
+        workingEnd = scheme.endValue;
+        workingStep = scheme.stepValue;
+        workingThresholdPaletteMode = scheme.paletteMode;
+        workingThresholdCustomStart = scheme.customStart;
+        workingThresholdCustomEnd = scheme.customEnd;
+        workingBands = scheme.bands;
+    };
+
+    const auto schemeFromWorking = [&](const QString &id, const QString &name) {
+        ThresholdPaletteScheme scheme;
+        scheme.id = id;
+        scheme.name = name;
+        scheme.startValue = workingStart;
+        scheme.endValue = workingEnd;
+        scheme.stepValue = workingStep;
+        scheme.paletteMode = workingThresholdPaletteMode;
+        scheme.customStart = workingThresholdCustomStart;
+        scheme.customEnd = workingThresholdCustomEnd;
+        scheme.bands = workingBands;
+        return scheme;
+    };
+
+    // 自定义色带管理器：连续渐变与阈值分段共用，parent 决定它挂在哪个模态窗口下。
+    const auto openCustomPaletteManager = [&](QWidget *parent) {
+        QDialog manager(parent);
+        manager.setWindowTitle(QStringLiteral("自定义色带"));
+        manager.setModal(true);
+        manager.setMinimumSize(480, 360);
+        auto *managerLayout = new QVBoxLayout(&manager);
+        auto *paletteList = new QListWidget(&manager);
+        managerLayout->addWidget(paletteList, 1);
+        const auto reloadList = [&] {
+            paletteList->clear();
+            for (const CustomPaletteEntry &entry : customPalettes)
+                paletteList->addItem(entry.name);
+        };
+        reloadList();
+        auto *managerButtons = new QHBoxLayout;
+        auto *newPalette = new QPushButton(QStringLiteral("新建"), &manager);
+        auto *deletePalette = new QPushButton(QStringLiteral("删除色带"), &manager);
+        auto *closeManager = new QPushButton(QStringLiteral("关闭"), &manager);
+        managerButtons->addWidget(newPalette);
+        managerButtons->addWidget(deletePalette);
+        managerButtons->addStretch(1);
+        managerButtons->addWidget(closeManager);
+        managerLayout->addLayout(managerButtons);
+
+        connect(newPalette, &QPushButton::clicked, &manager, [&] {
+            QDialog editor(&manager);
+            editor.setWindowTitle(QStringLiteral("新建自定义色带"));
+            auto *editorLayout = new QVBoxLayout(&editor);
+            auto *editorForm = new QFormLayout;
+            auto *nameEdit = new QLineEdit(nextCustomPaletteName(customPalettes), &editor);
+            QColor startColor(0, 8, 70);
+            QColor endColor(255, 255, 255);
+            auto *startButton = new QPushButton(&editor);
+            auto *endButton = new QPushButton(&editor);
+            const auto styleColorButton = [] (QPushButton *button, const QColor &color) {
+                const int luminance = qRound(0.299 * color.red()
+                                             + 0.587 * color.green()
+                                             + 0.114 * color.blue());
+                button->setText(color.name(QColor::HexRgb).toUpper());
+                button->setStyleSheet(
+                    QStringLiteral("QPushButton { background:%1; color:%2; "
+                                   "border:1px solid #7b8794; padding:6px; }")
+                        .arg(color.name(QColor::HexRgb),
+                             luminance < 135 ? QStringLiteral("white")
+                                             : QStringLiteral("black")));
+            };
+            styleColorButton(startButton, startColor);
+            styleColorButton(endButton, endColor);
+            editorForm->addRow(QStringLiteral("名称："), nameEdit);
+            editorForm->addRow(QStringLiteral("起始颜色："), startButton);
+            editorForm->addRow(QStringLiteral("结束颜色："), endButton);
+            editorLayout->addLayout(editorForm);
+            auto *customPreview = new QLabel(&editor);
+            customPreview->setFixedHeight(38);
+            customPreview->setFrameShape(QFrame::StyledPanel);
+            customPreview->setScaledContents(true);
+            editorLayout->addWidget(customPreview);
+            const auto updateCustomPreview = [&] {
+                customPreview->setPixmap(palettePreviewPixmap(
+                    BScanWidget::CustomPalette, startColor, endColor,
+                    0.0, 100.0, 1.0, 420, 34));
+            };
+            updateCustomPreview();
+            connect(startButton, &QPushButton::clicked, &editor, [&] {
+                const QColor selected = QColorDialog::getColor(
+                    startColor, &editor, QStringLiteral("选择起始颜色"));
+                if (!selected.isValid())
+                    return;
+                startColor = selected;
+                styleColorButton(startButton, startColor);
+                updateCustomPreview();
+            });
+            connect(endButton, &QPushButton::clicked, &editor, [&] {
+                const QColor selected = QColorDialog::getColor(
+                    endColor, &editor, QStringLiteral("选择结束颜色"));
+                if (!selected.isValid())
+                    return;
+                endColor = selected;
+                styleColorButton(endButton, endColor);
+                updateCustomPreview();
+            });
+            auto *editorButtons = new QDialogButtonBox(
+                QDialogButtonBox::Save | QDialogButtonBox::Cancel, &editor);
+            editorButtons->button(QDialogButtonBox::Save)->setText(QStringLiteral("保存"));
+            editorButtons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+            connect(editorButtons, &QDialogButtonBox::accepted, &editor, &QDialog::accept);
+            connect(editorButtons, &QDialogButtonBox::rejected, &editor, &QDialog::reject);
+            editorLayout->addWidget(editorButtons);
+            if (editor.exec() != QDialog::Accepted)
+                return;
+            const QString name = nameEdit->text().trimmed();
+            if (name.isEmpty()) {
+                QMessageBox::warning(&manager, QStringLiteral("自定义色带"),
+                                     QStringLiteral("请输入名称。"));
+                return;
+            }
+            CustomPaletteEntry entry;
+            entry.name = name;
+            entry.startColor = startColor;
+            entry.endColor = endColor;
+            customPalettes.append(entry);
+            saveCustomPalettes(customPalettes);
+            refillPaletteCombo();
+            reloadList();
+        });
+        connect(deletePalette, &QPushButton::clicked, &manager, [&] {
+            const int row = paletteList->currentRow();
+            if (row < 0 || row >= customPalettes.size()) {
+                QMessageBox::information(&manager, QStringLiteral("自定义色带"),
+                                         QStringLiteral("请先选择一个自定义色带。"));
+                return;
+            }
+            if (QMessageBox::question(
+                    &manager, QStringLiteral("自定义色带"),
+                    QStringLiteral("确定删除“%1”吗？").arg(customPalettes.at(row).name))
+                != QMessageBox::Yes) {
+                return;
+            }
+            customPalettes.removeAt(row);
+            saveCustomPalettes(customPalettes);
+            refillPaletteCombo();
+            reloadList();
+            applyFromControls();
+        });
+        connect(closeManager, &QPushButton::clicked, &manager, &QDialog::accept);
+        manager.exec();
+    };
+
+    // 分段设置编辑弹窗
+    const auto openBandEditor = [&]() -> bool {
+        QDialog editor(&dialog);
+        editor.setWindowTitle(QStringLiteral("分段设置"));
+        editor.setModal(true);
+        editor.setMinimumSize(560, 560);
+        auto *editorLayout = new QVBoxLayout(&editor);
+
+        auto *startSpin = new QDoubleSpinBox(&editor);
+        auto *endSpin = new QDoubleSpinBox(&editor);
+        auto *stepSpin = new QDoubleSpinBox(&editor);
+        for (QDoubleSpinBox *spin : {startSpin, endSpin, stepSpin}) {
+            spin->setRange(0.0, 100.0);
+            spin->setDecimals(1);
+            spin->setSingleStep(1.0);
+            spin->setSuffix(QStringLiteral(" %"));
+        }
+        startSpin->setValue(workingStart);
+        endSpin->setValue(workingEnd);
+        stepSpin->setMinimum(0.001);
+        stepSpin->setValue(workingStep);
+
+        auto *thresholdPaletteCombo = new QComboBox(&editor);
+        const auto populateThresholdPalette = [&](int selectData) {
+            const QSignalBlocker blocker(thresholdPaletteCombo);
+            thresholdPaletteCombo->clear();
+            thresholdPaletteCombo->addItem(QStringLiteral("默认热力"), BScanWidget::HeatPalette);
+            thresholdPaletteCombo->addItem(QStringLiteral("黑-灰-白"), BScanWidget::GrayscalePalette);
+            for (int i = 0; i < customPalettes.size(); ++i)
+                thresholdPaletteCombo->addItem(customPalettes.at(i).name, 100 + i);
+            thresholdPaletteCombo->setCurrentIndex(qMax(
+                0, thresholdPaletteCombo->findData(selectData)));
+        };
+        populateThresholdPalette(workingThresholdPaletteMode);
+        if (workingThresholdPaletteMode == BScanWidget::CustomPalette) {
+            for (int i = 0; i < customPalettes.size(); ++i) {
+                if (customPalettes.at(i).startColor == workingThresholdCustomStart
+                    && customPalettes.at(i).endColor == workingThresholdCustomEnd) {
+                    thresholdPaletteCombo->setCurrentIndex(
+                        thresholdPaletteCombo->findData(100 + i));
+                    break;
+                }
+            }
+        }
+
+        auto *thresholdCustomPaletteButton = new QPushButton(QStringLiteral("自定义色带"), &editor);
+        auto *thresholdPaletteRow = new QWidget(&editor);
+        auto *thresholdPaletteRowLayout = new QHBoxLayout(thresholdPaletteRow);
+        thresholdPaletteRowLayout->setContentsMargins(0, 0, 0, 0);
+        thresholdPaletteRowLayout->setSpacing(6);
+        thresholdPaletteRowLayout->addWidget(thresholdPaletteCombo, 1);
+        thresholdPaletteRowLayout->addWidget(thresholdCustomPaletteButton);
+        connect(thresholdCustomPaletteButton, &QPushButton::clicked, &editor, [&] {
+            const int current = thresholdPaletteCombo->currentData().toInt();
+            openCustomPaletteManager(&editor);
+            populateThresholdPalette(current);
+        });
+
+        auto *generateButton = new QPushButton(QStringLiteral("自动生成分段"), &editor);
+        auto *form = new QFormLayout;
+        form->addRow(QStringLiteral("起始值："), pa1664::ui::paramSliderField(startSpin));
+        form->addRow(QStringLiteral("结束值："), pa1664::ui::paramSliderField(endSpin));
+        form->addRow(QStringLiteral("分段间隔："), pa1664::ui::paramSliderField(stepSpin));
+        form->addRow(QStringLiteral("色带："), thresholdPaletteRow);
+        form->addRow(QString(), generateButton);
+        editorLayout->addLayout(form);
+
+        auto *bandTable = new QTableWidget(0, 3, &editor);
+        bandTable->setHorizontalHeaderLabels(
+            {QStringLiteral("下限(%)"), QStringLiteral("上限(%)"), QStringLiteral("固定颜色")});
+        bandTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+        bandTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+        bandTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+        bandTable->verticalHeader()->setVisible(false);
+        bandTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+        bandTable->setSelectionMode(QAbstractItemView::SingleSelection);
+        bandTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        bandTable->setMinimumHeight(200);
+        editorLayout->addWidget(bandTable, 1);
+
+        auto *statusLabel = new QLabel(&editor);
+        statusLabel->setWordWrap(true);
+        editorLayout->addWidget(statusLabel);
+
+        auto *editorButtons = new QDialogButtonBox(&editor);
+        auto *saveButton = editorButtons->addButton(QStringLiteral("保存"), QDialogButtonBox::AcceptRole);
+        auto *cancelButton = editorButtons->addButton(QStringLiteral("取消"), QDialogButtonBox::RejectRole);
+        editorLayout->addWidget(editorButtons);
+
+        const auto setColorButton = [](QPushButton *button, const QColor &color) {
+            const QColor valid = color.isValid() ? color : QColor(Qt::black);
+            button->setProperty("bandColor", valid);
+            button->setText(valid.name(QColor::HexRgb).toUpper());
+            const int luminance = qRound(0.299 * valid.red()
+                                         + 0.587 * valid.green()
+                                         + 0.114 * valid.blue());
+            button->setStyleSheet(QStringLiteral(
+                "QPushButton { background:%1; color:%2; border:1px solid #7b8794; padding:4px; }")
+                .arg(valid.name(QColor::HexRgb),
+                     luminance < 135 ? QStringLiteral("white") : QStringLiteral("black")));
+        };
+
+        const auto readBands = [&] {
+            QVector<ScanPalette::ThresholdColorBand> bands;
+            bands.reserve(bandTable->rowCount());
+            for (int row = 0; row < bandTable->rowCount(); ++row) {
+                auto *lower = qobject_cast<QDoubleSpinBox *>(bandTable->cellWidget(row, 0));
+                auto *upper = qobject_cast<QDoubleSpinBox *>(bandTable->cellWidget(row, 1));
+                auto *colorButton = qobject_cast<QPushButton *>(bandTable->cellWidget(row, 2));
+                if (!lower || !upper || !colorButton)
+                    continue;
+                ScanPalette::ThresholdColorBand band;
+                band.lower = lower->value() / 100.0;
+                band.upper = upper->value() / 100.0;
+                band.color = colorButton->property("bandColor").value<QColor>();
+                bands.append(band);
+            }
+            return bands;
+        };
+
+        const auto validateBands = [&](const QVector<ScanPalette::ThresholdColorBand> &bands) {
+            if (bands.isEmpty())
+                return QStringLiteral("请至少保留一个颜色区间。");
+            QVector<ScanPalette::ThresholdColorBand> sorted = bands;
+            std::sort(sorted.begin(), sorted.end(),
+                      [](const ScanPalette::ThresholdColorBand &l,
+                         const ScanPalette::ThresholdColorBand &r) {
+                return l.lower < r.lower;
+            });
+            double previousUpper = -1.0;
+            for (int i = 0; i < sorted.size(); ++i) {
+                const auto &band = sorted.at(i);
+                if (!band.color.isValid())
+                    return QStringLiteral("第%1个区间尚未选择有效颜色。").arg(i + 1);
+                if (band.upper - band.lower < 0.001)
+                    return QStringLiteral("第%1个区间的上限必须大于下限。").arg(i + 1);
+                if (band.lower < 0.0 || band.upper > 1.0)
+                    return QStringLiteral("百分比分段必须位于0%到100%之间。");
+                if (i > 0 && band.lower < previousUpper - 0.000001)
+                    return QStringLiteral("颜色区间存在重叠，请调整上下限。");
+                previousUpper = qMax(previousUpper, band.upper);
+            }
+            return QString();
+        };
+
+        const auto insertBandRow = [&](int row, double lowerValue, double upperValue,
+                                       const QColor &color) {
+            const int targetRow = qBound(0, row, bandTable->rowCount());
+            bandTable->insertRow(targetRow);
+            auto *lower = new QDoubleSpinBox(bandTable);
+            auto *upper = new QDoubleSpinBox(bandTable);
+            for (QDoubleSpinBox *spin : {lower, upper}) {
+                spin->setRange(0.0, 100.0);
+                spin->setDecimals(1);
+                spin->setSingleStep(1.0);
+                spin->setFrame(false);
+            }
+            lower->setValue(qMax(0.0, lowerValue));
+            upper->setValue(qMax(0.0, upperValue));
+            auto *colorButton = new QPushButton(bandTable);
+            setColorButton(colorButton, color);
+            bandTable->setCellWidget(targetRow, 0, lower);
+            bandTable->setCellWidget(targetRow, 1, upper);
+            bandTable->setCellWidget(targetRow, 2, colorButton);
+            bandTable->setRowHeight(targetRow, 34);
+            connect(colorButton, &QPushButton::clicked, &editor, [colorButton, &setColorButton] {
+                const QColor current = colorButton->property("bandColor").value<QColor>();
+                const QColor selected = QColorDialog::getColor(
+                    current, nullptr, QStringLiteral("选择区间颜色"));
+                if (selected.isValid())
+                    setColorButton(colorButton, selected);
+            });
+        };
+
+        const auto replaceBands = [&](const QVector<ScanPalette::ThresholdColorBand> &bands) {
+            bandTable->setRowCount(0);
+            for (const auto &band : bands) {
+                insertBandRow(bandTable->rowCount(),
+                              band.lower * 100.0, band.upper * 100.0, band.color);
+            }
+            if (bandTable->rowCount() > 0)
+                bandTable->selectRow(0);
+        };
+
+        const auto generateBands = [&] {
+            const double start = startSpin->value();
+            const double end = endSpin->value();
+            const double step = stepSpin->value();
+            if (end <= start || step <= 0.0) {
+                QMessageBox::warning(&editor, QStringLiteral("阈值分段"),
+                                     QStringLiteral("结束值必须大于起始值，分段间隔必须大于0。"));
+                return;
+            }
+            const int count = qCeil((end - start) / step);
+            if (count <= 0 || count > 64) {
+                QMessageBox::warning(&editor, QStringLiteral("阈值分段"),
+                                     QStringLiteral("自动生成的分段数量必须在1到64之间。"));
+                return;
+            }
+            int paletteData = thresholdPaletteCombo->currentData().toInt();
+            int paletteMode = paletteData;
+            QColor customStart, customEnd;
+            if (paletteData >= 100) {
+                const int ci = paletteData - 100;
+                paletteMode = BScanWidget::CustomPalette;
+                if (ci >= 0 && ci < customPalettes.size()) {
+                    customStart = customPalettes.at(ci).startColor;
+                    customEnd = customPalettes.at(ci).endColor;
+                }
+            }
+            QVector<ScanPalette::ThresholdColorBand> generated;
+            generated.reserve(count + 2);
+            if (start > 0.0) {
+                ScanPalette::ThresholdColorBand below;
+                below.lower = 0.0;
+                below.upper = start / 100.0;
+                below.color = paletteColorAt(paletteMode, customStart, customEnd, 0.0);
+                generated.append(below);
+            }
+            for (int index = 0; index < count; ++index) {
+                ScanPalette::ThresholdColorBand band;
+                const double lower = start + index * step;
+                const double upper = qMin(end, lower + step);
+                band.lower = lower / 100.0;
+                band.upper = upper / 100.0;
+                band.color = paletteColorAt(paletteMode, customStart, customEnd,
+                                            (index + 0.5) / count);
+                generated.append(band);
+            }
+            if (end < 100.0) {
+                ScanPalette::ThresholdColorBand above;
+                above.lower = end / 100.0;
+                above.upper = 1.0;
+                above.color = paletteColorAt(paletteMode, customStart, customEnd, 1.0);
+                generated.append(above);
+            }
+            replaceBands(generated);
+        };
+
+        replaceBands(workingBands);
+
+        connect(generateButton, &QPushButton::clicked, &editor, generateBands);
+
+        connect(saveButton, &QPushButton::clicked, &editor, [&] {
+            const QVector<ScanPalette::ThresholdColorBand> bands = readBands();
+            const QString error = validateBands(bands);
+            if (!error.isEmpty()) {
+                statusLabel->setStyleSheet(QStringLiteral("color:#c0392b; font-weight:600;"));
+                statusLabel->setText(error);
+                return;
+            }
+            workingStart = startSpin->value();
+            workingEnd = endSpin->value();
+            workingStep = stepSpin->value();
+            const int paletteData = thresholdPaletteCombo->currentData().toInt();
+            if (paletteData >= 100) {
+                workingThresholdPaletteMode = BScanWidget::CustomPalette;
+                const int ci = paletteData - 100;
+                if (ci >= 0 && ci < customPalettes.size()) {
+                    workingThresholdCustomStart = customPalettes.at(ci).startColor;
+                    workingThresholdCustomEnd = customPalettes.at(ci).endColor;
+                }
+            } else {
+                workingThresholdPaletteMode = paletteData;
+            }
+            workingBands = bands;
+            editor.accept();
+        });
+        connect(cancelButton, &QPushButton::clicked, &editor, &QDialog::reject);
+
+        return editor.exec() == QDialog::Accepted;
+    };
+
+    connect(managePalettes, &QPushButton::clicked, &dialog, [&] {
+        openCustomPaletteManager(&dialog);
+    });
+
+    connect(valueScaleCombo, &QComboBox::currentIndexChanged,
+            &dialog, [&] (int) { applyFromControls(); });
+    connect(paletteCombo, &QComboBox::currentIndexChanged,
+            &dialog, [&] (int) { applyFromControls(); });
+    connect(fixedMaximumSpin, &QDoubleSpinBox::valueChanged,
+            &dialog, [&] (double) { applyFromControls(); });
+    connect(lowerSpin, &QDoubleSpinBox::valueChanged,
+            &dialog, [&] (double) { applyFromControls(); });
+    connect(upperSpin, &QDoubleSpinBox::valueChanged,
+            &dialog, [&] (double) { applyFromControls(); });
+    connect(gammaSpin, &QDoubleSpinBox::valueChanged,
+            &dialog, [&] (double) { applyFromControls(); });
+    connect(colorRuleCombo, &QComboBox::currentIndexChanged,
+            &dialog, [&] (int) { updateRuleUi(); applyFromControls(); });
+
+    connect(newSchemeButton, &QPushButton::clicked, &dialog, [&] {
+        bool nameOk = false;
+        QString name = QInputDialog::getText(&dialog, QStringLiteral("新建分段方案"),
+                                             QStringLiteral("方案名称："),
+                                             QLineEdit::Normal, QString(), &nameOk).trimmed();
+        if (!nameOk)
+            return;
+        if (name.isEmpty()) {
+            int maxIndex = 0;
+            for (const ThresholdPaletteScheme &scheme : thresholdSchemes) {
+                if (scheme.name.startsWith(QStringLiteral("方案"))) {
+                    bool ok = false;
+                    const int index = scheme.name.mid(2).toInt(&ok);
+                    if (ok)
+                        maxIndex = qMax(maxIndex, index);
+                }
+            }
+            name = QStringLiteral("方案%1").arg(maxIndex + 1);
+        }
+        workingStart = 0.0;
+        workingEnd = 100.0;
+        workingStep = 20.0;
+        workingThresholdPaletteMode = BScanWidget::HeatPalette;
+        workingBands = BScanWidget::defaultThresholdColorBands();
+        if (!openBandEditor())
+            return;
+        ThresholdPaletteScheme scheme = schemeFromWorking(
+            QUuid::createUuid().toString(QUuid::WithoutBraces), name);
+        thresholdSchemes.append(scheme);
+        saveThresholdPaletteSchemes(thresholdSchemes);
+        thresholdSchemeCombo->addItem(scheme.name, scheme.id);
+        thresholdSchemeCombo->setCurrentIndex(thresholdSchemeCombo->count() - 1);
+        applyFromControls();
+    });
+    connect(editSchemeButton, &QPushButton::clicked, &dialog, [&] {
+        const QString id = thresholdSchemeCombo->currentData().toString();
+        int schemeIndex = -1;
+        for (int i = 0; i < thresholdSchemes.size(); ++i) {
+            if (thresholdSchemes.at(i).id == id) { schemeIndex = i; break; }
+        }
+        if (schemeIndex < 0) {
+            newSchemeButton->click();
+            return;
+        }
+        loadSchemeToWorking(thresholdSchemes.at(schemeIndex));
+        if (!openBandEditor())
+            return;
+        thresholdSchemes[schemeIndex] = schemeFromWorking(
+            id, thresholdSchemes.at(schemeIndex).name);
+        saveThresholdPaletteSchemes(thresholdSchemes);
+        applyFromControls();
+    });
+    connect(deleteSchemeButton, &QPushButton::clicked, &dialog, [&] {
+        const QString id = thresholdSchemeCombo->currentData().toString();
+        for (int i = 0; i < thresholdSchemes.size(); ++i) {
+            if (thresholdSchemes.at(i).id != id)
+                continue;
+            if (QMessageBox::question(&dialog, QStringLiteral("删除分段方案"),
+                                      QStringLiteral("确定删除“%1”吗？")
+                                          .arg(thresholdSchemes.at(i).name))
+                != QMessageBox::Yes) {
+                return;
+            }
+            thresholdSchemes.removeAt(i);
+            saveThresholdPaletteSchemes(thresholdSchemes);
+            thresholdSchemeCombo->removeItem(thresholdSchemeCombo->currentIndex());
+            thresholdSchemeCombo->setCurrentIndex(0);
+            return;
+        }
+    });
+    connect(thresholdSchemeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            &dialog, [&](int) {
+        const QString id = thresholdSchemeCombo->currentData().toString();
+        deleteSchemeButton->setEnabled(!id.isEmpty());
+        for (const ThresholdPaletteScheme &scheme : thresholdSchemes) {
+            if (scheme.id == id) {
+                loadSchemeToWorking(scheme);
+                applyFromControls();
+                return;
+            }
+        }
+        deleteSchemeButton->setEnabled(false);
+    });
+
+    auto *buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel
+            | QDialogButtonBox::RestoreDefaults,
+        &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("应用"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    buttons->button(QDialogButtonBox::RestoreDefaults)->setText(QStringLiteral("恢复默认"));
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+        settings.setValue(QStringLiteral("palette/activeThresholdSchemeId"),
+                          thresholdSchemeCombo->currentData().toString());
+        dialog.accept();
+    });
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(buttons->button(QDialogButtonBox::RestoreDefaults), &QPushButton::clicked,
+            &dialog, [&] {
+                colorRuleCombo->setCurrentIndex(
+                    colorRuleCombo->findData(ScanPalette::ContinuousColorRule));
+                valueScaleCombo->setCurrentIndex(
+                    valueScaleCombo->findData(BScanWidget::DynamicScale));
+                paletteCombo->setCurrentIndex(
+                    paletteCombo->findData(BScanWidget::GrayscalePalette));
+                fixedMaximumSpin->setValue(100.0);
+                lowerSpin->setValue(0.0);
+                upperSpin->setValue(100.0);
+                gammaSpin->setValue(1.0);
+                workingStart = 0.0;
+                workingEnd = 100.0;
+                workingStep = 20.0;
+                workingThresholdPaletteMode = BScanWidget::HeatPalette;
+                workingBands = BScanWidget::defaultThresholdColorBands();
+                updateRuleUi();
+                applyFromControls();
+            });
+    rootLayout->addWidget(buttons);
+
+    updateRuleUi();
+    applyFromControls();
+    if (dialog.exec() != QDialog::Accepted) {
+        m_paletteMode = originalMode;
+        m_paletteScaleMode = originalScaleMode;
+        m_paletteFixedMaximum = originalFixedMaximum;
+        m_paletteLower = originalLower;
+        m_paletteUpper = originalUpper;
+        m_paletteGamma = originalGamma;
+        m_customPaletteStart = originalCustomStart;
+        m_customPaletteEnd = originalCustomEnd;
+        m_colorRuleMode = originalColorRuleMode;
+        m_thresholdBands = originalBands;
+        applyPaletteSettings();
+    }
 }
 
 void MainWindow::openRemoteDesktop()
@@ -1865,6 +3083,7 @@ void MainWindow::renderCurrentFrame(bool newlyAcquired)
                                     : qMax(m_lastFrame.beams.size(), m_lastFrame.measurements.size());
     if (sourceBeamCount <= 0) return;
     m_beam->setMaximum(sourceBeamCount);
+    pa1664::ui::refreshParamSlider(m_beam);
     const int index = m_lastFrame.selectedSourceBeam >= 0
                           ? 0
                           : qBound(0, m_beam->value() - 1, sourceBeamCount - 1);
@@ -1970,14 +3189,46 @@ void MainWindow::updateStatus()
     }
 
     m_connect->setText(connected ? QStringLiteral("断开 SDK") : QStringLiteral("连接 SDK"));
+    // 远程模式必须把目标地址放在状态栏上：以前只写“等待小车主机”，
+    // 地址被写成 127.0.0.1 时和“小车主机没开机”在界面上长得一模一样。
+    const QString remoteHost =
+        m_remoteSession ? m_remoteSession->host() : QString();
+    const QString remoteTarget =
+        m_remoteSession
+            ? QStringLiteral("%1:%2").arg(remoteHost).arg(m_remoteSession->controlPort())
+            : QStringLiteral("未指定地址");
+    // 未连接时再区分一次“网络层就不可达”和“主机没起来”：前者本机根本没有
+    // 同网段的地址（USB 网卡掉线、网线松了），不是点重连能解决的。
+    const bool linkMissing =
+        m_remoteMode && !connected && !localSubnetReachable(remoteHost);
     m_serviceStatus->setText(
         m_remoteMode
-            ? (connected ? QStringLiteral("● 主机在线 / SDK 已连接")
-                         : QStringLiteral("● 等待小车主机"))
+            ? (connected
+                   ? QStringLiteral("● 主机在线 %1 / SDK 已连接").arg(remoteTarget)
+                   : (linkMissing
+                          ? QStringLiteral("● 网络不通 %1（本机无同网段地址）")
+                                .arg(remoteTarget)
+                          : QStringLiteral("● 等待小车主机 %1").arg(remoteTarget)))
             : (connected ? QStringLiteral("● SDK 已连接")
                          : QStringLiteral("● SDK 未连接")));
-    m_serviceStatus->setStyleSheet(connected ? "color:#1976d2;font-weight:600"
-                                              : "color:#77838f");
+    if (m_remoteMode) {
+        m_serviceStatus->setToolTip(
+            connected
+                ? QStringLiteral("操作台已连上小车主机 %1").arg(remoteTarget)
+                : (linkMissing
+                       ? QStringLiteral("本机没有与 %1 同网段的地址：USB 网卡未插好、"
+                                        "网线松了或网卡被禁用。先恢复本机 IP，"
+                                        "再谈重连。")
+                             .arg(remoteHost)
+                       : QStringLiteral("正在重连 %1。若地址是 127.0.0.1，只有本机运行 "
+                                        "PA1664RobotHost 时才有数据；连接小车端请用 "
+                                        "--remote <小车IP>:43100 启动。")
+                             .arg(remoteTarget)));
+    }
+    m_serviceStatus->setStyleSheet(
+        connected ? "color:#1976d2;font-weight:600"
+                  : (linkMissing ? "color:#c62828;font-weight:700"
+                                 : "color:#77838f"));
     m_hardwareStatus->setText(
         online ? QStringLiteral("● USB 硬件在线")
                : (capturing ? QStringLiteral("● 等待硬件帧")
@@ -2113,19 +3364,14 @@ BScanWidget *MainWindow::ensureBScan(int groupId)
     auto *widget = new BScanWidget;
     widget->setEncoderPrecision(encoderCountsPerCellA(groupId));
     widget->setMmPerCount(m_encoderMmPerCountA);
-    if (m_bViewMode)
-        widget->setViewMode(m_bViewMode->currentData().toInt());
-    if (m_bPaletteMode)
-        widget->setPaletteMode(m_bPaletteMode->currentData().toInt());
-    if (m_bScaleMode)
-        widget->setScaleMode(m_bScaleMode->currentData().toInt());
-    if (m_bDisplayLower && m_bDisplayUpper && m_bGamma)
-        widget->setDisplayLevels(m_bDisplayLower->value(),
-                                 m_bDisplayUpper->value(), m_bGamma->value());
-    if (m_bDisplayReject)
-        widget->setDisplayReject(m_bDisplayReject->value());
-    if (m_bInterpolateMissing)
-        widget->setInterpolateMissing(m_bInterpolateMissing->isChecked());
+    widget->setPaletteMode(m_paletteMode);
+    if (m_paletteMode == BScanWidget::CustomPalette)
+        widget->setCustomPalette(m_customPaletteStart, m_customPaletteEnd);
+    widget->setScaleMode(m_paletteScaleMode);
+    widget->setFixedScaleMaximum(m_paletteFixedMaximum);
+    widget->setDisplayLevels(m_paletteLower, m_paletteUpper, m_paletteGamma);
+    widget->setThresholdColorSettings(m_colorRuleMode, m_thresholdBands,
+                                      ScanPalette::PercentageThresholdValues);
     if (m_bScanStack)
         m_bScanStack->addWidget(widget);
     connect(widget, &BScanWidget::columnClicked, this,
@@ -2610,6 +3856,7 @@ void MainWindow::processPlaybackFrame(const QByteArray &packet, int pointCount, 
     }
     m_lastFrame = std::move(frame);
     m_beam->setMaximum(m_lastFrame.beams.size());
+    pa1664::ui::refreshParamSlider(m_beam);
     const int index = qBound(0, m_beam->value() - 1, m_lastFrame.beams.size() - 1);
     const int maximumAmplitude = m_remoteMode
         ? m_remoteStatus.value(QStringLiteral("device")).toObject()

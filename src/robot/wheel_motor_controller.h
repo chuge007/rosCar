@@ -96,6 +96,23 @@ class WheelMotorController final {
   bool setWheelSpeeds(double leftMps, double rightMps);
   bool stop();
   bool reset();
+  // 抱闸释放 0x77 / 锁死 0x78（官方 V3.8 的 2.27/2.28）。RS485 版 MWD 没有
+  // 独立抱闸帧，返回 false 表示这一侧协议不支持，而不是发送失败。
+  bool setBrakeReleased(bool release);
+  bool supportsBrakeControl() const { return initialized_; }
+  // 命令回显只代表"收到"，真正是否脱开看 rlyCtrlRslt（0x9A 的 Data[3]）：
+  // 运行中仍为 0 就说明闸没松，此时继续发速度只会堵转。
+  struct BrakeStatus {
+    bool leftValid = false;
+    bool rightValid = false;
+    bool leftReleased = false;
+    bool rightReleased = false;
+    qint64 leftAgeMs = -1;
+    qint64 rightAgeMs = -1;
+  };
+  BrakeStatus brakeStatus() const;
+  // 立即向两侧各发一次 0x9A 状态查询，让抱闸位尽快刷新。
+  bool queryStatusNow();
   bool pollFeedback(WheelMotorFeedback* feedback, bool requestStatus = true);
 
   // Cumulative CAN counters since the last initialize(). They let a caller
@@ -201,6 +218,8 @@ class WheelMotorController final {
   std::int64_t canStaleLogMs_ = -1;
   std::optional<ServoStatus> leftStatus_;
   std::optional<ServoStatus> rightStatus_;
+  qint64 leftStatusAtMs_ = -1;
+  qint64 rightStatusAtMs_ = -1;
   std::array<std::uint8_t, 8> leftSpeedFrame_{};
   std::array<std::uint8_t, 8> rightSpeedFrame_{};
   bool leftSpeedFrameValid_ = false;

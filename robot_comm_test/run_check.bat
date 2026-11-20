@@ -21,11 +21,11 @@ set PATH=D:\qt\5.12.4\msvc2017_64\bin;%PATH%
 del /q robot_comm_test.log robot_comm_test_full.log 2>nul
 
 if /I "%MODE%"=="usb" (
-  robot_comm_test.exe -H 192.168.1.20 -p 43100 -i "%INI%" -l DB2666828 -t %HOLD% -v --camera-usb 0,1 > stdout_%MODE%.txt 2>&1
+  robot_comm_test.exe -H 192.168.66.10 -p 43100 -i "%INI%" -l DB2666828 -t %HOLD% -v --camera-usb 0,1 > stdout_%MODE%.txt 2>&1
 ) else if /I "%MODE%"=="imu" (
-  robot_comm_test.exe -H 192.168.1.20 -p 43100 -i "%INI%" -l DB2666828 -t %HOLD% -v --imu > stdout_%MODE%.txt 2>&1
+  robot_comm_test.exe -H 192.168.66.10 -p 43100 -i "%INI%" -l DB2666828 -t %HOLD% -v --imu > stdout_%MODE%.txt 2>&1
 ) else (
-  robot_comm_test.exe -H 192.168.1.20 -p 43100 -i "%INI%" -l DB2666828 -t %HOLD% -v > stdout_%MODE%.txt 2>&1
+  robot_comm_test.exe -H 192.168.66.10 -p 43100 -i "%INI%" -l DB2666828 -t %HOLD% -v > stdout_%MODE%.txt 2>&1
 )
 
 echo RC=%errorlevel%

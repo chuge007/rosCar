@@ -56,6 +56,10 @@ struct LaserCorrectionSettings {
   // converts lateral image error into a gentle steering curvature.
   double laserCenterFeedbackGain = 0.60;
   double laserCenterLookaheadM = 0.25;
+  // Fast raw-image lateral feedback gain. The gap position is the freshest
+  // measure of whether the weld is leaving the laser's usable center region.
+  // This drives the geometry-saturating lookahead loop, not the fitted path.
+  double laserCenterAngularGain = 1.80;
   // Keep the inner wheel moving during correction. The previous 0.45 rad/s
   // cap was too aggressive at low speed and could turn almost in place.
   double minimumInnerWheelRatio = 0.45;
@@ -236,6 +240,9 @@ class LaserCorrectionController final : public QObject {
   };
 
   bool telemetryUsable(const crawling::DriveTelemetry& telemetry) const;
+  // 区分“纠偏线程队列延迟”与“底盘真断流”的会话终止阈值：
+  // telemetryTimeoutMs 内没有遥测只停车（保持会话），超过它才终止会话。
+  qint64 telemetrySessionStopMs() const;
   bool phaseNeedsLaser() const;
   bool phaseMoves() const;
   bool wheelsStopped() const;
@@ -505,13 +512,9 @@ class LaserCorrectionController final : public QObject {
   // ========== 新增：焊道跟踪优化组件 ==========
   SeamStateMachine seamStateMachine_;
   LaserCenterCalibration centerCalibration_;
-  AdaptivePIDParams adaptivePID_;
-  CenterFilter centerFilter_;
   std::vector<double> calibrationSamples_;
   quint64 lastCalibrationCameraSequence_ = 0;
   qint64 lastCalibrationSampleMs_ = -1;
-  double lastCorrectionError_ = 0.0;
-  qint64 lastCorrectionTimeMs_ = 0;
   qint64 lastSeamStateLogMs_ = 0;
 };
 

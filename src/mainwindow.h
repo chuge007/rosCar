@@ -1,9 +1,11 @@
 #pragma once
 
 #include "framedecoderworker.h"
+#include "rawpacket.h"
+#include "scanpalette.h"
+#include <QColor>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include "rawpacket.h"
 #include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
@@ -20,8 +22,6 @@ class FrameDecoderWorker;
 class FramePlayer;
 class ScanWaveformCache;
 class QAction;
-class QComboBox;
-class QCheckBox;
 class QCloseEvent;
 class QDockWidget;
 class QLabel;
@@ -83,6 +83,8 @@ private:
     void applyScreenLayout();
     void buildUi();
     void buildMenus();
+    void showPaletteDialog();
+    void applyPaletteSettings();
     void showMessage(const QString &text, bool error);
     void renderCurrentFrame(bool newlyAcquired);
     void updateDecoderSettings();
@@ -106,6 +108,10 @@ private:
     void enqueueGroupScanBatch(const GroupScanFrameBatch &frames, int deviceId);
     void drainPendingGroupScanBatches();
     void applyRemoteStatus(const QJsonObject &status);
+    // 状态页的运维动作：小车端卡死后，从这里把主机进程重启掉。
+    void restartRobotHost();
+    // 状态页的运维动作：按每台已配置电机的协议清除其错误状态。
+    void clearMotorAlarms();
     void stopAcquisition();
     void refreshGeometry();
 
@@ -158,14 +164,17 @@ private:
     QSpinBox *m_deviceId = nullptr;
     QSpinBox *m_beam = nullptr;
     QDoubleSpinBox *m_cPrecision = nullptr;
-    QComboBox *m_bViewMode = nullptr;
-    QComboBox *m_bPaletteMode = nullptr;
-    QComboBox *m_bScaleMode = nullptr;
-    QDoubleSpinBox *m_bDisplayReject = nullptr;
-    QDoubleSpinBox *m_bDisplayLower = nullptr;
-    QDoubleSpinBox *m_bDisplayUpper = nullptr;
-    QDoubleSpinBox *m_bGamma = nullptr;
-    QCheckBox *m_bInterpolateMissing = nullptr;
+    // 调色盘状态：色带、幅值上限、显示上下限与阈值分段由「工具 → 调色盘」统一设置。
+    int m_paletteMode = 1;       // 默认灰度
+    int m_paletteScaleMode = 1;  // BScanWidget::DynamicScale
+    double m_paletteFixedMaximum = 100.0;
+    double m_paletteLower = 0.0;
+    double m_paletteUpper = 100.0;
+    double m_paletteGamma = 1.0;
+    QColor m_customPaletteStart = QColor(0, 8, 70);
+    QColor m_customPaletteEnd = QColor(255, 255, 255);
+    int m_colorRuleMode = ScanPalette::ContinuousColorRule;
+    QVector<ScanPalette::ThresholdColorBand> m_thresholdBands;
     QLabel *m_serviceStatus = nullptr;
     QLabel *m_hardwareStatus = nullptr;
     QLabel *m_groupStatus = nullptr;
@@ -180,6 +189,10 @@ private:
     QLabel *m_cacheUpdatedLabel = nullptr;
     QLabel *m_recordingPathLabel = nullptr;
     QVector<QLabel *> m_vehicleMetrics;
+    QPushButton *m_restartHost = nullptr;
+    QLabel *m_restartHostState = nullptr;
+    QPushButton *m_clearMotorAlarm = nullptr;
+    QLabel *m_motorAlarmState = nullptr;
     QPushButton *m_connect = nullptr;
     QPushButton *m_record = nullptr;
     QPushButton *m_eViewButton = nullptr;

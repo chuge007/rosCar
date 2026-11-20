@@ -12,6 +12,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -32,33 +33,59 @@ constexpr qint64 kMaximumEncoderBatchBacklogBytes = 128ll * 1024 * 1024;
 constexpr int kFrameEncodeIntervalMs = 20;
 constexpr int kBatchEncodeIntervalMs = 4;
 
-// 厂商 SDK 的 SharedPreferenceService 在首次实例化时读取
-// configs/ultrasound_device_*/global/prefs.json。强制结束进程（taskkill /F、
-// 任务管理器结束进程）可能把该文件留成 0 字节，之后每次启动 SDK 都抛
-// json parse_error.101，超声服务线程随即退出，此后所有 ultrasound.* 请求都
-// 被主机兜底成"主机不支持操作"，重启进程也照样失败，只能手工修文件。
-// 启动时先修复这类残留，避免空文件变成永久故障。
+// SDK 首次运行生成的 configs/ultrasound_device_*/global/prefs.json 默认内容。
+// 修复空文件时必须写回这套完整 schema，不能只写 "{}"：SharedPreferenceService
+// 会从 prefs 数组里取字段，"{}" 会让它二次解析到空字符串，仍抛 parse_error.101。
+QJsonObject defaultSdkPreferences() {
+  QJsonArray prefs;
+  prefs.append(QJsonObject{{QStringLiteral("name"), QStringLiteral("id")},
+                           {QStringLiteral("type"), QStringLiteral("int")},
+                           {QStringLiteral("value"), -1}});
+  prefs.append(QJsonObject{{QStringLiteral("name"), QStringLiteral("pa_voltage")},
+                           {QStringLiteral("type"), QStringLiteral("int")},
+                           {QStringLiteral("value"), 50}});
+  prefs.append(QJsonObject{{QStringLiteral("name"), QStringLiteral("frame_rate")},
+                           {QStringLiteral("type"), QStringLiteral("int")},
+                           {QStringLiteral("value"), 8192}});
+  return QJsonObject{{QStringLiteral("prefs"), prefs}};
+}
+
+// 厂商 SDK 的 repository 模块在首次实例化时读取 configs 下**所有层级**的
+// prefs.json（device_0 / recorder / generic_0 / ultrasound_device_*/global 等）。
+// 强制结束进程（taskkill /F、任务管理器结束进程）会把文件留成 0 字节或
+// 全 NUL 填充，之后每次启动 SDK 都抛 json parse_error.101
+// "attempting to parse an empty input"，超声服务线程随即退出，此后所有
+// ultrasound.* 请求都被主机兜底成"主机不支持操作"，重启进程也照样失败。
+// 启动时先修复这类残留，避免坏文件变成永久故障。
+bool sdkPrefsFileBroken(const QString& path) {
+  const QFileInfo info(path);
+  if (!info.exists() || !info.isFile()) return false;
+  if (info.size() == 0) return true;
+  QFile probe(path);
+  if (!probe.open(QIODevice::ReadOnly)) return false;
+  const QByteArray bytes = probe.readAll();
+  probe.close();
+  // 全 NUL 填充要单独判：QJsonDocument 会直接报错，但这里给出明确日志依据。
+  bool allNul = !bytes.isEmpty();
+  for (int i = 0; i < bytes.size() && allNul; ++i) {
+    if (bytes.at(i) != '\0') allNul = false;
+  }
+  if (allNul) return true;
+  QJsonParseError parseError;
+  const QJsonDocument doc = QJsonDocument::fromJson(bytes, &parseError);
+  return parseError.error != QJsonParseError::NoError || !doc.isObject();
+}
+
 void repairSdkPreferences() {
   const QDir appDir(QCoreApplication::applicationDirPath());
-  const QDir configs(appDir.filePath(QStringLiteral("configs")));
+  const QString configsPath = appDir.filePath(QStringLiteral("configs"));
+  const QDir configs(configsPath);
   if (!configs.exists()) return;
-  const QStringList devices =
-      configs.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-  for (const QString& device : devices) {
-    const QString path =
-        configs.filePath(device + QStringLiteral("/global/prefs.json"));
-    const QFileInfo info(path);
-    if (!info.exists() || !info.isFile()) continue;
-    bool broken = info.size() == 0;
-    if (!broken) {
-      QFile probe(path);
-      if (probe.open(QIODevice::ReadOnly)) {
-        QJsonParseError parseError;
-        QJsonDocument::fromJson(probe.readAll(), &parseError);
-        broken = parseError.error != QJsonParseError::NoError;
-      }
-    }
-    if (!broken) continue;
+  QDirIterator it(configsPath, QStringList{QStringLiteral("prefs.json")},
+                  QDir::Files, QDirIterator::Subdirectories);
+  while (it.hasNext()) {
+    const QString path = it.next();
+    if (!sdkPrefsFileBroken(path)) continue;
     const QString backup = path + QStringLiteral(".broken.bak");
     QFile::remove(backup);
     QFile::rename(path, backup);
@@ -67,7 +94,13 @@ void repairSdkPreferences() {
       qWarning().noquote() << "ULTRASOUND_PREFS_REPAIR_FAILED" << path;
       continue;
     }
-    file.write("{}");
+    // global 层带 SDK 内置的全局参数，写回默认值；其余层级只声明空预置集合，
+    // 由 SDK 按自身默认值填充，避免写错 schema。
+    const QJsonObject content =
+        path.contains(QStringLiteral("/global/prefs.json"), Qt::CaseInsensitive)
+            ? defaultSdkPreferences()
+            : QJsonObject{{QStringLiteral("prefs"), QJsonArray{}}};
+    file.write(QJsonDocument(content).toJson(QJsonDocument::Indented));
     file.close();
     qWarning().noquote() << "ULTRASOUND_PREFS_REPAIRED" << path;
   }

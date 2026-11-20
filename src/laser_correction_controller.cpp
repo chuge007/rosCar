@@ -57,8 +57,6 @@ constexpr double kGuidanceLowConfidenceWeight = 0.12;
 // The state machine and calibration use millimetres internally. A fixed
 // calibration window bounds Confirmed once reliable measurements arrive.
 constexpr int kLaserCenterCalibrationSamples = 5;
-constexpr double kAdaptiveCenterMaxLateralSpeedMps = 0.030;
-constexpr double kAdaptiveCenterDerivativeLimitMps = 0.020;
 // Inferred one-edge centers are capped below 0.05; keep them out of the
 // geometric point cloud even though the live center loop can still use them.
 constexpr double kMinimumGeometrySampleConfidence = 0.08;
@@ -300,16 +298,6 @@ LaserCorrectionController::LaserCorrectionController(QObject* parent)
   seamStateMachine_.setCandidateConfidenceThreshold(0.10);
   seamStateMachine_.setLostConfidenceThreshold(0.05);
 
-  // 配置自适应PID
-  adaptivePID_.setThresholds(2.0, 5.0, 10.0);
-  adaptivePID_.setLargeErrorParams(2.5, 3.0);
-  adaptivePID_.setMediumErrorParams(1.5, 2.0);
-  adaptivePID_.setFineErrorParams(1.0, 1.5);
-  adaptivePID_.setSmallErrorParams(0.5, 1.0);
-
-  // 配置滤波器
-  centerFilter_.setAlpha(0.3);
-
   // 连接状态机信号
   connect(&seamStateMachine_, &SeamStateMachine::stateChanged,
           this, [this](SeamLocalizationState state) {
@@ -319,7 +307,6 @@ LaserCorrectionController::LaserCorrectionController(QObject* parent)
               qInfo() << "[LASER.STATE] 焊道状态变更:" << desc;
               lastSeamStateLogMs_ = now;
             }
-            if (state == SeamLocalizationState::Located) centerFilter_.reset();
             emit seamStateChanged(state, desc);
           });
 
@@ -348,9 +335,6 @@ LaserCorrectionController::LaserCorrectionController(QObject* parent)
             // The coordinate origin changed. Re-seed all stateful filters on
             // the next fresh centre instead of slewing through the old offset.
             filteredGapValid_ = false;
-            centerFilter_.reset();
-            lastCorrectionError_ = 0.0;
-            lastCorrectionTimeMs_ = 0;
             emit calibrationCompleted(offsetMm);
             emit logMessage(
                 CRAWLING_TEXT("激光中心基准校准完成：偏移 %1 mm，采样 %2 帧；"
@@ -415,6 +399,8 @@ void LaserCorrectionController::setSettings(
       clamp(settings_.maximumCurvatureRadPerM, 0.05, 2.0);
   settings_.laserCenterFeedbackGain =
       clamp(settings_.laserCenterFeedbackGain, 0.0, 1.5);
+  settings_.laserCenterAngularGain =
+      clamp(settings_.laserCenterAngularGain, 0.2, 4.0);
   settings_.laserCenterLookaheadM =
       clamp(settings_.laserCenterLookaheadM, 0.05, 1.0);
   // 0.77 的内侧轮比例把 19 mm/s 巡航时的转向能力压到 0.65 deg/s
@@ -720,9 +706,9 @@ void LaserCorrectionController::setEnabled(bool enabled) {
           .arg(settings_.headingFitBlend * 100.0, 0, 'f', 0)
           .arg(settings_.laserCenterFeedbackGain * 100.0, 0, 'f', 0));
   emit logMessage(CRAWLING_TEXT(
-      "自适应回中：偏差<2mm Kp=0.5/Kd=1.0，2~5mm 渐变，5~10mm Kp=1.5/Kd=2.0，"
-      ">10mm Kp=2.5/Kd=3.0；中心滤波 0.15~0.40，横向修正限幅 %1 mm/s")
-                      .arg(kAdaptiveCenterMaxLateralSpeedMps * 1000.0, 0, 'f', 0));
+      "实时回中采用几何前视饱和比例式：角速度=增益%1×车速×2×偏差/(前视²+偏差²)，"
+      "随偏差自动收敛，无额外PID/滤波层")
+                      .arg(settings_.laserCenterAngularGain, 0, 'f', 2));
   emit logMessage(
       CRAWLING_TEXT("激光检测恢复：普通图像沿用 %1 ms，原始轮廓/候选恢复 %2 ms，"
                     "原始图像超时 %3 ms")
@@ -833,7 +819,6 @@ void LaserCorrectionController::setPaused(bool paused) {
   shift(lastWatchdogTickMs_);
   shift(lastGuidanceFitMs_);
   shift(lastMotionProgressMs_);
-  shift(lastCorrectionTimeMs_);
   shift(profileTraceCaptureUntilMs_);
   shift(profileTraceNextFaultFlushMs_);
   shift(boundaryCandidateRecoveryUntilMs_);
@@ -1848,12 +1833,7 @@ void LaserCorrectionController::processObservation(
       const double predictedLateralM = kCameraLateralToVehicleSign *
           (seamPrediction_.absoluteCenterRatio - 0.5) *
           settings_.imageLateralSpanM;
-      const double predictedControlLateralM =
-          centerCalibration_.isCalibrated()
-              ? centerCalibration_.adjustToLaserFrame(
-                    predictedLateralM * 1000.0) /
-                    1000.0
-              : predictedLateralM;
+      const double predictedControlLateralM = predictedLateralM;
       if (!filteredGapValid_ || lastGapFilterMs_ < 0) {
         filteredGapLateralM_ = predictedControlLateralM;
         filteredGapValid_ = true;
@@ -1943,12 +1923,7 @@ void LaserCorrectionController::processObservation(
           kCameraLateralToVehicleSign *
           (trackedGapAbsoluteCenterRatio_ - 0.5) *
           settings_.imageLateralSpanM;
-      status_.gapLateralM =
-          centerCalibration_.isCalibrated()
-              ? centerCalibration_.adjustToLaserFrame(
-                    trackedLateralM * 1000.0) /
-                    1000.0
-              : trackedLateralM;
+      status_.gapLateralM = trackedLateralM;
       status_.confidence = std::max(0.001, trackedGapConfidence_ * 0.10);
       status_.leftEdgeLateralM = latestLeftEdgeM_;
       status_.rightEdgeLateralM = latestRightEdgeM_;
@@ -2079,10 +2054,7 @@ void LaserCorrectionController::processObservation(
   status_.seamStateDescription = seamStateMachine_.getStateDescription();
   status_.laserCenterCalibrated = centerCalibration_.isCalibrated();
   status_.laserCenterOffset = centerCalibration_.getOffset();
-  status_.gapLateralM =
-      centerCalibration_.isCalibrated()
-          ? centerCalibration_.adjustToLaserFrame(rawGapLateralMm) / 1000.0
-          : rawGapLateralM;
+  status_.gapLateralM = rawGapLateralM;
 
   // 只有 Located 状态允许进入后续控制和首段采集；Candidate/Confirmed
   // 仍持续更新观测，但不会驱动车辆。
@@ -2564,7 +2536,33 @@ void LaserCorrectionController::processDriveTelemetry(
     if (now - enabledAtMs_ > settings_.telemetryTimeoutMs &&
         (lastTelemetryMs_ < enabledAtMs_ ||
          now - lastTelemetryMs_ > settings_.telemetryTimeoutMs)) {
-      stop(CRAWLING_TEXT("轮端里程反馈超时，已停止自动纠偏"));
+      // 与 watchdogTick 同一套判定：600ms 内的遥测断档可能是纠偏线程队列
+      // 延迟，只停车不废会话；超过会话终止阈值才是底盘真断流。
+      const qint64 sessionStopMs = telemetrySessionStopMs();
+      const bool hardStop = lastTelemetryMs_ < enabledAtMs_ ||
+          (now - lastTelemetryMs_) > sessionStopMs;
+      emit diagnosticLogMessage(
+          QStringLiteral("event=correction_telemetry_timeout trigger=telemetry_callback "
+                         "session=%1 phase=%2 telemetry_age_ms=%3 image_age_ms=%4 "
+                         "watchdog_gap_ms=%5 state=%6 feedback_fresh=%7 "
+                         "command_fresh=%8 timeout_ms=%9 session_stop_ms=%10 "
+                         "hard_stop=%11")
+              .arg(trajectorySessionId_)
+              .arg(phaseName(phase_))
+              .arg(lastTelemetryMs_ < 0 ? -1 : now - lastTelemetryMs_)
+              .arg(lastImageMs_ < 0 ? -1 : now - lastImageMs_)
+              .arg(lastWatchdogTickMs_ < 0 ? -1 : now - lastWatchdogTickMs_)
+              .arg(driveStateText(telemetry.state))
+              .arg(telemetry.feedbackFresh ? 1 : 0)
+              .arg(telemetry.commandFresh ? 1 : 0)
+              .arg(settings_.telemetryTimeoutMs)
+              .arg(sessionStopMs)
+              .arg(hardStop ? 1 : 0));
+      if (hardStop) {
+        stop(CRAWLING_TEXT("轮端里程反馈超时，已停止自动纠偏"));
+      } else {
+        commandImmediateStop(CRAWLING_TEXT("底盘遥测短暂延迟，等待恢复"));
+      }
     } else {
       commandImmediateStop(CRAWLING_TEXT("等待有效轮端里程反馈"));
     }
@@ -2628,6 +2626,15 @@ bool LaserCorrectionController::telemetryUsable(
          std::isfinite(telemetry.right.wheelPositionRad) &&
          std::isfinite(telemetry.left.wheelSpeedMps) &&
          std::isfinite(telemetry.right.wheelSpeedMps);
+}
+
+qint64 LaserCorrectionController::telemetrySessionStopMs() const {
+  // 纠偏线程同时要处理激光图像、焊道观测、轨迹与日志，20 Hz 的底盘遥测
+  // 事件偶尔会在队列里排到 600ms 之后才被处理；这时的底盘反馈本身仍是新鲜
+  // 的（feedbackFresh=1）。把这部分当成“调度抖动”而不是“底盘断流”：
+  // 短超时只停车，超过这个更宽的窗口才真正终止纠偏会话。
+  return std::clamp(static_cast<qint64>(settings_.telemetryTimeoutMs) * 2,
+                    static_cast<qint64>(1500), static_cast<qint64>(5000));
 }
 
 bool LaserCorrectionController::phaseNeedsLaser() const {
@@ -2736,9 +2743,6 @@ void LaserCorrectionController::beginTrackingSegment() {
     filteredSignedCenterRateMps_ = 0.0;
     centerErrorTrendValid_ = false;
     lastCenterTrendSampleMs_ = clock_.elapsed();
-    centerFilter_.reset();
-    lastCorrectionError_ = 0.0;
-    lastCorrectionTimeMs_ = 0;
     emit logMessage(
         CRAWLING_TEXT("跟踪横向目标已设为激光全幅中心：线内 %1%，全图 %2%，"
                       "实时缺口将持续向中心收敛")
@@ -3306,58 +3310,30 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
         pendingCenterControlDirection_ = 0;
         pendingCenterControlDirectionCount_ = 0;
       }
-      // Adaptive gain: weak action around the seam to suppress one-pixel
-      // chatter, stronger action for a large offset. The existing lookahead
-      // converts the desired lateral correction speed into a yaw rate; the
-      // downstream curvature and wheel-ratio limits remain authoritative.
-      const bool centerCommandSuppressed = centerErrorForControl == 0.0;
-      const double rawControlErrorMm = std::abs(centerErrorForControl) * 1000.0;
-      centerFilter_.setAlpha(rawControlErrorMm > 10.0
-                                 ? 0.40
-                                 : (rawControlErrorMm > 5.0
-                                        ? 0.30
-                                        : (rawControlErrorMm > 2.0 ? 0.22
-                                                                   : 0.15)));
-      if (centerCommandSuppressed) centerFilter_.reset();
-      const double centerErrorForPidM = centerFilter_.update(centerErrorForControl);
-      const AdaptivePIDParams::Params adaptiveParams =
-          adaptivePID_.getParams(std::abs(centerErrorForPidM) * 1000.0);
-      double centerErrorRateMps = 0.0;
-      if (!centerCommandSuppressed) {
-        if (usableTrend) {
-          centerErrorRateMps = filteredSignedCenterRateMps_;
-        } else if (lastCorrectionTimeMs_ > 0 && now > lastCorrectionTimeMs_) {
-          const double elapsedSeconds =
-              clamp((now - lastCorrectionTimeMs_) / 1000.0, 0.001, 0.2);
-          centerErrorRateMps =
-              (centerErrorForPidM - lastCorrectionError_) / elapsedSeconds;
-        }
+      // Fast raw-image lateral loop. Follow the reference controller: the
+      // lateral error is converted through a geometry-saturating lookahead
+      // into a yaw rate, so the correction grows with the error but eases
+      // off as the seam returns to the optical center instead of
+      // overshooting. The image error is already time-filtered upstream, so
+      // no extra PID/filter stage is applied here.
+      const double centerAngularTarget =
+          settings_.laserCenterAngularGain * centerFeedbackWeight *
+          std::max(0.0, currentLinearMps_) * 2.0 * centerErrorForControl /
+          std::max(0.0001,
+                   settings_.laserCenterLookaheadM * settings_.laserCenterLookaheadM +
+                       centerErrorForControl * centerErrorForControl);
+      // Apply the acceleration limiter once, after fusion in applyCommand();
+      // a second stored ramp here keeps an old turn alive after the seam
+      // begins crossing center.
+      filteredCenterAngularRadps_ = clamp(
+          centerAngularTarget, -kLaserCenterAngularLimitRadps,
+          kLaserCenterAngularLimitRadps);
+      if (detectionHeld_ || detectionEdgeBreakFallback_ ||
+          centerResponseUntrusted_) {
+        const double authorityLimit = std::abs(centerAngularTarget);
+        filteredCenterAngularRadps_ = clamp(filteredCenterAngularRadps_,
+                                            -authorityLimit, authorityLimit);
       }
-      centerErrorRateMps = clamp(centerErrorRateMps,
-                                 -kAdaptiveCenterDerivativeLimitMps,
-                                 kAdaptiveCenterDerivativeLimitMps);
-      lastCorrectionError_ = centerErrorForPidM;
-      lastCorrectionTimeMs_ = now;
-
-      double lateralCorrectionMps =
-          adaptiveParams.kp * centerErrorForPidM +
-          adaptiveParams.kd * centerErrorRateMps;
-      lateralCorrectionMps = clamp(lateralCorrectionMps,
-                                   -kAdaptiveCenterMaxLateralSpeedMps,
-                                   kAdaptiveCenterMaxLateralSpeedMps);
-      const double speedFraction = clamp(
-          std::max(0.0, currentLinearMps_) /
-              std::max(0.0001, settings_.targetSpeedMps),
-          0.0, 1.25);
-      const double centerAngularTarget = clamp(
-          settings_.laserCenterFeedbackGain * centerFeedbackWeight *
-              speedFraction * lateralCorrectionMps /
-              std::max(0.05, settings_.laserCenterLookaheadM),
-          -kLaserCenterAngularLimitRadps, kLaserCenterAngularLimitRadps);
-      // The image error is already time-filtered. Apply the acceleration
-      // limiter once, after fusion in applyCommand(); a second stored ramp
-      // here keeps an old turn alive after the seam begins crossing center.
-      filteredCenterAngularRadps_ = centerAngularTarget;
 
       const double controlledError = headingError;
       // Use the measured raw-pixel envelope inside the actual laser span.
@@ -3545,10 +3521,6 @@ void LaserCorrectionController::advanceFromTelemetry(qint64 now) {
                              pendingCenterControlDirectionCount_);
         controlRecord.insert(QStringLiteral("signed_error_rate_mps"), filteredSignedCenterRateMps_);
         controlRecord.insert(QStringLiteral("center_weight"), centerFeedbackWeight);
-        controlRecord.insert(QStringLiteral("adaptive_kp"), adaptiveParams.kp);
-        controlRecord.insert(QStringLiteral("adaptive_kd"), adaptiveParams.kd);
-        controlRecord.insert(QStringLiteral("adaptive_error_m"), centerErrorForPidM);
-        controlRecord.insert(QStringLiteral("adaptive_correction_mps"), lateralCorrectionMps);
         controlRecord.insert(QStringLiteral("center_target_radps"), centerAngularTarget);
         controlRecord.insert(QStringLiteral("heading_term_radps"), effectiveHeadingAngular);
         controlRecord.insert(QStringLiteral("yaw_damping_radps"), derivativeTerm);
@@ -4164,10 +4136,36 @@ void LaserCorrectionController::watchdogTick() {
             .arg(lastCommandMs_ < 0 ? -1 : now - lastCommandMs_));
   }
   lastWatchdogTickMs_ = now;
+  const qint64 telemetryAgeMs =
+      lastTelemetryMs_ < 0 ? -1 : now - lastTelemetryMs_;
   if (now - enabledAtMs_ > settings_.telemetryTimeoutMs &&
       (lastTelemetryMs_ < enabledAtMs_ ||
-       now - lastTelemetryMs_ > settings_.telemetryTimeoutMs)) {
-    stop(CRAWLING_TEXT("轮端里程反馈超时，已停止自动纠偏"));
+       telemetryAgeMs > settings_.telemetryTimeoutMs)) {
+    // 短超时先停车（安全不变），但只有底盘真断流才终止会话：纠偏线程忙导致
+    // 的队列延迟会表现为 600ms~1500ms 的遥测间隔，此时底盘反馈本身仍是新鲜的，
+    // 不应因为一次调度抖动废掉整个纠偏会话。
+    const qint64 sessionStopMs = telemetrySessionStopMs();
+    const bool hardStop =
+        lastTelemetryMs_ < enabledAtMs_ || telemetryAgeMs > sessionStopMs;
+    emit diagnosticLogMessage(
+        QStringLiteral("event=correction_telemetry_timeout trigger=watchdog "
+                       "session=%1 phase=%2 telemetry_age_ms=%3 image_age_ms=%4 "
+                       "have_telemetry=%5 timeout_ms=%6 session_stop_ms=%7 "
+                       "hard_stop=%8")
+            .arg(trajectorySessionId_)
+            .arg(phaseName(phase_))
+            .arg(telemetryAgeMs)
+            .arg(lastImageMs_ < 0 ? -1 : now - lastImageMs_)
+            .arg(haveTelemetry_ ? 1 : 0)
+            .arg(settings_.telemetryTimeoutMs)
+            .arg(sessionStopMs)
+            .arg(hardStop ? 1 : 0));
+    if (hardStop) {
+      stop(CRAWLING_TEXT("轮端里程反馈超时，已停止自动纠偏"));
+      return;
+    }
+    // 只是调度抖动：停车但保持会话，遥测一恢复就自动继续。
+    commandImmediateStop(CRAWLING_TEXT("底盘遥测短暂延迟，等待恢复"));
     return;
   }
   // Image receipt cannot renew the independent measured-seam safety age.
@@ -4328,14 +4326,11 @@ void LaserCorrectionController::resetSession() {
   guidanceTravelSamples_.clear();
   lastVisualLongitudinalM_ = -1.0;
   lastGuidanceLongitudinalM_ = -1.0;
-  centerFilter_.reset();
   calibrationSamples_.clear();
   lastCalibrationCameraSequence_ = 0;
   lastCalibrationSampleMs_ = -1;
   centerCalibration_.reset();
   seamStateMachine_.reset();
-  lastCorrectionError_ = 0.0;
-  lastCorrectionTimeMs_ = 0;
   resetGapTracker();
   resetControllerError();
   status_ = {};

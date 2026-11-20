@@ -2,6 +2,7 @@
 #include "clamp_motor_controller.h"
 #include "candle_can_adapter.h"
 #include "pcan_can_adapter.h"
+#include "paramsliderfield.h"
 #include "robot_app_logger.h"
 
 #include <QApplication>
@@ -155,7 +156,8 @@ ClampMotorSettingsWidget::ClampMotorSettingsWidget(QWidget* parent) : QWidget(pa
     auto* countForm = new QFormLayout;
     counts_[axis] = new QSpinBox;
     counts_[axis]->setRange(0, DriveSettings::kMaximumClampMotorsPerAxis);
-    countForm->addRow(QStringLiteral("电机数量"), counts_[axis]);
+    countForm->addRow(QStringLiteral("电机数量"),
+                      pa1664::ui::paramSliderField(counts_[axis]));
     column->addLayout(countForm);
     tabs_[axis] = new QTabWidget;
     tabs_[axis]->setObjectName(QStringLiteral("clampMotorTabs"));
@@ -235,7 +237,7 @@ void ClampMotorSettingsWidget::beginRecordLimit(MotorForm* f, bool upper) {
   }
   const auto configuredAxes = settings();
   if (index < 0 || index >= configuredAxes[axis].size()) {
-    f->limitStatus->setText(QStringLiteral("请先保存夹子配置再记录限位"));
+    f->limitStatus->setText(QStringLiteral("请先保存前架配置再记录限位"));
     return;
   }
   if (!ClampMotorController::supportsPosition(configuredAxes[axis][index])) {
@@ -322,6 +324,7 @@ void ClampMotorSettingsWidget::updateMode(MotorForm* f) {
   if (!pcanError.isEmpty()) portHint += QLatin1Char('\n') + pcanError;
   f->port->setToolTip(portHint);
   f->id->setRange(1, zdt ? 255 : mode == ClampCommunicationMode::TtCanopen ? 127 : 32);
+  pa1664::ui::refreshParamSlider(f->id);
   f->bitrate->setVisible(!rs485);
   f->form->labelForField(f->bitrate)->setVisible(!rs485);
   f->zdt->setVisible(zdt);
@@ -355,7 +358,8 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->mode->setCurrentIndex(f->mode->findData(clampModeKey(motor.communicationMode)));
   f->form->addRow(QStringLiteral("通信方式"), f->mode);
   f->id = new QSpinBox;
-  f->form->addRow(QStringLiteral("电机 ID"), f->id);
+  // 电机 ID 是总线寻址整数，只能按 1 步进拖动。
+  f->form->addRow(QStringLiteral("电机 ID"), pa1664::ui::paramSliderField(f->id));
   f->alias = new QLineEdit;
   f->alias->setPlaceholderText(QStringLiteral("可选，主控页面显示此名称"));
   f->alias->setText(motor.alias);
@@ -366,7 +370,7 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->gearRatio->setSuffix(QStringLiteral(" mm/圈"));
   f->gearRatio->setValue(motor.gearRatio);
   f->gearRatio->setToolTip(QStringLiteral("电机转一圈，探头实际移动的距离"));
-  f->form->addRow(QStringLiteral("传动比"), f->gearRatio);
+  f->form->addRow(QStringLiteral("传动比"), pa1664::ui::paramSliderField(f->gearRatio));
   auto* limitRow = new QHBoxLayout;
   f->recordUpper = new QPushButton(QStringLiteral("记录上限位"));
   f->recordLower = new QPushButton(QStringLiteral("记录下限位"));
@@ -423,9 +427,11 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->maximumRpm = new QSpinBox;
   f->maximumRpm->setRange(1, 3000);
   f->maximumRpm->setSuffix(QStringLiteral(" RPM"));
-  zdtForm->addRow(QStringLiteral("100% 对应转速"), f->maximumRpm);
+  zdtForm->addRow(QStringLiteral("100% 对应转速"),
+                  pa1664::ui::paramSliderField(f->maximumRpm));
   f->acceleration = new QSpinBox;
-  zdtForm->addRow(QStringLiteral("加速度"), f->acceleration);
+  zdtForm->addRow(QStringLiteral("加速度"),
+                  pa1664::ui::paramSliderField(f->acceleration));
   auto* note = new QLabel(QStringLiteral(
       "驱动器需设置 CAN、自由协议及固定校验 6B，使用 PCAN、candleLight（candle0 等）"
       "或支持扩展帧的 SLCAN 适配器。请先关闭占用通道的其他控制程序。"
@@ -443,6 +449,7 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
   f->maximumRpm->setValue(motor.zdtMaximumSpeedRpm);
   f->acceleration->setRange(0, motor.zdtFirmware == ZdtFirmware::X ? 65535 : 255);
   f->acceleration->setValue(motor.zdtAcceleration);
+  pa1664::ui::refreshParamSlider(f->acceleration);
   updateLimitStatus(f);
   forms_[axis].append(f);
   tabs_[axis]->addTab(f->page, axisName(axis) + QString::number(forms_[axis].size()));
@@ -454,6 +461,7 @@ void ClampMotorSettingsWidget::addMotor(int axis, const ClampMotorSettings& moto
     const int previous = f->acceleration->value();
     f->acceleration->setRange(0, x ? 65535 : 255);
     if (!x && previous > 255) f->acceleration->setValue(10);
+    pa1664::ui::refreshParamSlider(f->acceleration);
     notifyEdited();
   });
   for (QComboBox* box : {f->baud, f->bitrate, f->sign})
@@ -841,7 +849,7 @@ void ClampMotorControlWidget::rebuild() {
       group->append(slider);
     }
   }
-  if (row == 0) grid->addWidget(new QLabel(QStringLiteral("尚未配置夹子电机")), 0, 0);
+  if (row == 0) grid->addWidget(new QLabel(QStringLiteral("尚未配置前架电机")), 0, 0);
   grid->setRowStretch(row + 1, 1);
   scroll_->setWidget(body);
 }

@@ -1,5 +1,6 @@
 #include "host_application.h"
 
+#include "host_restart_server.h"
 #include "transport/media_channel.h"
 #include "robot_host_service.h"
 #include "robot_peripheral_host_service.h"
@@ -55,6 +56,7 @@ HostApplication::HostApplication(QObject* parent)
       bulk_(new BulkServer(this)),
       robot_(new RobotHostService(this)),
       peripheral_(new RobotPeripheralHostService(robot_, this)),
+      restartServer_(new HostRestartServer),
       bulkDrainTimer_(new QTimer(this)) {
   bulkDrainTimer_->setInterval(10);
   connect(bulkDrainTimer_, &QTimer::timeout, this,
@@ -62,7 +64,11 @@ HostApplication::HostApplication(QObject* parent)
   wireServices();
 }
 
-HostApplication::~HostApplication() { stop(); }
+HostApplication::~HostApplication() {
+  stop();
+  delete restartServer_;
+  restartServer_ = nullptr;
+}
 
 bool HostApplication::start(const QHostAddress& address, quint16 controlPort,
                             quint16 realtimePort, quint16 mediaPort,
@@ -115,6 +121,19 @@ bool HostApplication::start(const QHostAddress& address, quint16 controlPort,
       QString::fromLatin1(kCapabilityUltrasoundMediaV1),
       QString::fromLatin1(kCapabilityUltrasoundBulkV1),
   });
+  // 运维重启通道：端口由控制端口固定偏移得到，操作端无需额外配置。
+  // 它与主线程的事件循环无关，因此“主线程卡死”这条最需要它的路径上仍然可用；
+  // 监听失败（端口与其它通道撞车）只降级，不连累主服务。
+  const quint16 adminPort =
+      static_cast<quint16>(controlPort + kAdminPortOffset);
+  QString restartError;
+  if (!restartServer_->start(address, adminPort, &restartError)) {
+    qWarning().noquote() << "HOST_RESTART_LISTEN_FAILED" << restartError;
+  } else {
+    qInfo().noquote() << QStringLiteral("运维重启通道监听：%1:%2")
+                             .arg(address.toString())
+                             .arg(static_cast<int>(adminPort));
+  }
   started_ = true;
   startUltrasoundService();
   robot_->initialize();
@@ -134,6 +153,9 @@ void HostApplication::stop() {
   bulk_->stop();
   media_->stop();
   realtime_->stop();
+  // 最后停运维通道：它可能在重启流程里刚把替代进程拉起来，先停会把
+  // worker 线程卡在握手里。stop() 幂等，析构时重复调用无副作用。
+  if (restartServer_) restartServer_->stop();
 }
 
 bool HostApplication::isRunning() const {

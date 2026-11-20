@@ -67,13 +67,6 @@ CanFrame ServoProtocol::speedCommand(std::uint8_t motorId, double outputSpeedDps
   return frame;
 }
 
-CanFrame ServoProtocol::runCommand(std::uint8_t motorId) {
-  CanFrame frame;
-  frame.id = kCommandIdBase + motorId;
-  frame.data[0] = kMotorRun;
-  return frame;
-}
-
 CanFrame ServoProtocol::stopCommand(std::uint8_t motorId) {
   CanFrame frame;
   frame.id = kCommandIdBase + motorId;
@@ -81,11 +74,12 @@ CanFrame ServoProtocol::stopCommand(std::uint8_t motorId) {
   return frame;
 }
 
+// 官方协议 2.27/2.28：0x77 抱闸释放、0x78 抱闸锁死，数据域全 0，
+// 驱动器把收到的帧原样回复。早期用 0x8C 是错的（不在命令表里，只回显不执行）。
 CanFrame ServoProtocol::brakeCommand(std::uint8_t motorId, bool release) {
   CanFrame frame;
   frame.id = kCommandIdBase + motorId;
-  frame.data[0] = kBrakeControl;
-  frame.data[1] = release ? 0x01 : 0x00;
+  frame.data[0] = release ? kBrakeRelease : kBrakeLock;
   return frame;
 }
 
@@ -104,11 +98,8 @@ CanFrame ServoProtocol::statusQuery(std::uint8_t motorId) {
 }
 
 CanFrame ServoProtocol::brakeStatusQuery(std::uint8_t motorId) {
-  CanFrame frame;
-  frame.id = kCommandIdBase + motorId;
-  frame.data[0] = kBrakeControl;
-  frame.data[1] = 0x10;
-  return frame;
+  // 抱闸状态在 0x9A 状态1 的 Data[3]（RlyCtrlRslt），没有独立的查询命令。
+  return statusQuery(motorId);
 }
 
 std::optional<ServoFeedback> ServoProtocol::parseFeedback(const CanFrame& frame) {
@@ -159,11 +150,21 @@ std::optional<ServoStatus> ServoProtocol::parseStatus(const CanFrame& frame) {
 }
 
 std::optional<bool> ServoProtocol::parseBrakeStatus(const CanFrame& frame) {
-  if (!isServoReplyId(frame.id) ||
-      frame.data[0] != kBrakeControl || frame.data[1] > 1) {
+  if (!isServoReplyId(frame.id)) {
     return std::nullopt;
   }
-  return frame.data[1] != 0;
+  // 0x77/0x78 的回复就是发送帧的回显，代表指令已下发；
+  // 0x9A 的 Data[3] 才是驱动器实际执行的抱闸状态。
+  if (frame.data[0] == kBrakeRelease) {
+    return true;
+  }
+  if (frame.data[0] == kBrakeLock) {
+    return false;
+  }
+  if (frame.data[0] == kStatusQuery) {
+    return frame.data[3] != 0;
+  }
+  return std::nullopt;
 }
 
 }  // namespace crawling

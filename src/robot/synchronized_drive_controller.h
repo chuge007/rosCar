@@ -73,6 +73,11 @@ class SynchronizedDriveController final : public QObject {
   qint64 leftSpeedFeedbackMs_ = -1000;
   qint64 rightSpeedFeedbackMs_ = -1000;
   qint64 lastSynchronizationFeedbackMs_ = -1000;
+  // 使能后先等抱闸脱开再发速度：驱动器收到指令才驱动抱闸继电器，闸瓦机械
+  // 脱开要几十到几百毫秒。窗口内发速度会让电机顶着闸启动，电流瞬间顶到
+  // 限幅并触发过载锁存，之后闸就再也松不开（现场右轮的自锁就是这样来的）。
+  qint64 brakeGuardUntilMs_ = -1;
+  qint64 lastBrakeQueryMs_ = -1;
   InputCommand input_;
   MotorFeedback leftFeedback_;
   MotorFeedback rightFeedback_;
@@ -92,6 +97,15 @@ class SynchronizedDriveController final : public QObject {
   bool lastCorrectionSteeringLimited_ = false;
   qint64 lastDriveFeedbackDiagnosticMs_ = -1;
   qint64 lastDriveCommandLogMs_ = -1;
+  // 控制循环调度诊断：定时器 20 ms，任何一个 tick 明显超时都说明本线程被
+  // 抢占或被 CAN 收发阻塞。published telemetry lives in this loop, so a
+  // delayed tick is indistinguishable from a dead wheel sensor downstream.
+  qint64 lastTickDelayDiagnosticMs_ = -1;
+  qint64 lastCanPollMs_ = -1;
+  qint64 lastCanWriteMs_ = -1;
+  // Real speed-frame send time. The wheel_speed_write log line is throttled to
+  // 500 ms, so its spacing cannot be used to judge the control period.
+  qint64 lastSpeedWriteMs_ = -1;
   bool correctionCommandActive_ = false;
 };
 
