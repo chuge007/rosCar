@@ -80,3 +80,24 @@ This project is indexed by GitNexus as **pa1664-workbench** (45568 symbols, 5885
 - 通道：TCP 43100 命令 / UDP 43101 实时 / UDP 43102 媒体 / TCP 43103 批量；实时通道 200 ms 租约，`realtime_codec` 属运动安全路径。
 - 日志落盘在 exe 所在目录：`bin\logs\`（本地）、`C:\Users\a\Desktop\robot_host\app\logs\`（小车端）。`robot_console.log` = Workbench，`robot_host.log` = Host，`comm/<category>.log` = `COMM.*`，`profile_weld_detection.log` = 焊缝诊断。**超声没有专属日志文件**。
 - 小车端直连 `ssh a@192.168.66.10`，部署目录 `C:\Users\a\Desktop\robot_host`，远程原生命令输出 GBK，需前置 `chcp 65001 >nul`；换 EXE 前要删 `app\robot_host.lock`。
+
+## Git 远程与推送规范（2026-11-20 定案）
+
+双远程共存，禁止只留一个：
+
+| 远程名 | 地址 | 角色 |
+|---|---|---|
+| `origin` | `https://gitee.com/the-good-guy/pa1664-workbench.git` | 主远程，本地分支默认上游 |
+| `github` | `https://github.com/chuge007/rosCar.git` | GitHub 镜像 |
+
+- 本地分支 `PA1664WorkbenchPublish` 跟踪 `origin/PA1664WorkbenchPublish`；GitHub 上同名分支由 `git push github PA1664WorkbenchPublish` 显式推送。
+- **推送范围只限用户点名的分支**：用户说推哪个分支就只推哪个，不顺手推其他分支、不改 `main`、不动 `c` / `PA1664WorkbenchTmpsparate` / `backup-*` 等既有分支。
+- 禁止 `git push --force`（任何分支），禁止删除远程分支，禁止改 `git config`。
+- 推送前先 `git status` 确认工作区范围，推送后用 `git ls-remote --heads <remote> <branch>` 核对 SHA 与本地 HEAD 一致，再回报。
+- 常规推送模板：
+
+```powershell
+git push origin <branch>    # gitee
+git push github <branch>    # GitHub
+git ls-remote --heads origin <branch>; git ls-remote --heads github <branch>
+```
