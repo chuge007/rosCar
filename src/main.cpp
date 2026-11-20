@@ -223,7 +223,7 @@ bool isLoopbackRemoteHost(const QString &host)
 }
 
 // 现场最常见的“没数据”不是软件问题：USB 网卡掉线、网线松了以后本机就掉出
-// 192.168.1.x，界面只显示“等待小车主机”，和“主机没开机”完全混淆。启动时把
+// 192.168.66.x，界面只显示“等待小车主机”，和“主机没开机”完全混淆。启动时把
 // 本机有哪些可用地址、和目标是否同网段直接写进日志，事后不用再猜。
 QString describeLocalNetworkFor(const QString &remoteHost)
 {
@@ -332,7 +332,7 @@ QString configuredRemoteEndpoint(const QStringList &arguments,
                 endpoint = remembered;
             }
         }
-        // 仍然没有可用地址（或仍是回环）：小车主机固定在 192.168.1.20，
+        // 仍然没有可用地址（或仍是回环）：小车主机固定在车侧专网 192.168.66.10，
         // 直接连它。连回环在这套系统里没有诊断价值，只会让人以为软件坏了；
         // 真要本机联调，用 start_workbench_localhost.bat（显式 --remote）启动。
         QString finalHost;
@@ -341,7 +341,7 @@ QString configuredRemoteEndpoint(const QStringList &arguments,
             || (parseRemoteEndpoint(endpoint, &finalHost, &finalPort)
                 && isLoopbackRemoteHost(finalHost))) {
             const QString defaultRobotEndpoint =
-                QStringLiteral("192.168.1.20:43100");
+                QStringLiteral("192.168.66.10:43100");
             QString defaultHost;
             quint16 defaultPort = 0;
             if (parseRemoteEndpoint(defaultRobotEndpoint, &defaultHost, &defaultPort)) {
@@ -352,7 +352,7 @@ QString configuredRemoteEndpoint(const QStringList &arguments,
                     << (sameSubnet
                             ? QStringLiteral("（本机与小车同网段，直接连小车）")
                             : QStringLiteral("（本机不在小车网段，请先把网卡配到 "
-                                             "192.168.1.x 再重连）"));
+                                             "192.168.66.x 再重连）"));
                 endpoint = defaultRobotEndpoint;
             }
         }

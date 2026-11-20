@@ -1,6 +1,7 @@
 #include "clamp_motor_controller.h"
 #include "candle_can_adapter.h"
 #include "pcan_can_adapter.h"
+#include "mwd_can_protocol.h"
 #include "mwd_modbus_protocol.h"
 #include "robot_app_logger.h"
 #include "servo_protocol.h"
@@ -66,7 +67,7 @@ bool sameRouting(const ClampMotorAxes& left, const ClampMotorAxes& right) {
       b.lowerLimitEnabled = a.lowerLimitEnabled;
       // 原生 CAN（PCAN / candleLight）只按 canBitrate 通信，串口波特率不参与路由。
       // 操作端与主机保存的该字段历史值不同（如 500000 与 115200）时，若当成路由变化
-      // 会关闭并重开适配器，表现就是每次下配置后夹子电机要等数秒才恢复响应。
+      // 会关闭并重开适配器，表现就是每次下配置后前架电机要等数秒才恢复响应。
       if (PcanCanAdapter::isPcanPort(b.serialPort) ||
           CandleCanAdapter::isCandlePort(b.serialPort)) {
         b.serialBaudRate = a.serialBaudRate;
@@ -111,7 +112,7 @@ void ClampMotorController::setSettings(const DriveSettings& settings) {
     closePorts();
     if (hadPorts) {
       connectionEnabled_ = false;
-      emit connectionChanged(false, QStringLiteral("夹子配置已更改，原连接已关闭"));
+      emit connectionChanged(false, QStringLiteral("前架配置已更改，原连接已关闭"));
     }
   }
   const bool displayChanged =
@@ -189,7 +190,7 @@ void ClampMotorController::connectDevice() {
     for (int motorIndex = 0; motorIndex < axis.size(); ++motorIndex) {
       const auto& motor = axis[motorIndex];
       if (motor.serialPort.trimmed().isEmpty()) {
-        const QString label = QStringLiteral("夹子 %1%2 / ID %3 / %4")
+        const QString label = QStringLiteral("前架 %1%2 / ID %3 / %4")
             .arg(axisName(axisIndex)).arg(motorIndex + 1).arg(motor.motorId)
             .arg(clampModeName(motor.communicationMode));
         AppLogger::warning(QStringLiteral("CLAMP.CONNECTION"),
@@ -206,13 +207,13 @@ void ClampMotorController::connectDevice() {
         AppLogger::error(QStringLiteral("CLAMP.CONNECTION"),
             QStringLiteral("event=open_failed %1").arg(context));
         success = false;
-        emit statusChanged(QStringLiteral("夹子 %1%2 / ID %3 / %4：%5 打开失败，电机未连接")
+        emit statusChanged(QStringLiteral("前架 %1%2 / ID %3 / %4：%5 打开失败，电机未连接")
             .arg(axisName(axisIndex)).arg(motorIndex + 1).arg(motor.motorId)
             .arg(clampModeName(motor.communicationMode), motor.serialPort));
       } else {
         AppLogger::write(QStringLiteral("CLAMP.CONNECTION"),
             QStringLiteral("event=open_ok %1").arg(context));
-        const QString label = QStringLiteral("夹子 %1%2 / ID %3 / %4 / %5 / %6")
+        const QString label = QStringLiteral("前架 %1%2 / ID %3 / %4 / %5 / %6")
             .arg(axisName(axisIndex)).arg(motorIndex + 1).arg(motor.motorId)
             .arg(clampModeName(motor.communicationMode), motor.serialPort)
             .arg(motor.communicationMode == ClampCommunicationMode::MwdRs485
@@ -261,12 +262,12 @@ void ClampMotorController::connectDevice() {
     stop();
     closePorts();
     connectionEnabled_ = false;
-    emit connectionChanged(false, QStringLiteral("夹子电机连接失败，已关闭本次连接"));
+    emit connectionChanged(false, QStringLiteral("前架电机连接失败，已关闭本次连接"));
   } else {
     connectionEnabled_ = configured > 0;
     emit connectionChanged(configured > 0,
-        configured > 0 ? QStringLiteral("夹子通信端口已连接（%1 台电机，尚未确认电机应答）").arg(configured)
-                       : QStringLiteral("夹子电机未配置通信端口"));
+        configured > 0 ? QStringLiteral("前架通信端口已连接（%1 台电机，尚未确认电机应答）").arg(configured)
+                       : QStringLiteral("前架电机未配置通信端口"));
   }
 }
 
@@ -281,7 +282,7 @@ void ClampMotorController::disconnectDevice() {
   connectionEnabled_ = false;
   AppLogger::write(QStringLiteral("CLAMP.CONNECTION"),
                    QStringLiteral("event=disconnect"));
-  emit connectionChanged(false, QStringLiteral("夹子电机已断开"));
+  emit connectionChanged(false, QStringLiteral("前架电机已断开"));
 }
 
 QString ClampMotorController::motorContext(const ClampMotorSettings& motor,
@@ -361,12 +362,13 @@ void ClampMotorController::onCanFrame(const QString& port, std::uint32_t id,
       }
     return;
   }
-  if (!extended && data.size() == 8 && data[0] == char(ServoProtocol::kBrakeControl) &&
+  if (!extended && data.size() == 8 &&
+      data[0] == char(MwdCanProtocol::kBrakeControl) &&
       (commandId || feedbackId)) {
     CanFrame frame;
     frame.id = id;
     std::copy(data.cbegin(), data.cend(), frame.data.begin());
-    const auto brakeStatus = ServoProtocol::parseBrakeStatus(frame);
+    const auto brakeStatus = MwdCanProtocol::parseBrakeStatus(frame);
     if (!brakeStatus) return;
     const int address = int(commandId ? id - ServoProtocol::kCommandIdBase
                                       : id - ServoProtocol::kFeedbackIdBase);
@@ -399,8 +401,10 @@ void ClampMotorController::onCanFrame(const QString& port, std::uint32_t id,
                 .arg(-1)
                 .arg(0, 4, 16, QLatin1Char('0'))
                 .arg(QString::fromLatin1(data.toHex().toUpper())));
-        if (pendingQuery) {
-          emit statusChanged(QStringLiteral("%1：电机抱闸反馈=%2（0=锁死，1=释放）")
+        // 0x77/0x78 的回显本身就是驱动器的接收确认（官方 3.6.3），
+        // 不必再等 0x9A 查询票才更新本地抱闸状态。
+        {
+          emit statusChanged(QStringLiteral("%1：抱闸指令已确认=%2（0=锁死，1=释放）")
               .arg(context, state));
           mwdBrakeReleased_.insert(key, actualBrakeReleased);
           mwdBrakeConfirmed_.insert(key, actualBrakeReleased);
@@ -427,7 +431,7 @@ void ClampMotorController::onCanFrame(const QString& port, std::uint32_t id,
       if (motor.communicationMode != ClampCommunicationMode::ZdtCan ||
           motor.motorId != address || portKey(motor.serialPort) != port) continue;
       const QString key = zdtMotorKey(motor, axis, index);
-      const QString label = QStringLiteral("夹子 %1%2 / ID %3 / %4")
+      const QString label = QStringLiteral("前架 %1%2 / ID %3 / %4")
           .arg(axisName(axis)).arg(index + 1).arg(address).arg(motor.serialPort);
       const quint8 command = quint8(data[0]);
       const quint8 result = quint8(data[1]);
@@ -599,7 +603,7 @@ bool ClampMotorController::ensureOpen(const ClampMotorSettings& motor) {
   port->setStopBits(QSerialPort::OneStop);
   port->setFlowControl(QSerialPort::NoFlowControl);
   if (!port->open(QIODevice::ReadWrite)) {
-    emit statusChanged(QStringLiteral("夹子端口 %1 打开失败：%2")
+    emit statusChanged(QStringLiteral("前架端口 %1 打开失败：%2")
                            .arg(motor.serialPort, port->errorString()));
     return false;
   }
@@ -614,7 +618,7 @@ bool ClampMotorController::ensureOpen(const ClampMotorSettings& motor) {
   if (bitrate.isEmpty() || !writeControl("C\r") || !writeControl(bitrate) ||
       !writeControl("O\r")) {
     port->close();
-    emit statusChanged(QStringLiteral("夹子 CAN 适配器 %1 初始化失败").arg(motor.serialPort));
+    emit statusChanged(QStringLiteral("前架 CAN 适配器 %1 初始化失败").arg(motor.serialPort));
     return false;
   }
   return true;
@@ -729,7 +733,7 @@ bool ClampMotorController::setMwdBrake(const ClampMotorSettings& motor,
   }
   bool sent = false;
   if (motor.communicationMode == ClampCommunicationMode::MwdCan) {
-    const auto frame = ServoProtocol::brakeCommand(
+    const auto frame = MwdCanProtocol::brakeCommand(
         static_cast<std::uint8_t>(motor.motorId), release);
     sent = sendCanFrame(
         motor, frame.id,
@@ -743,7 +747,7 @@ bool ClampMotorController::setMwdBrake(const ClampMotorSettings& motor,
         const int ticket = ++nextMwdBrakeQueryTicket_;
         mwdBrakeQueryTickets_.insert(queryKey, ticket);
         const auto sendStatusQuery = [this, motor, context](const QString& retry) {
-          const auto query = ServoProtocol::brakeStatusQuery(
+          const auto query = MwdCanProtocol::brakeStatusQuery(
               static_cast<std::uint8_t>(motor.motorId));
           return sendCanFrame(
               motor, query.id,
@@ -779,7 +783,7 @@ bool ClampMotorController::setMwdBrake(const ClampMotorSettings& motor,
               QStringLiteral("event=brake_feedback_timeout %1 protocol=MWD_CAN")
                   .arg(context));
           emit statusChanged(QStringLiteral(
-              "%1：已发抱闸指令，但未收到 0x8C 10 抱闸状态反馈")
+              "%1：已发抱闸指令，但未收到 0x77/0x78 回执")
               .arg(context));
         });
       });
@@ -888,7 +892,7 @@ bool ClampMotorController::sendMotorCommand(const ClampMotorSettings& motor,
       zdtEnablePending_.insert(key);
       AppLogger::write(QStringLiteral("CLAMP.ZDT"),
           QStringLiteral("event=enable_state %1 state=waiting_for_motor_ack").arg(context));
-      emit statusChanged(QStringLiteral("夹子 %1%2 / ID %3：TX 扩展帧 ID=0x%4 DATA=F3 AB 01 00 6B；等待驱动板使能确认")
+      emit statusChanged(QStringLiteral("前架 %1%2 / ID %3：TX 扩展帧 ID=0x%4 DATA=F3 AB 01 00 6B；等待驱动板使能确认")
           .arg(axisName(axis)).arg(index + 1).arg(motor.motorId)
           .arg(static_cast<qulonglong>(static_cast<std::uint32_t>(motor.motorId) << 8), 0, 16));
       const quint64 session = zdtSession_;
@@ -897,7 +901,7 @@ bool ClampMotorController::sendMotorCommand(const ClampMotorSettings& motor,
         zdtRequestedPercent_.remove(key);
         AppLogger::error(QStringLiteral("CLAMP.ZDT"),
             QStringLiteral("event=enable_timeout %1").arg(context));
-        emit statusChanged(QStringLiteral("夹子 %1：驱动板使能应答超时，速度未发送；检查电源、CAN 线/速率、ID 和 0x6B")
+        emit statusChanged(QStringLiteral("前架 %1：驱动板使能应答超时，速度未发送；检查电源、CAN 线/速率、ID 和 0x6B")
             .arg(context));
       });
       return true;
@@ -929,7 +933,7 @@ bool ClampMotorController::sendMotorCommand(const ClampMotorSettings& motor,
                                                         signedTenthsRpm, motor.zdtAcceleration);
       if (!frames.isEmpty())
         logSpeedStatus(key + QStringLiteral("/tx"),
-            QStringLiteral("夹子 %1%2 / ID %3：TX 扩展帧 ID=0x%4 DATA=%5；速度 %6%，等待应答")
+            QStringLiteral("前架 %1%2 / ID %3：TX 扩展帧 ID=0x%4 DATA=%5；速度 %6%，等待应答")
                 .arg(axisName(axis)).arg(index + 1).arg(motor.motorId)
                 .arg(static_cast<qulonglong>(frames[0].id), 0, 16)
                 .arg(QString::fromLatin1(frames[0].data.toHex(' ').toUpper()))
@@ -942,7 +946,7 @@ bool ClampMotorController::sendMotorCommand(const ClampMotorSettings& motor,
         zdtSpeedTickets_.remove(key);
         AppLogger::warning(QStringLiteral("CLAMP.ZDT"),
             QStringLiteral("event=speed_ack_timeout %1").arg(context));
-        emit statusChanged(QStringLiteral("夹子 %1：速度帧已写入但电机未应答，不能确认已运行")
+        emit statusChanged(QStringLiteral("前架 %1：速度帧已写入但电机未应答，不能确认已运行")
             .arg(context));
       });
     }
@@ -951,39 +955,22 @@ bool ClampMotorController::sendMotorCommand(const ClampMotorSettings& motor,
   if (motor.communicationMode == ClampCommunicationMode::MwdCan) {
     const auto id = static_cast<std::uint8_t>(motor.motorId);
     if (percent == 0) {
-      const auto stopFrame = ServoProtocol::stopCommand(id);
+      const auto stopFrame = MwdCanProtocol::simple(id, MwdCanProtocol::kMotorStop);
       const bool stopped = sendCanFrame(
           motor, stopFrame.id,
           QByteArray(reinterpret_cast<const char*>(stopFrame.data.data()), 8), false,
           context + QStringLiteral(" protocol=MWD_CAN command=stop"));
-      const auto holdRunFrame = ServoProtocol::runCommand(id);
-      const bool holdEnabled = sendCanFrame(
-          motor, holdRunFrame.id,
-          QByteArray(reinterpret_cast<const char*>(holdRunFrame.data.data()), 8), false,
-          context + QStringLiteral(" protocol=MWD_CAN command=hold_enable"));
-      const auto holdSpeedFrame = ServoProtocol::speedCommand(id, 0.0);
+      const auto holdSpeedFrame = MwdCanProtocol::speedCommand(id, 0.0);
       const bool holdSpeed = sendCanFrame(
           motor, holdSpeedFrame.id,
           QByteArray(reinterpret_cast<const char*>(holdSpeedFrame.data.data()), 8), false,
           context + QStringLiteral(" protocol=MWD_CAN command=hold_speed_zero"));
       const bool locked = setMwdBrake(motor, false, axis, index);
-      return stopped && holdEnabled && holdSpeed && locked;
+      return stopped && holdSpeed && locked;
     }
+    // 0x88 不在官方命令表里（只回显），夹爪的抱闸由 0x77 释放、0x78 锁死负责。
     if (!setMwdBrake(motor, true, axis, index)) return false;
-    const auto runFrame = ServoProtocol::runCommand(id);
-    if (!sendCanFrame(
-            motor, runFrame.id,
-            QByteArray(reinterpret_cast<const char*>(runFrame.data.data()), 8),
-            false, context + QStringLiteral(" protocol=MWD_CAN command=run"))) {
-      const auto stopFrame = ServoProtocol::stopCommand(id);
-      sendCanFrame(
-          motor, stopFrame.id,
-          QByteArray(reinterpret_cast<const char*>(stopFrame.data.data()), 8),
-          false, context + QStringLiteral(" protocol=MWD_CAN command=stop_recovery"));
-      setMwdBrake(motor, false, axis, index);
-      return false;
-    }
-    const auto speedFrame = ServoProtocol::speedCommand(id, commandSpeed);
+    const auto speedFrame = MwdCanProtocol::speedCommand(id, commandSpeed);
     const bool sent = sendCanFrame(
         motor, speedFrame.id,
         QByteArray(reinterpret_cast<const char*>(speedFrame.data.data()), 8), false,
@@ -992,7 +979,7 @@ bool ClampMotorController::sendMotorCommand(const ClampMotorSettings& motor,
       AppLogger::warning(QStringLiteral("CLAMP.MWD"),
           QStringLiteral("event=motion_failed %1 protocol=MWD_CAN action=brake_lock_recovery")
               .arg(context));
-      const auto stopFrame = ServoProtocol::stopCommand(id);
+      const auto stopFrame = MwdCanProtocol::simple(id, MwdCanProtocol::kMotorStop);
       sendCanFrame(
           motor, stopFrame.id,
           QByteArray(reinterpret_cast<const char*>(stopFrame.data.data()), 8),
@@ -1088,7 +1075,7 @@ void ClampMotorController::setMotorSpeed(int axis, int index, int percent) {
     AppLogger::warning(QStringLiteral("CLAMP.MOTOR"),
         QStringLiteral("event=command_rejected %1 reason=not_connected")
             .arg(context));
-    emit statusChanged(QStringLiteral("请先连接夹子电机"));
+    emit statusChanged(QStringLiteral("请先连接前架电机"));
     return;
   }
   const QString error = settings_.clampValidationError();
@@ -1108,7 +1095,7 @@ void ClampMotorController::setMotorSpeed(int axis, int index, int percent) {
     AppLogger::error(QStringLiteral("CLAMP.MOTOR"),
         QStringLiteral("event=command_failed %1 slider_percent=%2")
             .arg(context).arg(percent));
-    emit statusChanged(QStringLiteral("夹子 %1 指令发送失败，请检查连接").arg(label));
+    emit statusChanged(QStringLiteral("前架 %1 指令发送失败，请检查连接").arg(label));
     return;
   }
   AppLogger::write(QStringLiteral("CLAMP.MOTOR"),
@@ -1121,10 +1108,10 @@ void ClampMotorController::setMotorSpeed(int axis, int index, int percent) {
   const QString zdtKey = zdtMotorKey(motor, axis, index);
   if (motor.communicationMode == ClampCommunicationMode::ZdtCan) {
     if (zdtEnablePending_.contains(zdtKey))
-      logSpeedStatus(zdtKey, QStringLiteral("夹子 %1：等待使能确认，暂缓速度 %2%")
+      logSpeedStatus(zdtKey, QStringLiteral("前架 %1：等待使能确认，暂缓速度 %2%")
           .arg(label).arg(percent));
   } else {
-    logSpeedStatus(zdtKey, QStringLiteral("夹子 %1：速度 %2% 已写入接口，电机未验证")
+    logSpeedStatus(zdtKey, QStringLiteral("前架 %1：速度 %2% 已写入接口，电机未验证")
         .arg(label).arg(percent));
   }
 }
@@ -1150,7 +1137,7 @@ void ClampMotorController::stopMotor(int axis, int index) {
   // Stopping never opens an unconnected port or enables a motor.
   if (!((port && port->isOpen()) || (adapter && adapter->isOpen()) ||
         (pcan && pcan->isOpen()))) return;
-  const QString label = QStringLiteral("夹子 %1%2 / ID %3")
+  const QString label = QStringLiteral("前架 %1%2 / ID %3")
       .arg(axisName(axis)).arg(index + 1).arg(motor.motorId);
   if (!sendMotorCommand(motor, 0, axis, index))
     emit statusChanged(label + QStringLiteral("：停止指令写入失败"));
@@ -1197,6 +1184,106 @@ void ClampMotorController::stop() {
       stopMotor(axis, index);
   emit controlsResetRequested();
 }
+void ClampMotorController::clearAlarms() {
+  if (QThread::currentThread() != thread()) {
+    QMetaObject::invokeMethod(this, [this] { clearAlarms(); },
+                              Qt::QueuedConnection);
+    return;
+  }
+  int cleared = 0;
+  int failed = 0;
+  for (int axis = 0; axis < 3; ++axis) {
+    for (int index = 0; index < settings_.clampMotors[axis].size(); ++index) {
+      const auto& motor = settings_.clampMotors[axis][index];
+      const QString context = motorContext(motor, axis, index);
+      QString command;
+      bool ok = false;
+      switch (motor.communicationMode) {
+        case ClampCommunicationMode::MwdCan: {
+          // V2.35 的 0x9B：清除电机错误标志（电机状态未恢复正常时清不掉）。
+          const auto id = static_cast<std::uint8_t>(motor.motorId);
+          const auto frame =
+              MwdCanProtocol::simple(id, MwdCanProtocol::kClearError);
+          command = QStringLiteral("protocol=MWD_CAN command=clear_error_9B");
+          ok = sendCanFrame(
+              motor, frame.id,
+              QByteArray(reinterpret_cast<const char*>(frame.data.data()), 8), false,
+              context + QLatin1Char(' ') + command);
+          break;
+        }
+        case ClampCommunicationMode::MwdRs485: {
+          // MWD V5.0 Modbus：没有独立清错寄存器，写 6006=0 停机清运行态后重新抱闸。
+          auto* port = ports_.value(portKey(motor.serialPort), nullptr);
+          command = QStringLiteral(
+              "protocol=MWD_RS485 command=stop register=6006 value=0");
+          ok = port != nullptr && port->isOpen() &&
+               sendMwdModbusFrame(
+                   port,
+                   MwdModbusProtocol::stopCommand(
+                       static_cast<std::uint8_t>(motor.motorId)),
+                   context + QLatin1Char(' ') + command);
+          const QString key = zdtMotorKey(motor, axis, index);
+          mwdBrakeReleased_.remove(key);
+          mwdBrakeConfirmed_.remove(key);
+          mwdBrakeQueryTickets_.remove(key);
+          break;
+        }
+        case ClampCommunicationMode::ZdtCan: {
+          // ZDT：0x0E 解除堵转保护；复位本地缓存的使能/速度状态，下一次下发重新协商。
+          const QString key = zdtMotorKey(motor, axis, index);
+          zdtRequestedPercent_.remove(key);
+          zdtSpeedTickets_.remove(key);
+          zdtEnablePending_.remove(key);
+          zdtEnabledMotors_.remove(key);
+          command = QStringLiteral("protocol=ZDT command=release_stall_0E");
+          const auto frames = ZdtCanProtocol::releaseStallCommand(motor.motorId);
+          ok = !frames.isEmpty();
+          for (const auto& frame : frames) {
+            if (!sendCanFrame(motor, frame.id, frame.data, true,
+                              context + QLatin1Char(' ') + command)) {
+              ok = false;
+            }
+          }
+          break;
+        }
+        default: {
+          // TT CANopen（CiA 402）：控制字 0x6040 写 0x0080 = bit7 故障复位。
+          const auto id = static_cast<std::uint8_t>(motor.motorId);
+          QByteArray data(8, '\0');
+          data[0] = char(0x2B);
+          data[1] = char(0x40);
+          data[2] = char(0x60);
+          qToLittleEndian<quint16>(0x0080,
+                                   reinterpret_cast<uchar*>(data.data() + 4));
+          command = QStringLiteral(
+              "protocol=TT_CANOPEN command=fault_reset register=6040 value=0080");
+          ok = sendCanFrame(motor, 0x600U + static_cast<std::uint32_t>(id), data,
+                            false, context + QLatin1Char(' ') + command);
+          break;
+        }
+      }
+      if (ok) {
+        ++cleared;
+      } else {
+        ++failed;
+      }
+      AppLogger::write(
+          QStringLiteral("CLAMP.ALARM"),
+          QStringLiteral("event=clear_alarm %1 %2 result=%3")
+              .arg(context, command,
+                   ok ? QStringLiteral("TX_OK") : QStringLiteral("FAILED")));
+    }
+  }
+  AppLogger::write(
+      QStringLiteral("CLAMP.ALARM"),
+      QStringLiteral("event=clear_alarm_summary cleared=%1 failed=%2")
+          .arg(cleared)
+          .arg(failed));
+  emit statusChanged(QStringLiteral("前架电机清错：成功 %1 台，失败 %2 台")
+                         .arg(cleared)
+                         .arg(failed));
+}
+
 void ClampMotorController::stopX(){setSpeed(0, 0);}
 void ClampMotorController::stopY(){setSpeed(1, 0);}
 void ClampMotorController::stopZ(){setSpeed(2, 0);}
@@ -1221,8 +1308,8 @@ void ClampMotorController::requestPosition(int axis, int index) {
   const QString context = motorContext(motor, axis, index);
   if (motor.communicationMode == ClampCommunicationMode::MwdCan) {
     QByteArray data(8, char(0));
-    data[0] = char(0x92);
-    if (!sendCanFrame(motor, ServoProtocol::kCommandIdBase +
+    data[0] = char(MwdCanProtocol::kReadMultiTurnAngle);
+    if (!sendCanFrame(motor, MwdCanProtocol::kCommandIdBase +
                           static_cast<std::uint32_t>(motor.motorId),
                       data, false, context + QStringLiteral(" command=read_position")))
       AppLogger::error(QStringLiteral("CLAMP.POSITION"),
@@ -1329,7 +1416,7 @@ void ClampMotorController::moveToPosition(int axis, int index, double targetDegr
   const auto& motor = settings_.clampMotors[axis][index];
   const QString context = motorContext(motor, axis, index);
   if (!connectionEnabled_) {
-    emit statusChanged(QStringLiteral("请先连接夹子电机"));
+    emit statusChanged(QStringLiteral("请先连接前架电机"));
     return;
   }
   if (!supportsPosition(motor)) {
@@ -1400,12 +1487,12 @@ void ClampMotorController::sendPositionCommand(int axis, int index, double targe
     const auto target = static_cast<std::int32_t>(std::llround(targetDegrees * 100.0));
     const std::uint16_t maxSpeed = 360;
     QByteArray data(8, char(0));
-    data[0] = char(0xA4);
+    data[0] = char(MwdCanProtocol::kMultiTurnPosition);
     data[2] = char(maxSpeed & 0xFF);
     data[3] = char((maxSpeed >> 8) & 0xFF);
     for (int byte = 0; byte < 4; ++byte)
       data[4 + byte] = char((static_cast<std::uint32_t>(target) >> (8 * byte)) & 0xFF);
-    sent = sendCanFrame(motor, ServoProtocol::kCommandIdBase +
+    sent = sendCanFrame(motor, MwdCanProtocol::kCommandIdBase +
                             static_cast<std::uint32_t>(motor.motorId),
                         data, false, context + QStringLiteral(" command=move_to_position"));
   } else if (motor.communicationMode == ClampCommunicationMode::ZdtCan) {

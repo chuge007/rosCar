@@ -28,7 +28,7 @@ D:\dev\deskCrawlingRobot\CrawlingRobotSV\PA1664WorkbenchTmpSeparate
 
 - 读 `PA1664WorkbenchTmp2` 的源码用于功能比对
 - `git status` / `log` / `diff` / `show` / `blame` 等只读查询
-- `Get-Process` / `tasklist` / `dir` 查看状态；`ssh a@192.168.1.20` 读日志与进程
+- `Get-Process` / `tasklist` / `dir` 查看状态；`ssh a@192.168.66.10` 读日志与进程
 - 读 `bin\logs\`、`compile_commands.json`、`vendor\` 等仓内资源
 
 ## 需要越界时

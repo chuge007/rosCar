@@ -28,7 +28,7 @@ provider:
 | 生成 / 刷新编译数据库 | `gen_compile_commands.py`，再用 clangd 校验 |
 | 部署 Host | `copy` 到 `startup_deploy\robot_host\app\` → 远程 `taskkill` + 删 `robot_host.lock` → 备份 → `scp` → `dir` 校验 |
 | 启动 | 远程 `StartRobotHost.cmd`、本地 `bin\PA1664Workbench.exe` / `PA1664RobotHost.exe` |
-| 排查 | `ssh a@192.168.1.20` 看日志、`Get-Process` / `tasklist` 看存活、读本地 `bin\logs\` |
+| 排查 | `ssh a@192.168.66.10` 看日志、`Get-Process` / `tasklist` 看存活、读本地 `bin\logs\` |
 | 只读 git | `git status` / `log` / `diff` / `show` |
 
 ## 仍然要停下的例外（仅这些）

@@ -103,159 +103,6 @@ private:
 };
 
 /**
- * @brief 自适应PID参数计算器
- *
- * 根据偏差大小分四档调整Kp和Kd：
- * - <2 mm：弱响应平滑保持
- * - 2~5 mm：精细调整
- * - 5~10 mm：稳定逼近
- * - >10 mm：强响应快速纠正
- *
- * 档位边界使用 0.5 mm 的平滑过渡，避免滤波后的误差在阈值附近
- * 反复切换增益而引入抖动。
- */
-class AdaptivePIDParams {
-public:
-    struct Params {
-        double kp;
-        double kd;
-    };
-
-    /**
-     * @brief 根据误差获取自适应PID参数
-     * @param errorMm 焊道中心偏差（mm）
-     * @return 当前偏差对应的Kp和Kd
-     */
-    Params getParams(double errorMm) const {
-        const double absError = std::isfinite(errorMm)
-                                    ? std::abs(errorMm)
-                                    : 0.0;
-        const auto smoothStep = [](double edge0, double edge1, double value) {
-            const double ratio = std::clamp(
-                (value - edge0) / (edge1 - edge0), 0.0, 1.0);
-            return ratio * ratio * (3.0 - 2.0 * ratio);
-        };
-        const double fineBlend = smoothStep(
-            smallErrorThreshold_ - kGainTransitionHalfWidthMm,
-            smallErrorThreshold_ + kGainTransitionHalfWidthMm, absError);
-        const double mediumBlend = smoothStep(
-            mediumErrorThreshold_ - kGainTransitionHalfWidthMm,
-            mediumErrorThreshold_ + kGainTransitionHalfWidthMm, absError);
-        const double largeBlend = smoothStep(
-            largeErrorThreshold_ - kGainTransitionHalfWidthMm,
-            largeErrorThreshold_ + kGainTransitionHalfWidthMm, absError);
-
-        const double kp = smallKp_ + fineBlend * (fineKp_ - smallKp_) +
-                          mediumBlend * (mediumKp_ - fineKp_) +
-                          largeBlend * (largeKp_ - mediumKp_);
-        const double kd = smallKd_ + fineBlend * (fineKd_ - smallKd_) +
-                          mediumBlend * (mediumKd_ - fineKd_) +
-                          largeBlend * (largeKd_ - mediumKd_);
-        return {kp, kd};
-    }
-
-    // 阈值设置
-    void setThresholds(double small, double medium, double large) {
-        smallErrorThreshold_ = small;
-        mediumErrorThreshold_ = medium;
-        largeErrorThreshold_ = large;
-    }
-
-    // 大偏差参数
-    void setLargeErrorParams(double kp, double kd) {
-        largeKp_ = kp;
-        largeKd_ = kd;
-    }
-
-    // 中等偏差参数
-    void setMediumErrorParams(double kp, double kd) {
-        mediumKp_ = kp;
-        mediumKd_ = kd;
-    }
-
-    // 精细偏差参数（2~5mm）
-    void setFineErrorParams(double kp, double kd) {
-        fineKp_ = kp;
-        fineKd_ = kd;
-    }
-
-    // 小偏差参数
-    void setSmallErrorParams(double kp, double kd) {
-        smallKp_ = kp;
-        smallKd_ = kd;
-    }
-
-private:
-    static constexpr double kGainTransitionHalfWidthMm = 0.5;
-
-    // 偏差阈值（mm）
-    double smallErrorThreshold_ = 2.0;
-    double mediumErrorThreshold_ = 5.0;
-    double largeErrorThreshold_ = 10.0;
-
-    // PID参数
-    double largeKp_ = 2.5;
-    double largeKd_ = 3.0;
-    double mediumKp_ = 1.5;
-    double mediumKd_ = 2.0;
-    double fineKp_ = 1.0;
-    double fineKd_ = 1.5;
-    double smallKp_ = 0.5;
-    double smallKd_ = 1.0;
-};
-
-/**
- * @brief 中心位置滤波器
- *
- * 使用指数滑动平均抑制测量噪声
- */
-class CenterFilter {
-public:
-    explicit CenterFilter(double alpha = 0.3) : alpha_(alpha) {}
-
-    /**
-     * @brief 更新滤波器并获取滤波后的值
-     * @param raw 原始测量值
-     * @return 滤波后的值
-     */
-    double update(double raw) {
-        if (!initialized_) {
-            filtered_ = raw;
-            initialized_ = true;
-        } else {
-            filtered_ = alpha_ * raw + (1.0 - alpha_) * filtered_;
-        }
-        return filtered_;
-    }
-
-    /**
-     * @brief 获取当前滤波值
-     */
-    double getValue() const { return filtered_; }
-
-    /**
-     * @brief 重置滤波器
-     */
-    void reset() {
-        initialized_ = false;
-        filtered_ = 0.0;
-    }
-
-    /**
-     * @brief 设置滤波系数
-     * @param alpha 滤波系数（0~1），越大越接近原始值
-     */
-    void setAlpha(double alpha) {
-        alpha_ = std::clamp(alpha, 0.0, 1.0);
-    }
-
-private:
-    double alpha_;          // 滤波系数
-    double filtered_ = 0.0; // 当前滤波值
-    bool initialized_ = false;
-};
-
-/**
  * @brief 焊道状态机
  *
  * 管理焊道从检测到定位的状态转换
@@ -275,8 +122,19 @@ public:
      */
     void update(bool detectionValid, double centerMm, double confidence) {
         const bool wasLocated = currentState_ == SeamLocalizationState::Located;
-        if (!detectionValid || !std::isfinite(centerMm) ||
-            !std::isfinite(confidence)) {
+        // 参照原项目的连续帧确认思路：单帧噪声/低置信度不立即降级，
+        // 连续多帧丢失才判定焊道真正离开，避免中心环被一帧抖动硬性归零。
+        const bool hardInvalid = !detectionValid || !std::isfinite(centerMm) ||
+                                 !std::isfinite(confidence);
+        const bool lost = hardInvalid ||
+                          confidence < lostConfidenceThreshold_;
+        const bool degraded =
+            !lost && confidence < candidateConfidenceThreshold_;
+
+        if (lost) {
+            if (++dropStreak_ < kDropConfirmationFrames) {
+                return;
+            }
             transitionTo(SeamLocalizationState::NotDetected);
             recentCenters_.clear();
             confirmationCount_ = 0;
@@ -284,17 +142,12 @@ public:
             return;
         }
 
-        if (confidence < lostConfidenceThreshold_) {
-            transitionTo(SeamLocalizationState::NotDetected);
-            recentCenters_.clear();
-            confirmationCount_ = 0;
-            if (wasLocated) emit seamLost();
-            return;
-        }
-
-        if (confidence < candidateConfidenceThreshold_) {
+        if (degraded) {
+            if (++dropStreak_ < kDropConfirmationFrames) {
+                return;
+            }
             // 已定位的焊道降为候选；尚未定位时保持原状态，避免低置信度
-            // 单帧把 NotDetected 误报成候选。
+            // 把 NotDetected 误报成候选。
             if (currentState_ == SeamLocalizationState::Located) {
                 transitionTo(SeamLocalizationState::Candidate);
                 emit seamLost();
@@ -306,6 +159,7 @@ public:
             return;
         }
 
+        dropStreak_ = 0;
         recentCenters_.push_back(centerMm);
         if (recentCenters_.size() > maxHistoryFrames_) {
             recentCenters_.erase(recentCenters_.begin());
@@ -393,6 +247,7 @@ public:
         transitionTo(SeamLocalizationState::NotDetected);
         recentCenters_.clear();
         confirmationCount_ = 0;
+        dropStreak_ = 0;
         calibrationComplete_ = false;
     }
 
@@ -460,9 +315,12 @@ private:
     SeamLocalizationState currentState_ = SeamLocalizationState::NotDetected;
     std::vector<double> recentCenters_;
     int confirmationCount_ = 0;
+    // 连续低置信/无效帧计数：达到阈值才降级，抑制单帧抖动。
+    int dropStreak_ = 0;
 
     // 参数配置
     static constexpr int maxHistoryFrames_ = 10;
+    static constexpr int kDropConfirmationFrames = 3;
     int minConfirmationFrames_ = 3;
     double centerStabilityTolerance_ = 2.0;  // mm
     double candidateConfidenceThreshold_ = 0.10;

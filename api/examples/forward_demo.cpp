@@ -3,7 +3,7 @@
 // 运行前确认：
 //   1. 小车端 PA1664RobotHost.exe 已启动（C:\Users\a\Desktop\robot_host）；
 //   2. 小车端底盘串口/CAN 配置已完成过一次（API 连接时沿用主机已保存的配置）；
-//   3. 本机与小车在同一网段，能 ping 通 192.168.1.20。
+//   3. 本机与小车在同一网段，能 ping 通 192.168.66.10。
 //
 // 命令行：forward_demo [host]
 // 退出码：0 正常流程结束，2 连接失败，3 前置请求失败。
@@ -701,8 +701,8 @@ int runFullTest(const std::string& host, const std::string& iniPath) {
 }
 
 // 超声单参数读写：--usparam <host> <method> <argsJson>
-// 例：--usparam 192.168.1.20 setGain "[20,0]"
-//     --usparam 192.168.1.20 getGain "[0]"
+// 例：--usparam 192.168.66.10 setGain "[20,0]"
+//     --usparam 192.168.66.10 getGain "[0]"
 int runUltrasoundParam(const std::string& host, const std::string& method,
                        const std::string& rawArgs) {
   QCoreApplication* app = QCoreApplication::instance();
@@ -754,16 +754,16 @@ int main(int argc, char** argv) {
   if (argc > 1 && std::string(argv[1]) == "--selftest")
     return runSelfTest(argc > 2 ? std::string(argv[2]) : std::string());
   if (argc > 1 && std::string(argv[1]) == "--usparam")
-    return runUltrasoundParam(argc > 2 ? argv[2] : "192.168.1.20",
+    return runUltrasoundParam(argc > 2 ? argv[2] : "192.168.66.10",
                               argc > 3 ? argv[3] : "getGain",
                               argc > 4 ? argv[4] : "[0]");
   if (argc > 1 && std::string(argv[1]) == "--full")
-    return runFullTest(argc > 2 ? std::string(argv[2]) : "192.168.1.20",
+    return runFullTest(argc > 2 ? std::string(argv[2]) : "192.168.66.10",
                        argc > 3 ? std::string(argv[3]) : std::string());
   if (argc > 1 && std::string(argv[1]) == "--config")
-    return runConfigTest(argc > 2 ? std::string(argv[2]) : "192.168.1.20");
+    return runConfigTest(argc > 2 ? std::string(argv[2]) : "192.168.66.10");
   if (argc > 1 && std::string(argv[1]) == "--link")
-    return runLinkTest(argc > 2 ? std::string(argv[2]) : "192.168.1.20",
+    return runLinkTest(argc > 2 ? std::string(argv[2]) : "192.168.66.10",
                        argc > 3 && std::string(argv[3]) == "connect");
 
   pa1664::Config config;

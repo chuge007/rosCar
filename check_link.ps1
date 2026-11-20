@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'SilentlyContinue'
-$target = '192.168.1.20'
+$target = '192.168.66.10'
 $port = 43100
 
 Write-Host "=============================================="

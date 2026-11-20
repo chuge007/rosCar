@@ -117,7 +117,7 @@ bool copyDeviceBytes(QIODevice &source, QIODevice &target, qint64 byteCount)
 }
 
 // 本机是否存在与远程目标同网段的 IPv4 地址。USB 网卡掉线后本机会直接掉出
-// 小车所在的 192.168.1.x，此时“连不上”和“主机没开机”必须能区分开。
+// 小车所在的 192.168.66.x，此时“连不上”和“主机没开机”必须能区分开。
 // 带 3 秒缓存：未连接时 updateStatus() 会被周期调用，枚举网卡不算便宜。
 bool localSubnetReachable(const QString &remoteHost)
 {
@@ -1230,12 +1230,33 @@ void MainWindow::buildUi()
     m_restartHostState->setWordWrap(true);
     m_restartHostState->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_restartHostState->setStyleSheet(QStringLiteral("color:#52606d"));
+    // 电机报错后不必重启主机：这一键按每台电机当前选择的通讯方式，
+    // 用对应品牌的协议发清错指令。
+    m_clearMotorAlarm = new QPushButton(QStringLiteral("清除电机错误"));
+    m_clearMotorAlarm->setObjectName(QStringLiteral("clearMotorAlarmButton"));
+    m_clearMotorAlarm->setToolTip(QStringLiteral(
+        "按当前通讯方式，用对应电机品牌的协议发清错指令：\n"
+        "· 驱动轮 MD-can / MD-rs485：0x76 系统复位，2.5 秒后补 0x77 释放抱闸\n"
+        "· 前架电机 MWD-can：0x9B 清除电机错误标志\n"
+        "· 前架电机 MWD-rs485：写 6006=0 停机\n"
+        "· 前架电机 ZDT-can：0x0E 解除堵转保护\n"
+        "· 前架电机 TT-CANopen：0x6040=0x0080 故障复位\n"
+        "远程模式下由小车端主机执行，本机模式直接下本机总线。\n"
+        "清错后底盘回到未使能状态，重新点「使能」时会先松抱闸并等待确认。"));
+    m_motorAlarmState = new QLabel(QStringLiteral("等待指令"));
+    m_motorAlarmState->setWordWrap(true);
+    m_motorAlarmState->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_motorAlarmState->setStyleSheet(QStringLiteral("color:#52606d"));
     restartRow->addWidget(m_restartHost);
+    restartRow->addWidget(m_clearMotorAlarm);
     restartRow->addStretch();
     restartLayout->addLayout(restartRow);
     restartLayout->addWidget(m_restartHostState);
+    restartLayout->addWidget(m_motorAlarmState);
     connect(m_restartHost, &QPushButton::clicked, this,
             &MainWindow::restartRobotHost);
+    connect(m_clearMotorAlarm, &QPushButton::clicked, this,
+            &MainWindow::clearMotorAlarms);
     statusLayout->addWidget(restartGroup);
 
     statusLayout->addStretch();
@@ -1625,6 +1646,25 @@ void MainWindow::restartRobotHost()
                                    });
             });
     client->request(host, adminPort);
+}
+
+void MainWindow::clearMotorAlarms()
+{
+    if (!m_robotPanel) {
+        showMessage(QStringLiteral("小车控制面板尚未就绪，无法清除电机错误"), true);
+        return;
+    }
+    if (m_remoteMode &&
+        (!m_remoteSession || !m_remoteSession->isReady())) {
+        showMessage(QStringLiteral("小车端链路未就绪，清除电机错误指令未发送"), true);
+        return;
+    }
+    m_robotPanel->clearMotorAlarms();
+    const QString text = m_remoteMode
+        ? QStringLiteral("已发送到小车端：驱动轮请求松闸、夹爪各轴清错；请重新点「使能」")
+        : QStringLiteral("已发送到本机总线：驱动轮请求松闸、夹爪各轴清错；请重新点「使能」");
+    if (m_motorAlarmState) m_motorAlarmState->setText(text);
+    showMessage(text, false);
 }
 
 void MainWindow::showPanelSection(int index)

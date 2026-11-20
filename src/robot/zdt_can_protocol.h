@@ -21,6 +21,9 @@ class ZdtCanProtocol {
   static QVector<ZdtCanFrame> speedCommand(int address, ZdtFirmware firmware,
                                           int signedTenthsRpm, int acceleration);
   static QVector<ZdtCanFrame> stopCommand(int address);
+  // 解除堵转保护（0x0E，数据 0x01），用于清除堵转锁死后的驱动板错误态。
+  // 固件不支持该命令时驱动板回错误码，不会产生运动。
+  static QVector<ZdtCanFrame> releaseStallCommand(int address);
 };
 
 } // namespace crawling

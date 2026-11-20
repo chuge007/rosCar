@@ -653,7 +653,7 @@ RobotControlPanel::RobotControlPanel(
             appendLog(QStringLiteral("启动自动连接 USB 摄像头：已配置的网络地址或设备"));
             connectConfiguredUsbCamera();
         }
-        appendLog(QStringLiteral("启动自动连接夹子电机：已配置的接口"));
+        appendLog(QStringLiteral("启动自动连接前架电机：已配置的接口"));
         connectConfiguredClampMotor();
     });
 }
@@ -733,8 +733,8 @@ void RobotControlPanel::applyRemotePeripheralSnapshot(
             snapshot.value(QStringLiteral("clampConnected")).toBool(false);
         updateClampConnection(
             connected, snapshot.value(QStringLiteral("clampStatus")).toString(
-                           connected ? QStringLiteral("夹子电机已连接")
-                                     : QStringLiteral("夹子电机未连接")));
+                           connected ? QStringLiteral("前架电机已连接")
+                                     : QStringLiteral("前架电机未连接")));
         if (m_clampControls)
             m_clampControls->setRemoteConnected(connected);
     }
@@ -945,11 +945,11 @@ void RobotControlPanel::onRemoteResponseReceived(
     }
     if (operation == QStringLiteral("robot.clamp.connect")) {
         if (m_clampConfigState)
-            m_clampConfigState->setText(QStringLiteral("正在请求主机连接夹子电机"));
+            m_clampConfigState->setText(QStringLiteral("正在请求主机连接前架电机"));
         return;
     }
     if (operation == QStringLiteral("robot.clamp.settings.update")) {
-        appendLog(QStringLiteral("远程夹子配置已由主机保存"));
+        appendLog(QStringLiteral("远程前架配置已由主机保存"));
         return;
     }
     if (operation == QStringLiteral("robot.autoCorrection.start")) {
@@ -1032,7 +1032,7 @@ void RobotControlPanel::onRemoteEventReceived(const QString &eventName,
         updateLaserConnection(false, QStringLiteral("远程主机已释放激光相机"));
         for (int slot = 0; slot < crawling::kUsbCameraChannelCount; ++slot)
             updateUsbConnection(slot, false, QStringLiteral("远程主机已释放 USB 摄像头"));
-        updateClampConnection(false, QStringLiteral("远程主机已释放夹子电机"));
+        updateClampConnection(false, QStringLiteral("远程主机已释放前架电机"));
         if (m_clampControls) m_clampControls->setRemoteConnected(false);
         crawling::LaserCorrectionStatus stopped;
         stopped.active = false;
@@ -1716,7 +1716,7 @@ void RobotControlPanel::buildUi()
     m_stateLabel = new QLabel(QStringLiteral("未连接"));
     m_stateLabel->setProperty("role", "chip");
     m_autoConnectCheck = new QCheckBox(
-        QStringLiteral("启动时自动连接（夹子电机始终连接）"));
+        QStringLiteral("启动时自动连接（前架电机始终连接）"));
     m_autoConnectCheck->setStyleSheet(QStringLiteral("color:white;"));
     m_connectAllButton = actionButton(QStringLiteral("连接全部接口"), "primary");
     auto *disconnectAll = actionButton(QStringLiteral("断开全部接口"));
@@ -1773,7 +1773,7 @@ void RobotControlPanel::buildUi()
     driveGrid->addWidget(emergency, 1, 0, 1, 2);
     manualLayout->addLayout(driveGrid);
 
-    auto *clampGroup = new QGroupBox(QStringLiteral("夹子电机手动控制"));
+    auto *clampGroup = new QGroupBox(QStringLiteral("前架电机手动控制"));
     auto *clampLayout = new QVBoxLayout(clampGroup);
     m_clampControls = new crawling::ClampMotorControlWidget(m_clampController);
     clampLayout->addWidget(m_clampControls);
@@ -1802,7 +1802,7 @@ void RobotControlPanel::buildUi()
     manualLayout->addWidget(correctionControls);
     manualLayout->addWidget(clampGroup);
 
-    // 车体控制：滑块参数紧接「夹子电机手动控制」下方。
+    // 车体控制：滑块参数紧接「前架电机手动控制」下方。
     // 纠偏四项在「启动自动纠偏」时下发，内侧轮最小比例随「保存并应用参数」写入底盘配置。
     auto *vehicleControl = new QGroupBox(QStringLiteral("车体控制"));
     auto *vehicleControlLayout = new QVBoxLayout(vehicleControl);
@@ -2150,12 +2150,14 @@ QWidget *RobotControlPanel::buildConfigurationPage()
 
     // 纠偏速度/分段长度/Kp/Kd 与内侧轮最小比例已移到「底盘控制 → 车体控制」
     // 的滑块上，这里只保留与通信、限幅、看门狗相关的配置项。
-    auto *adapter = new QGroupBox(QStringLiteral("MWD RS485 适配器"), page);
+    auto *adapter = new QGroupBox(QStringLiteral("驱动轮"), page);
     auto *adapterForm = new QFormLayout(adapter);
     m_wheelCommunicationMode = new QComboBox(adapter);
-    m_wheelCommunicationMode->addItem(QStringLiteral("CAN（默认）"),
+    // 驱动轮电机品牌固定为 MD，通讯方式即协议：MD-can 走 V3.8 CAN 帧，
+    // MD-rs485 走 V3.8 的 0x3E 串口帧。
+    m_wheelCommunicationMode->addItem(QStringLiteral("MD-can（默认）"),
                                        QStringLiteral("can"));
-    m_wheelCommunicationMode->addItem(QStringLiteral("RS485"),
+    m_wheelCommunicationMode->addItem(QStringLiteral("MD-rs485"),
                                        QStringLiteral("rs485"));
     m_wheelCanPort = new QComboBox(adapter);
     m_wheelCanBaud = new QComboBox(adapter);
@@ -2461,12 +2463,12 @@ QWidget *RobotControlPanel::buildConfigurationPage()
     addConfigurationLock(usb, QStringLiteral("usb_camera"));
     leftColumn->addWidget(usb);
 
-    auto *clamp = new QGroupBox(QStringLiteral("夹子电机通信"), page);
+    auto *clamp = new QGroupBox(QStringLiteral("前架电机通信"), page);
     auto *clampForm = new QFormLayout(clamp);
     m_clampSettings = new crawling::ClampMotorSettingsWidget(clamp);
     m_clampSettings->setController(m_clampController);
     clampForm->addRow(m_clampSettings);
-    auto *clampSave = actionButton(QStringLiteral("保存夹子配置"));
+    auto *clampSave = actionButton(QStringLiteral("保存前架配置"));
     auto *clampRefresh = actionButton(QStringLiteral("刷新串口"));
     clampForm->addRow(buttonRow({clampSave, clampRefresh}));
     connect(clampSave, &QPushButton::clicked, this, [this] { saveClampSettings(); });
@@ -2494,8 +2496,8 @@ QWidget *RobotControlPanel::buildConfigurationPage()
             m_clampControls->setEnabled(true);
         });
     }
-    auto *clampConnect = actionButton(QStringLiteral("连接夹子电机"), "primary");
-    auto *clampDisconnect = actionButton(QStringLiteral("断开夹子电机"));
+    auto *clampConnect = actionButton(QStringLiteral("连接前架电机"), "primary");
+    auto *clampDisconnect = actionButton(QStringLiteral("断开前架电机"));
     m_clampConfigState = new QLabel(QStringLiteral("未连接"), clamp);
     clampForm->addRow(QString(), buttonRow({clampConnect, clampDisconnect}));
     clampForm->addRow(QStringLiteral("连接状态"), m_clampConfigState);
@@ -3668,8 +3670,8 @@ bool RobotControlPanel::saveClampSettings()
             QStringLiteral("robot.clamp.settings.update"),
             QJsonObject{{QStringLiteral("settings"),
                          pa1664::remote::driveSettingsToJson(m_settings)}});
-        appendLog(QStringLiteral("夹子配置已下发到主机（含限位设置）"));
-        m_clampConfigState->setText(QStringLiteral("正在保存远程夹子配置"));
+        appendLog(QStringLiteral("前架配置已下发到主机（含限位设置）"));
+        m_clampConfigState->setText(QStringLiteral("正在保存远程前架配置"));
         return true;
     }
     QSettings persistent(crawling::DriveSettings::persistentFilePath(), QSettings::IniFormat);
@@ -3679,15 +3681,15 @@ bool RobotControlPanel::saveClampSettings()
     latest.save(persistent);
     persistent.sync();
     if (persistent.status() != QSettings::NoError) {
-        appendLog(QStringLiteral("夹子配置保存失败"));
+        appendLog(QStringLiteral("前架配置保存失败"));
         return false;
     }
     m_settings.clampMotors = current.clampMotors;
     m_settings.clampMotorSyncEnabled = current.clampMotorSyncEnabled;
     if (m_clampController) m_clampController->setSettings(current);
     m_clampControls->setEnabled(true);
-    m_clampConfigState->setText(QStringLiteral("夹子配置已保存"));
-    appendLog(QStringLiteral("夹子配置已保存"));
+    m_clampConfigState->setText(QStringLiteral("前架配置已保存"));
+    appendLog(QStringLiteral("前架配置已保存"));
     return true;
 }
 
@@ -3714,7 +3716,7 @@ void RobotControlPanel::disconnectAllDevices()
         m_remoteSession->request(QStringLiteral("robot.laser.disconnect"));
         m_remoteSession->request(QStringLiteral("robot.camera.disconnectAll"));
         m_remoteSession->request(QStringLiteral("robot.clamp.disconnect"));
-        appendLog(QStringLiteral("已请求远程断开底盘、夹子电机、IMU、激光相机和 USB 摄像头"));
+        appendLog(QStringLiteral("已请求远程断开底盘、前架电机、IMU、激光相机和 USB 摄像头"));
         return;
     }
     if (m_clampController)
@@ -3731,7 +3733,7 @@ void RobotControlPanel::disconnectAllDevices()
             QMetaObject::invokeMethod(m_usbCameraController, "disconnectCamera",
                                       Qt::QueuedConnection, Q_ARG(int, slot));
     }
-    appendLog(QStringLiteral("已请求断开底盘、夹子电机、IMU、激光相机和 USB 摄像头"));
+    appendLog(QStringLiteral("已请求断开底盘、前架电机、IMU、激光相机和 USB 摄像头"));
 }
 
 void RobotControlPanel::persistAutoConnectSetting(bool enabled)
@@ -3796,6 +3798,30 @@ void RobotControlPanel::clearJogLatch()
         *latchedFlag = false;
         sendMotionCommand();
     }
+}
+
+void RobotControlPanel::clearMotorAlarms()
+{
+    if (m_remoteSession) {
+        if (!m_remoteLinkReady) {
+            appendLog(QStringLiteral("远程链路未就绪，清除电机错误请求未发送"));
+            return;
+        }
+        // 驱动轮走底盘服务（0x80 系统复位 / RS485 0x76），夹爪各轴走外设服务
+        // （按 mwdCan / mwdRs485 / zdtCan / ttCanopen 各自的清错指令）。
+        m_remoteSession->request(QStringLiteral("robot.clearAlarm"));
+        m_remoteSession->request(QStringLiteral("robot.clamp.clearAlarm"));
+        appendLog(QStringLiteral("已向远程主机发送清除电机错误（驱动轮 + 夹爪各轴）"));
+        return;
+    }
+    if (m_controller) {
+        QMetaObject::invokeMethod(m_controller, "clearAlarm", Qt::QueuedConnection);
+    }
+    if (m_clampController) {
+        QMetaObject::invokeMethod(m_clampController, "clearAlarms",
+                                  Qt::QueuedConnection);
+    }
+    appendLog(QStringLiteral("已向本机驱动轮与夹爪电机发送清除错误指令"));
 }
 
 void RobotControlPanel::requestEnable(bool enabled)
@@ -4986,13 +5012,18 @@ bool RobotControlPanel::event(QEvent *event)
 
 void RobotControlPanel::releaseAllJog(const QString &reason)
 {
+    // 方向键按下状态丢失只需要补发一次停车，跟自动纠偏没有关系：纠偏由
+    // 主机内部闭环驱动，操作端切到「超声检测」页签、窗口失焦、最小化都会
+    // 走到这里。以前顺带发 robot.autoCorrection.stop，现场显示"操作员停止
+    // 自动纠偏"，但操作员并没有点停止。纠偏自身的停止路径仍然完整：显式
+    // 停止按钮、急停、暂停按钮，以及主机侧的遥测/观测超时、连接断开、
+    // 手动租约到期等安全停止。
     if (m_autoCorrectionActive) {
         crawling::AppLogger::write(
             QStringLiteral("CORRECTION.STOP"),
-            QStringLiteral("event=correction_stop_requested source=%1 active=1 pending=%2")
+            QStringLiteral("event=correction_implicit_stop_ignored source=%1 active=1 pending=%2")
                 .arg(reason)
                 .arg(m_autoCorrectionStartPending ? 1 : 0));
-        stopAutoCorrection();
     }
     clearJogLatch();
     const bool wasJogging = m_forward || m_reverse || m_left || m_right;

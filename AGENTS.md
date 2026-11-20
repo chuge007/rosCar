@@ -76,6 +76,7 @@ This project is indexed by GitNexus as **pa1664-workbench** (45452 symbols, 5862
 
 ## 网络与日志
 
+- 地址规划：车侧专网 `192.168.66.0/24`，小车 `192.168.66.10`、激光轮廓仪 `192.168.66.11`（`DB2666828` / MV-TD240-2D，网关必须留空）、操作台 `192.168.66.20`，**2026-11-19 已现场生效**。激光必须与车端同段：海康 SDK 靠广播发现（`MV3D_LP_GetDeviceNumber`），不跨路由；相机则各占车端一张网卡、独立 2/3 段。网卡命令、清单、验证与回滚见 `docs/车侧专网IP规划.md`。
 - 通道：TCP 43100 命令 / UDP 43101 实时 / UDP 43102 媒体 / TCP 43103 批量；实时通道 200 ms 租约，`realtime_codec` 属运动安全路径。
 - 日志落盘在 exe 所在目录：`bin\logs\`（本地）、`C:\Users\a\Desktop\robot_host\app\logs\`（小车端）。`robot_console.log` = Workbench，`robot_host.log` = Host，`comm/<category>.log` = `COMM.*`，`profile_weld_detection.log` = 焊缝诊断。**超声没有专属日志文件**。
-- 小车端直连 `ssh a@192.168.1.20`，部署目录 `C:\Users\a\Desktop\robot_host`，远程原生命令输出 GBK，需前置 `chcp 65001 >nul`；换 EXE 前要删 `app\robot_host.lock`。
+- 小车端直连 `ssh a@192.168.66.10`，部署目录 `C:\Users\a\Desktop\robot_host`，远程原生命令输出 GBK，需前置 `chcp 65001 >nul`；换 EXE 前要删 `app\robot_host.lock`。

@@ -75,6 +75,7 @@ SOURCES += \
     $$ROBOT_SOURCE_ROOT/wheel_synchronizer.cpp \
     $$ROBOT_SOURCE_ROOT/servo_protocol.cpp \
     $$ROBOT_SOURCE_ROOT/mwd_rs485_protocol.cpp \
+    $$ROBOT_SOURCE_ROOT/mwd_can_protocol.cpp \
     $$ROBOT_SOURCE_ROOT/mwd_modbus_protocol.cpp \
     $$ROBOT_SOURCE_ROOT/rim302_protocol.cpp \
     $$ROBOT_SOURCE_ROOT/wheel_motor_controller.cpp \
@@ -135,6 +136,7 @@ HEADERS += \
     $$ROBOT_SOURCE_ROOT/wheel_synchronizer.h \
     $$ROBOT_SOURCE_ROOT/servo_protocol.h \
     $$ROBOT_SOURCE_ROOT/mwd_rs485_protocol.h \
+    $$ROBOT_SOURCE_ROOT/mwd_can_protocol.h \
     $$ROBOT_SOURCE_ROOT/mwd_modbus_protocol.h \
     $$ROBOT_SOURCE_ROOT/rim302_protocol.h \
     $$ROBOT_SOURCE_ROOT/hardware_discovery.h \

@@ -1,5 +1,5 @@
 param(
-    [string]$Target = '192.168.1.20',
+    [string]$Target = '192.168.66.10',
     [int]$IntervalSeconds = 2,
     [int]$Minutes = 480
 )

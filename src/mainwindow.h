@@ -110,6 +110,8 @@ private:
     void applyRemoteStatus(const QJsonObject &status);
     // 状态页的运维动作：小车端卡死后，从这里把主机进程重启掉。
     void restartRobotHost();
+    // 状态页的运维动作：按每台已配置电机的协议清除其错误状态。
+    void clearMotorAlarms();
     void stopAcquisition();
     void refreshGeometry();
 
@@ -189,6 +191,8 @@ private:
     QVector<QLabel *> m_vehicleMetrics;
     QPushButton *m_restartHost = nullptr;
     QLabel *m_restartHostState = nullptr;
+    QPushButton *m_clearMotorAlarm = nullptr;
+    QLabel *m_motorAlarmState = nullptr;
     QPushButton *m_connect = nullptr;
     QPushButton *m_record = nullptr;
     QPushButton *m_eViewButton = nullptr;

@@ -197,6 +197,11 @@ class RobotPeripheralHostService final : public QObject {
   qint64 lastCameraPipelineLogMs_ = -100000;
   qint64 lastLaserEventMs_ = -100000;
   qint64 lastCorrectionStatusMs_ = -100000;
+  // Drive telemetry reaches the correction loop as a queued call through this
+  // object's thread. Stamping its arrival here splits "the chassis stopped
+  // publishing" from "this thread was too busy to forward it in time".
+  qint64 lastTelemetryRxMs_ = -1;
+  qint64 lastTelemetryGapDiagnosticMs_ = -1;
   bool initialized_ = false;
   bool shuttingDown_ = false;
   bool portEnumerationPending_ = false;

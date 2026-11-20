@@ -237,7 +237,7 @@ void ClampMotorSettingsWidget::beginRecordLimit(MotorForm* f, bool upper) {
   }
   const auto configuredAxes = settings();
   if (index < 0 || index >= configuredAxes[axis].size()) {
-    f->limitStatus->setText(QStringLiteral("请先保存夹子配置再记录限位"));
+    f->limitStatus->setText(QStringLiteral("请先保存前架配置再记录限位"));
     return;
   }
   if (!ClampMotorController::supportsPosition(configuredAxes[axis][index])) {
@@ -821,7 +821,7 @@ void ClampMotorControlWidget::rebuild() {
       group->append(slider);
     }
   }
-  if (row == 0) grid->addWidget(new QLabel(QStringLiteral("尚未配置夹子电机")), 0, 0);
+  if (row == 0) grid->addWidget(new QLabel(QStringLiteral("尚未配置前架电机")), 0, 0);
   grid->setRowStretch(row + 1, 1);
   scroll_->setWidget(body);
 }

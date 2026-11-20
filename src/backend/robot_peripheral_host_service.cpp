@@ -498,22 +498,13 @@ void RobotPeripheralHostService::startSensorThreads() {
     // mailbox. In the integrated build the panel wired this signal directly
     // to LaserCorrectionController::submitProfileFrame; the separated host had
     // lost that link, so no detection result ever reached the operator view.
+    // The frame-to-controller link itself is created in the correction-thread
+    // block below, where correction_ exists; only bookkeeping stays here.
     connect(sensor_,
             &crawling::RobotSensorController::correctionProfileFrameReady, this,
             [this, publishLaserFrameEvent](
-                const QVector<QVector3D>& points, quint32 frameNumber,
-                qint64 receivedAtEpochMs) {
+                const QVector<QVector3D>& points, quint32, qint64) {
               lastLaserPointCount_ = points.size();
-              if (correction_) {
-                QMetaObject::invokeMethod(
-                    correction_,
-                    [controller = correction_, points, frameNumber,
-                     receivedAtEpochMs] {
-                      controller->submitProfileFrame(points, frameNumber,
-                                                     receivedAtEpochMs);
-                    },
-                    Qt::QueuedConnection);
-              }
               publishLaserFrameEvent(QStringLiteral("correctionProfile"));
             }, Qt::QueuedConnection);
     connect(sensor_, &crawling::RobotSensorController::correctionProfilePrepared,
@@ -710,6 +701,30 @@ void RobotPeripheralHostService::startSensorThreads() {
     correction_->moveToThread(correctionThread_);
     connect(correctionThread_, &QThread::finished, correction_,
             &QObject::deleteLater);
+    // Hand each SDK profile frame straight to the controller's mailbox.
+    // submitProfileFrame() locks and replaces the pending frame, queuing at
+    // most one consume task, so this is safe from the sensor thread and keeps
+    // the correction queue from accumulating stale scans (which used to starve
+    // the drive telemetry callback and trip the 600 ms watchdog). This has to
+    // live here: correction_ does not exist yet when the sensor signals are
+    // wired in startSensorThreads().
+    if (sensor_) {
+      connect(sensor_,
+              &crawling::RobotSensorController::correctionProfileFrameReady,
+              correction_,
+              &crawling::LaserCorrectionController::submitProfileFrame,
+              Qt::DirectConnection);
+    }
+    // Feed drive telemetry from the chassis straight into the correction
+    // thread. Relaying it through this main-thread object put it behind every
+    // correction log line in the same event queue, so a busy main thread turned
+    // into a phantom "wheel feedback timeout" while the wheels were turning
+    // normally.
+    if (drive_) {
+      connect(drive_, &RobotHostService::driveTelemetryReady, correction_,
+              &crawling::LaserCorrectionController::processDriveTelemetry,
+              Qt::QueuedConnection);
+    }
     // The separated host ran the weld detector but never routed its diagnostics
     // to disk, so detector_ms and laser_pipeline_slow were invisible in the
     // field and a slow detector was indistinguishable from a slow link. Mirror
@@ -731,15 +746,42 @@ void RobotPeripheralHostService::startSensorThreads() {
     connect(correction_,
             &crawling::LaserCorrectionController::diagnosticLogMessage, this,
             [](const QString& message) {
-              const bool keepAll =
+              // Safety-edge events answer "who stopped what and why", so they
+              // must survive the sampler. Without them a stalled input queue
+              // and a broken sensor look identical in the field log. The
+              // boundary stop in particular is emitted once and was being
+              // swallowed by an unrelated per-frame line in the same second,
+              // leaving "seam_outside_scan" with no measured margin to read.
+              const bool alwaysKeep =
+                  message.contains(QLatin1String("event=correction_task_started")) ||
+                  message.contains(QLatin1String("event=scan_boundary_stop")) ||
+                  message.contains(QLatin1String("event=correction_stop")) ||
+                  message.contains(QLatin1String(
+                      "event=correction_telemetry_timeout")) ||
+                  message.contains(QLatin1String("event=laser_input_timeout"));
+              const bool keepTimed =
                   message.contains(QLatin1String("event=laser_pipeline_slow")) ||
-                  message.contains(
-                      QLatin1String("event=correction_task_started")) ||
-                  message.contains(QLatin1String("event=laser_source_rejected"));
+                  message.contains(QLatin1String("event=laser_source_rejected")) ||
+                  message.contains(QLatin1String(
+                      "event=correction_telemetry_rejected")) ||
+                  message.contains(QLatin1String(
+                      "event=correction_dispatch_delay"));
               static qint64 lastSampledMs = -1;
+              static qint64 lastTimedMs = -1;
               const qint64 now = QDateTime::currentMSecsSinceEpoch();
-              if (!keepAll && lastSampledMs >= 0 && now - lastSampledMs < 1000)
+              if (alwaysKeep) {
+                crawling::AppLogger::writeProfileDetection(message);
                 return;
+              }
+              // Sampling stays, but tightened to 200 ms for those events so a
+              // burst keeps its ordering without flooding the profile log.
+              if (keepTimed) {
+                if (lastTimedMs >= 0 && now - lastTimedMs < 200) return;
+                lastTimedMs = now;
+                crawling::AppLogger::writeProfileDetection(message);
+                return;
+              }
+              if (lastSampledMs >= 0 && now - lastSampledMs < 1000) return;
               lastSampledMs = now;
               crawling::AppLogger::writeProfileDetection(message);
             },
@@ -792,7 +834,31 @@ void RobotPeripheralHostService::startSensorThreads() {
               publishCorrectionStatus();
             }, Qt::QueuedConnection);
     connect(correction_, &crawling::LaserCorrectionController::logMessage, this,
-            [this](const QString& message) { appendLog(message); },
+            [this](const QString& message) {
+              // Each frame used to publish 5-8 Chinese diagnostic lines to this
+              // thread, which then forwarded every one of them to the operator
+              // as a TCP event. At ~20 fps that flooded the main event loop and
+              // starved the 20 Hz drive telemetry. Safety and state lines stay
+              // immediate; the per-control-cycle chatter is sampled to 5 Hz.
+              const bool perCycle =
+                  message.contains(QLatin1String("纠偏全链路-")) ||
+                  message.contains(QLatin1String("纠偏控制 #")) ||
+                  message.contains(QLatin1String("纠偏速度监督 #")) ||
+                  message.contains(QLatin1String("拟合详情")) ||
+                  message.contains(QLatin1String("拟合诊断")) ||
+                  message.contains(QLatin1String("双边缘拟合完成")) ||
+                  message.contains(QLatin1String("纠偏阶段：")) ||
+                  message.contains(QLatin1String("激光诊断：")) ||
+                  message.contains(QLatin1String("柔性转向限幅")) ||
+                  message.contains(QLatin1String("柔性纠偏前进并采集"));
+              static qint64 lastCycleLogMs = -1;
+              const qint64 now = QDateTime::currentMSecsSinceEpoch();
+              if (perCycle) {
+                if (lastCycleLogMs >= 0 && now - lastCycleLogMs < 200) return;
+                lastCycleLogMs = now;
+              }
+              appendLog(message);
+            },
             Qt::QueuedConnection);
     connect(correction_,
             &crawling::LaserCorrectionController::trackingPhaseStarted, this,
@@ -1057,15 +1123,35 @@ void RobotPeripheralHostService::handleRequest(quint64 sessionId,
 void RobotPeripheralHostService::processDriveTelemetry(
     const crawling::DriveTelemetry& telemetry) {
   lastTelemetry_ = telemetry;
-  if (drive_) driveConnected_ = drive_->isDriveConnected();
-  if (correction_ && correctionThread_ && correctionThread_->isRunning()) {
-    QMetaObject::invokeMethod(
-        correction_,
-        [controller = correction_, telemetry] {
-          controller->processDriveTelemetry(telemetry);
-        },
-        Qt::QueuedConnection);
+  // The chassis publishes every 50 ms. A gap measured here means the event sat
+  // in this thread's queue, which is exactly what the correction watchdog later
+  // reports as "wheel feedback timeout" - record it at the real cause.
+  const qint64 rxNowMs = QDateTime::currentMSecsSinceEpoch();
+  const qint64 forwardGapMs =
+      lastTelemetryRxMs_ < 0 ? 0 : rxNowMs - lastTelemetryRxMs_;
+  lastTelemetryRxMs_ = rxNowMs;
+  if (forwardGapMs > 150 &&
+      (lastTelemetryGapDiagnosticMs_ < 0 ||
+       rxNowMs - lastTelemetryGapDiagnosticMs_ >= 200)) {
+    lastTelemetryGapDiagnosticMs_ = rxNowMs;
+    crawling::AppLogger::write(
+        QStringLiteral("DRIVE.TELEMETRY"),
+        QStringLiteral("event=telemetry_forward_gap gap_ms=%1 state=%2 "
+                       "feedback_fresh=%3 command_fresh=%4 "
+                       "correction_active=%5 pending=%6")
+            .arg(forwardGapMs)
+            .arg(static_cast<int>(telemetry.state))
+            .arg(telemetry.feedbackFresh ? 1 : 0)
+            .arg(telemetry.commandFresh ? 1 : 0)
+            .arg(correctionActive_ ? 1 : 0)
+            .arg(correctionStartPending_ ? 1 : 0));
   }
+  if (drive_) driveConnected_ = drive_->isDriveConnected();
+  // Drive telemetry no longer hops through this (main-thread) object: the
+  // controller is fed directly from RobotHostService in the correction-thread
+  // block. Relaying it here made the 20 Hz telemetry share an event queue with
+  // every correction log line, and a busy main thread then looked exactly like
+  // a dead wheel sensor ("轮端里程反馈超时").
   if ((correctionActive_ || correctionStartPending_) &&
       (!driveConnected_ ||
        telemetry.state != crawling::DriveState::Enabled)) {
@@ -1406,6 +1492,12 @@ void RobotPeripheralHostService::handleClampRequest(
   if (operation == QStringLiteral("robot.clamp.stop")) {
     QMetaObject::invokeMethod(clamp_, "stop", Qt::QueuedConnection);
     respond(sessionId, requestId, true);
+    return;
+  }
+  // 清除夹子电机错误：每台已配置电机按自己的通信协议发复位/解除保护指令。
+  if (operation == QStringLiteral("robot.clamp.clearAlarm")) {
+    QMetaObject::invokeMethod(clamp_, "clearAlarms", Qt::QueuedConnection);
+    respond(sessionId, requestId, true, QJsonObject{{QStringLiteral("queued"), true}});
     return;
   }
   if (operation == QStringLiteral("robot.clamp.setMotorSpeed")) {

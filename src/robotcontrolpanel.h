@@ -80,6 +80,8 @@ public slots:
     void startAutoCorrection();
     void stopAutoCorrection();
     void setAutoCorrectionPaused(bool paused);
+    // 一键清除所有已配置电机错误：驱动轮（CAN 0x80 / RS485 0x76）+ 夹爪各轴按各自协议。
+    void clearMotorAlarms();
 
 protected:
     void showEvent(QShowEvent *event) override;

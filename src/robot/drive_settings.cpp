@@ -105,11 +105,13 @@ ClampCommunicationMode clampModeFromKey(const QString& key) {
 }
 
 QString clampModeName(ClampCommunicationMode mode) {
+  // 前架电机（MWD/ZDT/TT 品牌）与驱动轮（MD 品牌）是两套独立协议，
+  // 显示名带上品牌前缀，避免现场把 MWD-can 与 MD-can 混为一谈。
   switch (mode) {
-    case ClampCommunicationMode::TtCanopen: return QStringLiteral("TT CANopen");
-    case ClampCommunicationMode::MwdRs485: return QStringLiteral("MWD RS485");
-    case ClampCommunicationMode::MwdCan: return QStringLiteral("MWD CAN");
-    case ClampCommunicationMode::ZdtCan: return QStringLiteral("ZDT CAN");
+    case ClampCommunicationMode::TtCanopen: return QStringLiteral("TT-CANopen");
+    case ClampCommunicationMode::MwdRs485: return QStringLiteral("MWD-rs485");
+    case ClampCommunicationMode::MwdCan: return QStringLiteral("MWD-can");
+    case ClampCommunicationMode::ZdtCan: return QStringLiteral("ZDT-can");
   }
   return {};
 }

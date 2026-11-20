@@ -5,7 +5,7 @@
 // 200 ms 运动租约、心跳、断线重连、HMAC 校验、图像/扫描数据编解码）全部封装
 // 在本库内部。调用方只写：
 //
-//     pa1664::RobotApi api;          // 默认连 192.168.1.20:43100
+//     pa1664::RobotApi api;          // 默认连 192.168.66.10:43100
 //     api.start();                   // 后台建链 + 自动重连
 //     api.takeControl();             // 连接底盘 + 使能
 //     api.forward(0.5);              // 前进（一半速度），持续生效
@@ -97,7 +97,7 @@ struct Result {
 // 否则会被主机端限幅或判为非法目标（默认值与出厂配置相同）。
 // 用 loadDriveConfig() 读到的值调用 applyDriveConfig() 可自动对齐。
 struct Config {
-  std::string host = "192.168.1.20";
+  std::string host = "192.168.66.10";
   std::uint16_t controlPort = 43100;   // TCP 控制通道
   double maxLinearSpeedMps = 0.120;    // maximumLinearSpeedMps
   double maxAngularSpeedRadps = 0.8726646259971648;  // 50 deg/s
