@@ -114,7 +114,8 @@ public:
         HeatPalette = 0,
         GrayscalePalette = 1,
         RfPalette = 2,
-        CustomPalette = 3
+        CustomPalette = 3,
+        TofdPalette = 4
     };
 
     explicit EScanWidget(QWidget *parent = nullptr);
@@ -175,7 +176,8 @@ public:
         HeatPalette = 0,
         GrayscalePalette = 1,
         RfPalette = 2,
-        CustomPalette = 3
+        CustomPalette = 3,
+        TofdPalette = 4
     };
     enum ScaleMode { FixedFullScale = 0, DynamicScale = 1 };
 

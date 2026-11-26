@@ -150,7 +150,7 @@ private:
     double m_bDisplayRejectValue = 0.0;  // 显示低切，百分比
     bool m_bInterpolateMissingValue = false;
     // 调色盘状态。
-    int m_paletteMode = 1;       // 默认灰度
+    int m_paletteMode = 4;       // 默认 TOFD 灰阶
     int m_paletteScaleMode = 0;  // BScanWidget::FixedFullScale
     double m_paletteFixedMaximum = 100.0;
     double m_paletteLower = 0.0;
