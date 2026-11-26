@@ -1256,8 +1256,8 @@ void RobotControlPanel::onRemoteEventReceived(const QString &eventName,
         return;
     }
     if (eventName == QStringLiteral("robot.peripheral.log")) {
-        // Clamp/IMU/camera diagnostics relayed from the host; without this the
-        // operator never sees which clamp motor stopped answering.
+        // Retained only for older hosts that still relay their log lines.
+        // Current hosts keep diagnostics in robot_host.log on the car.
         appendLog(QStringLiteral("[外设] %1")
                       .arg(data.value(QStringLiteral("message")).toString()));
         return;

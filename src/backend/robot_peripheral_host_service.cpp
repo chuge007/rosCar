@@ -864,21 +864,23 @@ void RobotPeripheralHostService::startSensorThreads() {
     connect(correction_, &crawling::LaserCorrectionController::logMessage, this,
             [this](const QString& message) {
               // Each frame used to publish 5-8 Chinese diagnostic lines to this
-              // thread, which then forwarded every one of them to the operator
-              // as a TCP event. At ~20 fps that flooded the main event loop and
-              // starved the 20 Hz drive telemetry. Safety and state lines stay
-              // immediate; the per-control-cycle chatter is sampled to 5 Hz.
+              // thread. At ~20 fps that flooded the main event loop and starved
+              // media delivery. Safety and state lines stay immediate; the
+              // per-control-cycle chatter is sampled to 5 Hz.
+              // These literals must be QStringLiteral: QLatin1String treats the
+              // UTF-8 Chinese bytes as Latin-1, so no message ever matched and
+              // the sampler silently passed every line (measured 23 lines/s).
               const bool perCycle =
-                  message.contains(QLatin1String("纠偏全链路-")) ||
-                  message.contains(QLatin1String("纠偏控制 #")) ||
-                  message.contains(QLatin1String("纠偏速度监督 #")) ||
-                  message.contains(QLatin1String("拟合详情")) ||
-                  message.contains(QLatin1String("拟合诊断")) ||
-                  message.contains(QLatin1String("双边缘拟合完成")) ||
-                  message.contains(QLatin1String("纠偏阶段：")) ||
-                  message.contains(QLatin1String("激光诊断：")) ||
-                  message.contains(QLatin1String("柔性转向限幅")) ||
-                  message.contains(QLatin1String("柔性纠偏前进并采集"));
+                  message.contains(QStringLiteral("纠偏全链路-")) ||
+                  message.contains(QStringLiteral("纠偏控制 #")) ||
+                  message.contains(QStringLiteral("纠偏速度监督 #")) ||
+                  message.contains(QStringLiteral("拟合详情")) ||
+                  message.contains(QStringLiteral("拟合诊断")) ||
+                  message.contains(QStringLiteral("双边缘拟合完成")) ||
+                  message.contains(QStringLiteral("纠偏阶段：")) ||
+                  message.contains(QStringLiteral("激光诊断：")) ||
+                  message.contains(QStringLiteral("柔性转向限幅")) ||
+                  message.contains(QStringLiteral("柔性纠偏前进并采集"));
               static qint64 lastCycleLogMs = -1;
               const qint64 now = QDateTime::currentMSecsSinceEpoch();
               if (perCycle) {
@@ -1954,10 +1956,9 @@ void RobotPeripheralHostService::maybeLogCameraPipeline(qint64 nowMs) {
 }
 
 void RobotPeripheralHostService::appendLog(const QString& message) {
-  // Single channel only: logMessage() is forwarded by HostApplication as the
-  // "robot.peripheral.log" event. The duplicate "robot.log" event used to make
-  // every peripheral line appear twice on the operator console (once plain,
-  // once with the [外设] prefix).
+  // Local host log only. logMessage() is written to robot_host.log by
+  // HostApplication; it is deliberately not forwarded to the operator, so a
+  // busy correction loop cannot flood the control channel or the UI thread.
   if (message.isEmpty()) return;
   emit logMessage(ownerSessionId_, message);
 }

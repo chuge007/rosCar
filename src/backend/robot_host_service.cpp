@@ -102,9 +102,10 @@ void RobotHostService::initialize() {
           }, Qt::QueuedConnection);
   connect(drive_, &crawling::SynchronizedDriveController::logMessage,
           this, [this](const QString& message) {
+            // Local host log only: operator-side log events used to duplicate
+            // every drive line over the control channel and cost main-thread
+            // time during correction.
             emit logMessage(ownerSessionId_, message);
-            emit eventReady(ownerSessionId_, QStringLiteral("robot.log"),
-                            QJsonObject{{QStringLiteral("message"), message}});
           }, Qt::QueuedConnection);
   connect(drive_, &crawling::SynchronizedDriveController::canSettingsDetected,
           this, [this](const crawling::HardwareDetectionResult& result) {

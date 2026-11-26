@@ -226,13 +226,13 @@ void HostApplication::wireServices() {
   connect(peripheral_, &RobotPeripheralHostService::eventReady, this,
           &HostApplication::sendSessionEvent);
   connect(peripheral_, &RobotPeripheralHostService::logMessage, this,
-          [this](quint64 sessionId, const QString& message) {
+          [](quint64 sessionId, const QString& message) {
+            // Peripheral diagnostics stay on the car. Forwarding each line as
+            // robot.peripheral.log made the host main thread serialise and send
+            // ~25 long events per second while correction was running, which
+            // starved media delivery and made the operator picture stutter.
+            // The operator keeps its own console log in bin\logs\.
             qInfo().noquote() << "ROBOT_PERIPHERAL" << sessionId << message;
-            // Clamp/IMU/camera diagnostics used to stay in the host log file,
-            // so an operator could never see which clamp motor failed to
-            // answer. Forward them as an event the console can display.
-            sendSessionEvent(sessionId, QStringLiteral("robot.peripheral.log"),
-                             QJsonObject{{QStringLiteral("message"), message}});
           });
   connect(peripheral_, &RobotPeripheralHostService::mediaReady, this,
           [this](quint16 streamId, MediaStreamKind kind,
