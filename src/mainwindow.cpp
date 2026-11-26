@@ -876,6 +876,10 @@ void MainWindow::buildUi()
     m_mapTabs = new QStackedWidget;
     m_mapTabs->setObjectName(QStringLiteral("mapTabs"));
     m_eScan = new EScanWidget;
+    // E 扫必须在这里就继承调色盘配置：EScanWidget 自身默认是灰度色表，
+    // 只有「工具 → 调色盘」下发过才会变成 TOFD/热力等，否则表现为
+    // 「调色盘的 TOFD 只作用在 B 扫，E 扫仍是黑底灰度」。
+    applyPaletteSettings();
     m_mapTabs->addWidget(m_eScan);
     connect(m_aScan, &AScanWidget::depthHovered,
             this, &MainWindow::synchronizeDepthCursor);

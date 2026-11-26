@@ -55,15 +55,10 @@ QColor waveColor(double normalized)
 }
 
 // TOFD 灰阶：零信号=浅灰背景，负幅值→黑，正幅值→白。
+// 公式在 scanpalette.h，B/E 扫共用一份，避免两端索引约定分叉。
 QRgb tofdGray(int index)
 {
-    const double signedValue = (double(index) - 127.5) / 127.5;
-    constexpr double zeroGray = 200.0;
-    const double gray = signedValue < 0.0
-        ? zeroGray * (1.0 + signedValue)
-        : zeroGray + (255.0 - zeroGray) * signedValue;
-    const int g = qBound(0, qRound(gray), 255);
-    return QColor(g, g, g).rgb();
+    return ScanPalette::tofdGrayRgb(index);
 }
 
 // B/E 扫共用的阈值分段默认值：由低到高依次为深蓝、天蓝、绿、黄、红。
@@ -1102,12 +1097,14 @@ void EScanWidget::setFrame(const DecodedFrame &frame, double scale)
         return;
     const int beams = frame.beams.size();
     const int points = frame.beams.first().size();
+    // 与 decodeEScan 保持同一索引约定：127.5 为零信号，保留正负极性。
+    const double gain = 127.5 / qMax(1.0, scale);
     QImage image(beams, points, QImage::Format_Indexed8);
     for (int y = 0; y < points; ++y) {
         uchar *line = image.scanLine(y);
         for (int x = 0; x < beams; ++x) {
-            const double n = qAbs(double(frame.beams[x][y])) / qMax(1.0, scale);
-            line[x] = uchar(qBound(0, qRound(n * 255.0), 255));
+            const double raw = double(frame.beams[x][y]) * gain;
+            line[x] = uchar(qBound(0, qRound(127.5 + raw), 255));
         }
     }
     m_image = image;
@@ -1214,19 +1211,30 @@ void EScanWidget::rebuildColorTable()
 {
     if (m_image.isNull() || m_image.format() != QImage::Format_Indexed8)
         return;
+    // E 扫索引与 B 扫 RF/TOFD 同构：127.5 ≈ 零信号，0 = 最负，255 = 最正。
+    // 幅值类色表（热力 / 灰度 / 自定义 / 阈值分段）只取 |索引 - 127.5|；
+    // 极性类色表（TOFD / RF）再用符号决定负半周压黑还是正半周提白。
+    const double levelSpan = qMax(0.01, m_displayUpper - m_displayLower);
+    const double gammaExponent = 1.0 / m_displayGamma;
     QVector<QRgb> palette(256);
     for (int i = 0; i < palette.size(); ++i) {
-        double normalized = double(i) / 255.0;
+        const double signedValue = (double(i) - 127.5) / 127.5;
+        const double magnitude = qAbs(signedValue);
         if (m_colorRuleMode == ScanPalette::ThresholdBandsColorRule) {
             const double value = m_thresholdValueMode == ScanPalette::AbsoluteThresholdValues
-                ? normalized * 100.0 : normalized;
+                ? magnitude * 100.0 : magnitude;
             palette[i] = thresholdBandColor(value).rgb();
             continue;
         }
-        normalized = qBound(0.0, (normalized - m_displayLower)
-                                  / qMax(0.01, m_displayUpper - m_displayLower), 1.0);
-        normalized = qPow(normalized, 1.0 / m_displayGamma);
-        if (m_paletteMode == HeatPalette) {
+        double normalized = qBound(0.0, (magnitude - m_displayLower) / levelSpan, 1.0);
+        normalized = qPow(normalized, gammaExponent);
+        if (m_paletteMode == TofdPalette) {
+            palette[i] = ScanPalette::tofdGrayRgb(signedValue, normalized);
+        } else if (m_paletteMode == RfPalette) {
+            palette[i] = (signedValue < 0.0
+                ? QColor::fromRgbF(1.0 - normalized, 1.0 - normalized, 1.0)
+                : QColor::fromRgbF(1.0, 1.0 - normalized, 1.0 - normalized)).rgb();
+        } else if (m_paletteMode == HeatPalette) {
             palette[i] = waveColor(normalized).rgb();
         } else if (m_paletteMode == CustomPalette) {
             palette[i] = QColor(
@@ -1237,7 +1245,6 @@ void EScanWidget::rebuildColorTable()
                 qRound(m_customPaletteStart.blue()
                        + (m_customPaletteEnd.blue() - m_customPaletteStart.blue()) * normalized)).rgb();
         } else {
-            // E 扫解码后只保留幅值，不保留正负极性；RF 模式在此按灰度显示。
             const int gray = qRound(normalized * 255.0);
             palette[i] = QColor(gray, gray, gray).rgb();
         }

@@ -1,5 +1,7 @@
 #include "packetdecoder.h"
 
+#include "scanpalette.h"
+
 #include <QColor>
 #include <array>
 #include <cstring>
@@ -90,17 +92,14 @@ static bool validatePacket(const QByteArray &packet, int groupOffsetWords,
     return true;
 }
 
-static const std::array<QRgb, 256> &amplitudePalette()
+// E 扫图像索引是双极的（127.5 ≈ 零信号），默认色表同样按双极灰阶：
+// 零信号=浅灰底、负半周压黑、正半周提白，未接 UI 色表时也不会把极性画丢。
+static const std::array<QRgb, 256> &bipolarPalette()
 {
     static const std::array<QRgb, 256> palette = [] {
         std::array<QRgb, 256> result{};
-        for (int i = 0; i < 256; ++i) {
-            const double normalized = double(i) / 255.0;
-            const double hue = (1.0 - normalized) * 0.66;
-            result[size_t(i)] = QColor::fromHsvF(
-                float(hue), 0.96f,
-                float(0.72 + normalized * 0.28)).rgb();
-        }
+        for (int i = 0; i < 256; ++i)
+            result[size_t(i)] = ScanPalette::tofdGrayRgb(i);
         return result;
     }();
     return palette;
@@ -212,7 +211,7 @@ bool PacketDecoder::decodeEScan(const QByteArray &packet, int groupOffsetWords,
     scale = qMax(1.0, scale);
     const qsizetype strideWords = pointCount + 16;
     const auto *words = reinterpret_cast<const qint16 *>(packet.constData());
-    const auto &palette = amplitudePalette();
+    const auto &palette = bipolarPalette();
 
     out = {};
     out.sourceBeamCount = beamCount;
@@ -231,13 +230,18 @@ bool PacketDecoder::decodeEScan(const QByteArray &packet, int groupOffsetWords,
     // raster directly from the SDK buffer with an integer palette lookup;
     // avoid constructing beamCount temporary QVector waveforms and avoid a
     // QColor/HSV conversion for every pixel on the GUI thread.
+    //
+    // 索引保留采样正负极性：127.5 ≈ 零信号，0 = 最负、255 = 最正。
+    // 这样 E 扫才能像 B 扫的 TOFD/RF 那样「负半周压黑 / 正半周提白」，
+    // 幅值类色表在扫查端只取 |索引 - 127.5|，语义不受影响。
+    const double gain = 127.5 / scale;
     for (int point = 0; point < pointCount; ++point) {
         uchar *line = out.eScanImage.scanLine(point);
         for (int beam = 0; beam < beamCount; ++beam) {
             const qsizetype sampleIndex = groupOffsetWords
                 + qsizetype(beam) * strideWords + point;
-            const int magnitude = qAbs(int(words[sampleIndex]));
-            const int colorIndex = qMin(255, int(double(magnitude) * 255.0 / scale));
+            const int colorIndex = qBound(0, qRound(127.5
+                + double(words[sampleIndex]) * gain), 255);
             line[beam] = uchar(colorIndex);
         }
     }
