@@ -92,14 +92,18 @@ static bool validatePacket(const QByteArray &packet, int groupOffsetWords,
 
 static const std::array<QRgb, 256> &amplitudePalette()
 {
+    // E 扫索引是 127 中心的带符号编码，默认色表按 TOFD 双极灰度生成：
+    // 负半周→黑，零信号→浅灰，正半周→白。Workbench 会按用户色带重建色表。
     static const std::array<QRgb, 256> palette = [] {
         std::array<QRgb, 256> result{};
         for (int i = 0; i < 256; ++i) {
-            const double normalized = double(i) / 255.0;
-            const double hue = (1.0 - normalized) * 0.66;
-            result[size_t(i)] = QColor::fromHsvF(
-                float(hue), 0.96f,
-                float(0.72 + normalized * 0.28)).rgb();
+            const double signedValue = (double(i) - 127.5) / 127.5;
+            constexpr double zeroGray = 200.0;
+            const double gray = signedValue < 0.0
+                ? zeroGray * (1.0 + signedValue)
+                : zeroGray + (255.0 - zeroGray) * signedValue;
+            const int g = qBound(0, qRound(gray), 255);
+            result[size_t(i)] = qRgb(g, g, g);
         }
         return result;
     }();
@@ -236,9 +240,12 @@ bool PacketDecoder::decodeEScan(const QByteArray &packet, int groupOffsetWords,
         for (int beam = 0; beam < beamCount; ++beam) {
             const qsizetype sampleIndex = groupOffsetWords
                 + qsizetype(beam) * strideWords + point;
-            const int magnitude = qAbs(int(words[sampleIndex]));
-            const int colorIndex = qMin(255, int(double(magnitude) * 255.0 / scale));
-            line[beam] = uchar(colorIndex);
+            // 索引按 127 中心编码带符号采样：零信号=127，正半周向白、负半周向黑，
+            // 与 B 扫一致，才能用同一套双极色表（TOFD/RF）还原波形极性。
+            const int sample = int(words[sampleIndex]);
+            const double magnitude = qMin(1.0, qAbs(double(sample)) / scale);
+            const double sign = sample < 0 ? -1.0 : 1.0;
+            line[beam] = uchar(qBound(0, qRound(127.5 + sign * magnitude * 127.5), 255));
         }
     }
 

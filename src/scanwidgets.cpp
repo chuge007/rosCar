@@ -1130,8 +1130,11 @@ void EScanWidget::setFrame(const DecodedFrame &frame, double scale)
     for (int y = 0; y < points; ++y) {
         uchar *line = image.scanLine(y);
         for (int x = 0; x < beams; ++x) {
-            const double n = qAbs(double(frame.beams[x][y])) / qMax(1.0, scale);
-            line[x] = uchar(qBound(0, qRound(n * 255.0), 255));
+            // 与解码器一致的 127 中心带符号编码：零=127，正半周向白，负半周向黑。
+            const qint16 sample = frame.beams[x][y];
+            const double n = qMin(1.0, qAbs(double(sample)) / qMax(1.0, scale));
+            const double sign = sample < 0 ? -1.0 : 1.0;
+            line[x] = uchar(qBound(0, qRound(127.5 + sign * n * 127.5), 255));
         }
     }
     m_image = image;
@@ -1240,7 +1243,9 @@ void EScanWidget::rebuildColorTable()
         return;
     QVector<QRgb> palette(256);
     for (int i = 0; i < palette.size(); ++i) {
-        double normalized = double(i) / 255.0;
+        // 解码索引是 127 中心的带符号值：幅值走单调色带，符号供 TOFD 双极使用。
+        const double signedValue = (double(i) - 127.5) / 127.5;
+        double normalized = qAbs(signedValue);
         if (m_colorRuleMode == ScanPalette::ThresholdBandsColorRule) {
             const double value = m_thresholdValueMode == ScanPalette::AbsoluteThresholdValues
                 ? normalized * 100.0 : normalized;
@@ -1260,8 +1265,13 @@ void EScanWidget::rebuildColorTable()
                        + (m_customPaletteEnd.green() - m_customPaletteStart.green()) * normalized),
                 qRound(m_customPaletteStart.blue()
                        + (m_customPaletteEnd.blue() - m_customPaletteStart.blue()) * normalized)).rgb();
+        } else if (m_paletteMode == TofdPalette) {
+            // 与 B 扫同一张双极色表：负半周压黑、零信号浅灰、正半周提白。
+            const int index = qBound(0, qRound(127.5 + (signedValue < 0.0 ? -1.0 : 1.0)
+                                                        * normalized * 127.5), 255);
+            palette[i] = tofdGray(index);
         } else {
-            // E 扫解码后只保留幅值，不保留正负极性；RF 模式在此按灰度显示。
+            // 灰度/黑-灰-白按幅值单调显示：零信号黑，回波越强越白。
             const int gray = qRound(normalized * 255.0);
             palette[i] = QColor(gray, gray, gray).rgb();
         }
