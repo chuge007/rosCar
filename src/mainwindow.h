@@ -165,7 +165,7 @@ private:
     QSpinBox *m_beam = nullptr;
     QDoubleSpinBox *m_cPrecision = nullptr;
     // 调色盘状态：色带、幅值上限、显示上下限与阈值分段由「工具 → 调色盘」统一设置。
-    int m_paletteMode = 1;       // 默认灰度
+    int m_paletteMode = 4;       // 默认 TOFD 灰阶
     int m_paletteScaleMode = 1;  // BScanWidget::DynamicScale
     double m_paletteFixedMaximum = 100.0;
     double m_paletteLower = 0.0;

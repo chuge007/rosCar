@@ -357,6 +357,12 @@ QColor paletteColorAt(int mode, const QColor &customStart,
             ? QColor::fromRgbF(1.0 - magnitude, 1.0 - magnitude, 1.0)
             : QColor::fromRgbF(1.0, 1.0 - magnitude, 1.0 - magnitude);
     }
+    if (mode == BScanWidget::TofdPalette) {
+        // 预览/自动生成按幅值 0..1 映射到正半轴（浅灰→白）。
+        constexpr double zeroGray = 200.0;
+        const int g = qBound(0, qRound(zeroGray + (255.0 - zeroGray) * n), 255);
+        return QColor(g, g, g);
+    }
     if (mode == BScanWidget::CustomPalette) {
         const QColor start = customStart.isValid() ? customStart : QColor(0, 8, 70);
         const QColor end = customEnd.isValid() ? customEnd : QColor(255, 255, 255);
@@ -391,6 +397,19 @@ QPixmap palettePreviewPixmap(int mode, const QColor &customStart,
 {
     QPixmap pixmap(qMax(1, width), qMax(1, height));
     QPainter painter(&pixmap);
+    if (mode == BScanWidget::TofdPalette) {
+        constexpr double zeroGray = 200.0;
+        for (int x = 0; x < pixmap.width(); ++x) {
+            const double signedValue = double(x) / qMax(1, pixmap.width() - 1) * 2.0 - 1.0;
+            const double gray = signedValue < 0.0
+                ? zeroGray * (1.0 + signedValue)
+                : zeroGray + (255.0 - zeroGray) * signedValue;
+            const int g = qBound(0, qRound(gray), 255);
+            painter.setPen(QColor(g, g, g));
+            painter.drawLine(x, 0, x, pixmap.height());
+        }
+        return pixmap;
+    }
     const double lower = qBound(0.0, lowerPercent / 100.0, 0.99);
     const double upper = qBound(lower + 0.01, upperPercent / 100.0, 1.0);
     const double levelSpan = qMax(0.01, upper - lower);
@@ -1856,13 +1875,14 @@ void MainWindow::showPaletteDialog()
         paletteCombo->clear();
         paletteCombo->addItem(QStringLiteral("默认热力"), BScanWidget::HeatPalette);
         paletteCombo->addItem(QStringLiteral("黑-灰-白"), BScanWidget::GrayscalePalette);
+        paletteCombo->addItem(QStringLiteral("TOFD 灰阶"), BScanWidget::TofdPalette);
         for (int i = 0; i < customPalettes.size(); ++i)
             paletteCombo->addItem(customPalettes.at(i).name, 100 + i);
         int index = paletteCombo->findData(previousData);
         if (index < 0)
             index = paletteCombo->findText(previousText);
         if (index < 0)
-            index = paletteCombo->findData(BScanWidget::GrayscalePalette);
+            index = paletteCombo->findData(BScanWidget::TofdPalette);
         paletteCombo->setCurrentIndex(qMax(0, index));
     };
     refillPaletteCombo();
@@ -1878,7 +1898,7 @@ void MainWindow::showPaletteDialog()
     }
     paletteCombo->setCurrentIndex(initialPaletteIndex >= 0
                                       ? initialPaletteIndex
-                                      : paletteCombo->findData(BScanWidget::GrayscalePalette));
+                                      : paletteCombo->findData(BScanWidget::TofdPalette));
 
     auto *managePalettes = new QPushButton(QStringLiteral("自定义色带"), continuousGroup);
     auto *paletteRow = new QWidget(continuousGroup);
@@ -2172,6 +2192,7 @@ void MainWindow::showPaletteDialog()
             thresholdPaletteCombo->clear();
             thresholdPaletteCombo->addItem(QStringLiteral("默认热力"), BScanWidget::HeatPalette);
             thresholdPaletteCombo->addItem(QStringLiteral("黑-灰-白"), BScanWidget::GrayscalePalette);
+            thresholdPaletteCombo->addItem(QStringLiteral("TOFD 灰阶"), BScanWidget::TofdPalette);
             for (int i = 0; i < customPalettes.size(); ++i)
                 thresholdPaletteCombo->addItem(customPalettes.at(i).name, 100 + i);
             thresholdPaletteCombo->setCurrentIndex(qMax(
@@ -2540,7 +2561,7 @@ void MainWindow::showPaletteDialog()
                 valueScaleCombo->setCurrentIndex(
                     valueScaleCombo->findData(BScanWidget::DynamicScale));
                 paletteCombo->setCurrentIndex(
-                    paletteCombo->findData(BScanWidget::GrayscalePalette));
+                    paletteCombo->findData(BScanWidget::TofdPalette));
                 fixedMaximumSpin->setValue(100.0);
                 lowerSpin->setValue(0.0);
                 upperSpin->setValue(100.0);

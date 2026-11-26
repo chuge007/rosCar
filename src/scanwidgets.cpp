@@ -68,6 +68,18 @@ QColor waveColor(double normalized)
     return QColor(qRound(255 - t * 105), qRound(45 - t * 40), 0);
 }
 
+// TOFD 灰阶：零信号=浅灰背景，负幅值→黑，正幅值→白。
+QRgb tofdGray(int index)
+{
+    const double signedValue = (double(index) - 127.5) / 127.5;
+    constexpr double zeroGray = 200.0;
+    const double gray = signedValue < 0.0
+        ? zeroGray * (1.0 + signedValue)
+        : zeroGray + (255.0 - zeroGray) * signedValue;
+    const int g = qBound(0, qRound(gray), 255);
+    return QColor(g, g, g).rgb();
+}
+
 QRectF depthPlotRect(const QWidget *w, qreal leftMargin, qreal rightMargin)
 {
     constexpr qreal topMargin = 8.0;
@@ -1140,7 +1152,7 @@ void EScanWidget::setImagingGate(bool enabled, double start, double end,
 
 void EScanWidget::setPaletteMode(int mode)
 {
-    m_paletteMode = qBound(int(HeatPalette), mode, int(CustomPalette));
+    m_paletteMode = qBound(int(HeatPalette), mode, int(TofdPalette));
     rebuildColorTable();
     update();
 }
@@ -1148,7 +1160,7 @@ void EScanWidget::setPaletteMode(int mode)
 void EScanWidget::setPaletteSettings(int mode, double lowerPercent,
                                      double upperPercent, double gamma)
 {
-    m_paletteMode = qBound(int(HeatPalette), mode, int(CustomPalette));
+    m_paletteMode = qBound(int(HeatPalette), mode, int(TofdPalette));
     m_displayLower = qBound(0.0, lowerPercent / 100.0, 0.99);
     m_displayUpper = qBound(m_displayLower + 0.01,
                             upperPercent / 100.0, 1.0);
@@ -1413,7 +1425,7 @@ void BScanWidget::setViewMode(int mode)
 
 void BScanWidget::setPaletteMode(int mode)
 {
-    m_paletteMode = qBound(int(HeatPalette), mode, int(CustomPalette));
+    m_paletteMode = qBound(int(HeatPalette), mode, int(TofdPalette));
     rebuildColorTable();
     rebuildImage();
     update();
@@ -1550,7 +1562,7 @@ void BScanWidget::initializeImage(int sampleCount)
     const int imageHeight = qBound(1, sampleCount, 1024);
     m_image = QImage(4096, imageHeight, QImage::Format_Indexed8);
     rebuildColorTable();
-    m_image.fill(m_paletteMode == RfPalette ? 127 : 0);
+    m_image.fill((m_paletteMode == RfPalette || m_paletteMode == TofdPalette) ? 127 : 0);
     m_columns.clear();
     m_columns.resize(m_image.width());
     m_lastColumn = -1;
@@ -1574,7 +1586,7 @@ bool BScanWidget::ensureImageWidth(int requiredColumn)
                               ((requiredColumn / 4096) + 1) * 4096);
     QImage expanded(newWidth, m_image.height(), QImage::Format_Indexed8);
     expanded.setColorTable(m_image.colorTable());
-    expanded.fill(m_paletteMode == RfPalette ? 127 : 0);
+    expanded.fill((m_paletteMode == RfPalette || m_paletteMode == TofdPalette) ? 127 : 0);
     for (int y = 0; y < m_image.height(); ++y)
         std::memcpy(expanded.scanLine(y), m_image.constScanLine(y),
                     size_t(m_image.width()));
@@ -1903,6 +1915,8 @@ void BScanWidget::rebuildColorTable()
             palette[i] = (signedValue < 0.0
                 ? QColor::fromRgbF(1.0 - magnitude, 1.0 - magnitude, 1.0)
                 : QColor::fromRgbF(1.0, 1.0 - magnitude, 1.0 - magnitude)).rgb();
+        } else if (m_paletteMode == TofdPalette) {
+            palette[i] = tofdGray(i);
         } else if (m_paletteMode == CustomPalette) {
             const double normalized = double(i) / 255.0;
             palette[i] = QColor(
@@ -1923,7 +1937,7 @@ void BScanWidget::rebuildColumn(int column)
 {
     if (m_image.isNull() || column < 0 || column >= m_image.width())
         return;
-    const int emptyIndex = m_paletteMode == RfPalette ? 127 : 0;
+    const int emptyIndex = (m_paletteMode == RfPalette || m_paletteMode == TofdPalette) ? 127 : 0;
     const ColumnData &data = m_columns[column];
     for (int y = 0; y < m_image.height(); ++y)
         m_image.scanLine(y)[column] = uchar(emptyIndex);
@@ -1964,7 +1978,7 @@ void BScanWidget::rebuildColumn(int column)
         normalized = qBound(0.0, (normalized - m_displayLower) / levelSpan, 1.0);
         normalized = qPow(normalized, 1.0 / m_displayGamma);
         int index = qBound(0, qRound(normalized * 255.0), 255);
-        if (m_paletteMode == RfPalette) {
+        if (m_paletteMode == RfPalette || m_paletteMode == TofdPalette) {
             const double sign = data.samples[sourceRow] < 0 ? -1.0 : 1.0;
             index = qBound(0, qRound(127.5 + sign * normalized * 127.5), 255);
         }
@@ -2085,7 +2099,7 @@ bool BScanWidget::loadFrom(QDataStream &in)
         m_image = QImage(qMax(4096, ((storage.width() + 4095) / 4096) * 4096),
                          storage.height(), QImage::Format_Indexed8);
         rebuildColorTable();
-        m_image.fill(m_paletteMode == RfPalette ? 127 : 0);
+        m_image.fill((m_paletteMode == RfPalette || m_paletteMode == TofdPalette) ? 127 : 0);
         m_columns.clear();
         m_columns.resize(m_image.width());
         const bool hasAlpha = storage.hasAlphaChannel();
@@ -2207,6 +2221,8 @@ void BScanWidget::paintEvent(QPaintEvent *)
                 qRound(m_customPaletteStart.blue()
                        + (m_customPaletteEnd.blue() - m_customPaletteStart.blue()) * normalized));
         }
+        if (m_paletteMode == TofdPalette)
+            return QColor(tofdGray(index));
         return waveColor(double(index) / 255.0);
     };
     const auto drawColorBar = [&] {
