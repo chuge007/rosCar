@@ -126,6 +126,10 @@ class MediaServer final : public QObject {
   // A burst of ~70 fragments per JPEG frame used to overflow the tiny default
   // UDP send buffer; a single failed write then discarded the rest of the frame.
   qint64 lastRejectLogMs_ = 0;
+  // Effective SO_SNDBUF after tuning. When it is deep enough the fragment burst
+  // needs no pacing at all, which matters because sendMessage() runs on the
+  // caller's (host main) thread.
+  int sendBufferBytes_ = 0;
 };
 
 }  // namespace pa1664::remote

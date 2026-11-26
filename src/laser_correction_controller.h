@@ -477,6 +477,19 @@ class LaserCorrectionController final : public QObject {
   // the warning envelope, but must not masquerade as a fresh measurement.
   double boundaryMeasuredMarginRatio_ = 0.5;
   double boundarySignedRateRatioPerS_ = 0.0;
+  // A weak feature on the stripe can make the detector report the weld
+  // candidate at the far end of the scan while the chassis barely moved. The
+  // measured envelope only follows a physically plausible frame-to-frame
+  // displacement; anything larger keeps the last trusted envelope and is
+  // counted as a divergence, so one bad frame cannot latch
+  // seam_outside_scan. A sustained divergence still parks the task.
+  qint64 boundaryDivergedSinceMs_ = -1;
+  // A weld that really left the scan stays outside on every frame. Requiring
+  // a short confirmation window keeps a single rejected-candidate frame from
+  // parking the task while the containment turn is still able to recover.
+  qint64 boundaryOutOfScanSinceMs_ = -1;
+  qint64 lastBoundaryJumpRejectLogMs_ = -1;
+  int boundaryJumpRejectCount_ = 0;
   qint64 boundaryRecoveryStartedMs_ = -1;
   double boundaryRecoveryStartMargin_ = 0.0;
   int boundaryRecoveryDirection_ = 0;

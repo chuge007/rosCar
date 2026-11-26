@@ -40,6 +40,14 @@ namespace {
 // could have shown. Align the publish cadence with the source: 30 Hz ceiling on
 // a link that is still only ~12% loaded at 100 Mbit.
 constexpr int kLaserPointIntervalMs = 33;
+// The correction loop submits one weld observation per source frame (~30 fps),
+// and only the newest one inside a publish slot is ever sent. Gate the encode
+// and the cross-thread hand-off at submission time: serialising 3200 points and
+// copying the payload twice per frame, only to overwrite the pending payload a
+// few milliseconds later, competes with the JPEG cameras and the ultrasound
+// forwarder that share the same media thread. 25 ms keeps a 30 fps source at
+// full rate while clipping bursty re-submissions.
+constexpr int kProfileObservationSubmitIntervalMs = 25;
 // The operator panel repaints camera previews on its 100 ms UI clock, so a
 // 66 ms push interval wasted a third of the JPEG encodes and link bytes.
 constexpr int kUsbImageIntervalMs = 100;
@@ -160,6 +168,15 @@ void RobotPeripheralMediaEncoder::submitProfileObservation(
     const crawling::LaserGapDetection& detection, quint32 frameNumber,
     qint64 receivedAtEpochMs) {
   if (!active_) return;
+  // Encode gate first, publish gate second: a submission that cannot win the
+  // current publish slot must not pay for encoding 3200 points.
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  if (lastProfileObservationSubmitMs_ >= 0 &&
+      now - lastProfileObservationSubmitMs_ < kProfileObservationSubmitIntervalMs) {
+    ++profileObservationSkipped_;
+    return;
+  }
+  lastProfileObservationSubmitMs_ = now;
   QByteArray payload = encodeProfileObservation(points, detection, frameNumber,
                                                 receivedAtEpochMs);
   if (payload.isEmpty()) return;
@@ -804,6 +821,17 @@ void RobotPeripheralHostService::startSensorThreads() {
                          quint32 frameNumber, qint64 receivedAtEpochMs) {
               if (ownerSessionId_ == 0 || !mediaReceptionActive_ || !encoder_)
                 return;
+              // Drop the frame before it crosses the thread boundary: the queued
+              // call below copies 3200 points (~38 KB) twice, and on this thread
+              // that copy competes with the 20 Hz drive telemetry and the
+              // control session.
+              const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+              if (lastProfileObservationPostMs_ >= 0 &&
+                  nowMs - lastProfileObservationPostMs_ <
+                      kProfileObservationSubmitIntervalMs) {
+                return;
+              }
+              lastProfileObservationPostMs_ = nowMs;
               QMetaObject::invokeMethod(
                   encoder_,
                   [encoder = encoder_, points, detection, frameNumber,

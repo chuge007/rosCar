@@ -68,6 +68,10 @@ class RobotPeripheralMediaEncoder final : public QObject {
   QByteArray profileObservationPayload_;
   bool profileObservationPending_ = false;
   qint64 lastProfileObservationMs_ = -100000;
+  // Submission-side gate: encodings that would land inside the same publish
+  // slot are dropped before the 3200-point serialisation.
+  qint64 lastProfileObservationSubmitMs_ = -100000;
+  quint64 profileObservationSkipped_ = 0;
   QImage usbImages_[crawling::kUsbCameraChannelCount];
   crawling::ImuSample imuSample_;
   bool laserPointsPending_ = false;
@@ -197,6 +201,9 @@ class RobotPeripheralHostService final : public QObject {
   qint64 lastCameraPipelineLogMs_ = -100000;
   qint64 lastLaserEventMs_ = -100000;
   qint64 lastCorrectionStatusMs_ = -100000;
+  // Last weld observation handed to the media encoder. Checked before the
+  // cross-thread copy so redundant frames never touch this thread's heap.
+  qint64 lastProfileObservationPostMs_ = -100000;
   // Drive telemetry reaches the correction loop as a queued call through this
   // object's thread. Stamping its arrival here splits "the chassis stopped
   // publishing" from "this thread was too busy to forward it in time".

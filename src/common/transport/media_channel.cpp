@@ -1,7 +1,26 @@
+#ifdef _WIN32
+// Must precede any Windows header pulled in by Qt: WIN32_LEAN_AND_MEAN keeps
+// winsock.h out so winsock2.h below cannot clash, and NOMINMAX keeps the
+// min/max macros away from std::min/std::max used further down.
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+// setsockopt/getsockopt come from ws2_32; declare the import library here so
+// all three targets link without touching their .pro files.
+#  pragma comment(lib, "ws2_32.lib")
+#endif
+
 #include "media_channel.h"
 
 #include <QAbstractSocket>
 #include <QDateTime>
+#include <QDebug>
+#include <QElapsedTimer>
 #include <QNetworkDatagram>
 #include <QThread>
 #include <QTimer>
@@ -16,6 +35,69 @@ qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
 qint64 nowUs() { return nowMs() * 1000; }
 
 constexpr int kDatagramPayloadBytes = kMediaFragmentPayloadBytes;
+constexpr int kMediaSocketBufferBytes = 4 * 1024 * 1024;
+// Fragments written back-to-back before pacing; 32 x ~1.4 KB stays under the
+// 64 KB UDP send queue when the buffer could not be enlarged.
+constexpr int kFragmentsPerDrain = 32;
+// Below this the 64 KB default is assumed and the burst is paced.
+constexpr int kDeepSendBufferBytes = 256 * 1024;
+
+// Windows quantises Sleep() to the 15.6 ms timer tick, so QThread::msleep(2)
+// parks the caller for a full tick. On the host this send loop runs on the main
+// thread, where the control session and the 20 Hz drive telemetry live; a tick
+// of sleep every 32 fragments halved the camera frame rate. Yield for a short,
+// measurable slice instead.
+void yieldForUs(qint64 microseconds) {
+  QElapsedTimer clock;
+  clock.start();
+  while (clock.nsecsElapsed() < microseconds * 1000) {
+    QThread::yieldCurrentThread();
+  }
+}
+
+// The media socket needs a deep send queue: one 1080p camera JPEG is 70-90
+// datagrams written back-to-back, while the Windows default queue is 64 KB -
+// it fills around fragment 45 and the whole frame is aborted (socket error 7),
+// which the operator sees as a stuttered picture. QAbstractSocket requires the
+// option to be set after the native socket exists (i.e. after bind()), and its
+// SendBufferSizeSocketOption path does not take the larger value on these UDP
+// sockets, so write SO_SNDBUF/SO_RCVBUF straight to the descriptor. Returns the
+// effective send buffer size.
+int tuneMediaSocketBuffers(QUdpSocket* socket) {
+  if (!socket) return 0;
+  int sendBytes = 0;
+#ifdef _WIN32
+  const qintptr descriptor = socket->socketDescriptor();
+  if (descriptor > 0) {
+    int request = kMediaSocketBufferBytes;
+    ::setsockopt(SOCKET(descriptor), SOL_SOCKET, SO_SNDBUF,
+                 reinterpret_cast<const char*>(&request), sizeof(request));
+    ::setsockopt(SOCKET(descriptor), SOL_SOCKET, SO_RCVBUF,
+                 reinterpret_cast<const char*>(&request), sizeof(request));
+    int length = sizeof(sendBytes);
+    ::getsockopt(SOCKET(descriptor), SOL_SOCKET, SO_SNDBUF,
+                 reinterpret_cast<char*>(&sendBytes), &length);
+  }
+#endif
+  if (sendBytes <= 0) {
+    socket->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption,
+                            kMediaSocketBufferBytes);
+    socket->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption,
+                            kMediaSocketBufferBytes);
+    sendBytes =
+        socket->socketOption(QAbstractSocket::SendBufferSizeSocketOption).toInt();
+  }
+  if (sendBytes < kDeepSendBufferBytes) {
+    // Informational: without a deep queue the sender paces large frames every
+    // kFragmentsPerDrain fragments so a burst cannot overflow it.
+    qWarning().noquote()
+        << QStringLiteral("MEDIA.SOCKET send buffer %1 B (requested %2 B)："
+                          "分片发送改为分批让出，避免整帧丢弃")
+               .arg(sendBytes)
+               .arg(kMediaSocketBufferBytes);
+  }
+  return sendBytes;
+}
 
 }  // namespace
 
@@ -38,15 +120,13 @@ void MediaClient::start(const QString& host, quint16 port, quint64 sessionId,
     emit errorOccurred(QStringLiteral("媒体通道会话参数无效"));
     return;
   }
-  socket_->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption,
-                           4 * 1024 * 1024);
-  socket_->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption,
-                           4 * 1024 * 1024);
   if (!socket_->bind(QHostAddress::AnyIPv4, 0)) {
     emit errorOccurred(QStringLiteral("媒体 UDP 绑定失败：%1")
                            .arg(socket_->errorString()));
     return;
   }
+  // After the bind: the native socket only exists from here on.
+  tuneMediaSocketBuffers(socket_);
   peerAddress_ = address;
   peerPort_ = port;
   sessionId_ = sessionId;
@@ -181,17 +261,14 @@ bool MediaServer::start(const QHostAddress& address, quint16 port,
                         QString* error) {
   stop();
   // A 1080p JPEG is ~70 fragments written back-to-back. The default 64 KB UDP
-  // send buffer overflows with "Unable to send a message" (WSAEWOULDBLOCK),
-  // and the old loop discarded the whole frame on the first failed fragment.
-  // Enlarge both directions before binding so bursts fit in the kernel queue.
-  socket_->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption,
-                           4 * 1024 * 1024);
-  socket_->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption,
-                           4 * 1024 * 1024);
+  // send buffer overflows around fragment 45, and a failed fragment discards
+  // the whole frame. Enlarge both directions *after* the bind (Qt creates the
+  // native socket there, so an earlier setSocketOption() is a silent no-op).
   if (!socket_->bind(address, port)) {
     if (error) *error = socket_->errorString();
     return false;
   }
+  sendBufferBytes_ = tuneMediaSocketBuffers(socket_);
   return true;
 }
 
@@ -268,15 +345,19 @@ void MediaServer::sendMessage(quint64 sessionId, quint16 streamId,
       emit packetRejected(sessionId, error.detail);
       return;
     }
-    // WSAEWOULDBLOCK is transient under a fragment burst. Retry a few times
-    // with a short yield instead of throwing away the rest of the frame (the
-    // client can never assemble a frame with a missing fragment).
+    // WSAEWOULDBLOCK is transient under a fragment burst. Retry with a short
+    // backoff instead of throwing away the rest of the frame (the client can
+    // never assemble a frame with a missing fragment). Total worst-case stall
+    // is ~9 ms and only happens on a failing fragment; previously 4 x 1 ms was
+    // not enough to ride out a burst, so whole frames were dropped (~0.7/s on
+    // the field link) and the operator saw it as a stutter.
     qint64 written = -1;
-    for (int attempt = 0; attempt < 4; ++attempt) {
+    static constexpr int kSendAttempts = 6;
+    for (int attempt = 0; attempt < kSendAttempts; ++attempt) {
       written = socket_->writeDatagram(bytes, session.peer.address,
                                        session.peer.port);
       if (written == bytes.size()) break;
-      QThread::msleep(1);
+      yieldForUs(1000);
     }
     if (written != bytes.size()) {
       ++serverStats_.sendFailures;
@@ -287,14 +368,27 @@ void MediaServer::sendMessage(quint64 sessionId, quint16 streamId,
         lastRejectLogMs_ = now;
         emit packetRejected(
             sessionId,
-            QStringLiteral("媒体数据报发送失败(累计 %1)：%2")
+            QStringLiteral("媒体数据报发送失败(累计 %1，分片 %2/%3，"
+                           "socket错误 %4)：%5")
                 .arg(serverStats_.sendFailures)
+                .arg(index)
+                .arg(fragmentCount - 1)
+                .arg(static_cast<int>(socket_->error()))
                 .arg(socket_->errorString()));
       }
       return;
     }
     ++serverStats_.fragmentsSent;
     serverStats_.bytesSent += static_cast<quint64>(written);
+    // Only pace when the send queue could not be enlarged: a 70-90 fragment
+    // JPEG would otherwise refill 64 KB and abort mid-frame. With the deep
+    // buffer in place the burst fits and pacing would only cost main-thread
+    // time, which is exactly what this path cannot afford.
+    if (sendBufferBytes_ > 0 && sendBufferBytes_ < kDeepSendBufferBytes &&
+        index + 1 < fragmentCount &&
+        ((index + 1) % kFragmentsPerDrain) == 0) {
+      yieldForUs(1500);
+    }
   }
   ++serverStats_.messagesSent;
 }

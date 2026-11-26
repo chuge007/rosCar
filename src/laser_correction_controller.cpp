@@ -70,6 +70,23 @@ constexpr double kMinimumContainmentAngularRadps = 0.04;
 constexpr double kScanContainmentMarginRatio = 0.30;
 constexpr double kScanContainmentReleaseRatio = 0.35;
 constexpr double kScanStopMarginRatio = 0.04;
+// The chassis crawls, so a real weld moves a few percent of the scan per
+// frame. A candidate that jumps farther than this between two fresh
+// measurements is a detector association error (a different raised feature
+// on the stripe), not weld motion. Keeping the last trusted envelope stops a
+// single such frame from zeroing the measured margin.
+constexpr double kBoundaryMaxCandidateJumpRatio = 0.12;
+constexpr double kBoundaryMaxCandidateJumpCeilingRatio = 0.22;
+// A measurement that keeps contradicting the trusted envelope is a real loss
+// of confidence: the scene changed (occlusion, reflection, a workpiece step)
+// and neither "the weld is still here" nor "the weld left the scan" can be
+// proven. Park and ask the operator instead of crawling blind.
+constexpr qint64 kBoundaryDivergenceTimeoutMs = 1500;
+// A weld that truly left the scan stays outside on every frame. This short
+// window absorbs single-frame detector slips while the containment turn is
+// still applying inward steering.
+constexpr qint64 kBoundaryOutOfScanConfirmMs = 120;
+constexpr qint64 kBoundaryJumpRejectLogIntervalMs = 1000;
 // A live source frame and a positive measured margin are enough to keep a
 // short recovery window alive. Predicted margin is steering guidance only;
 // it must not turn an in-range weld into an immediate stop.
@@ -828,6 +845,9 @@ void LaserCorrectionController::setPaused(bool paused) {
   shift(profileTraceNextFaultFlushMs_);
   shift(boundaryCandidateRecoveryUntilMs_);
   shift(boundaryObservationMs_);
+  shift(boundaryDivergedSinceMs_);
+  shift(boundaryOutOfScanSinceMs_);
+  shift(lastBoundaryJumpRejectLogMs_);
   pausedAtMs_ = -1;
   paused_ = false;
   status_.paused = false;
@@ -4305,6 +4325,10 @@ void LaserCorrectionController::resetSession() {
   boundaryGapStartRatio_ = boundaryGapEndRatio_ = 0.5;
   boundaryMeasuredMarginRatio_ = 0.5;
   boundarySignedRateRatioPerS_ = 0.0;
+  boundaryDivergedSinceMs_ = -1;
+  boundaryOutOfScanSinceMs_ = -1;
+  lastBoundaryJumpRejectLogMs_ = -1;
+  boundaryJumpRejectCount_ = 0;
   boundaryRecoveryStartedMs_ = -1;
   boundaryRecoveryStartMargin_ = 0.0;
   boundaryRecoveryDirection_ = 0;
@@ -4462,6 +4486,47 @@ void LaserCorrectionController::updateScanBoundaryObservation(
       (!detection.edgeBreakFallback || detection.contourFallback) &&
       detection.confidence >= 0.060 && !reacquisitionPending_;
   if (measured) {
+    // A fresh candidate that teleports across the scan is a weak-feature
+    // association error: the chassis crawls, so a real weld advances only a
+    // few percent of the scan between two frames. Rejecting the frame keeps
+    // the last trusted envelope and stops a short sliver at the far end of
+    // the stripe from zeroing the margin and latching seam_outside_scan.
+    if (boundaryObservationReliable_ && boundaryObservationMs_ >= 0 &&
+        receivedMs >= boundaryObservationMs_) {
+      const double dt =
+          std::max(0.001, (receivedMs - boundaryObservationMs_) / 1000.0);
+      const double jump = std::max(std::abs(left - boundaryGapStartRatio_),
+                                   std::abs(right - boundaryGapEndRatio_));
+      const double allowed = std::min(
+          kBoundaryMaxCandidateJumpCeilingRatio,
+          kBoundaryMaxCandidateJumpRatio +
+              std::abs(boundarySignedRateRatioPerS_) * dt * 2.0);
+      if (jump > allowed) {
+        ++boundaryJumpRejectCount_;
+        if (boundaryDivergedSinceMs_ < 0) boundaryDivergedSinceMs_ = receivedMs;
+        if (lastBoundaryJumpRejectLogMs_ < 0 ||
+            receivedMs - lastBoundaryJumpRejectLogMs_ >=
+                kBoundaryJumpRejectLogIntervalMs) {
+          lastBoundaryJumpRejectLogMs_ = receivedMs;
+          emit diagnosticLogMessage(
+              QStringLiteral("event=boundary_candidate_rejected "
+                             "reason=implausible_jump jump_ratio=%1 allowed_ratio=%2 "
+                             "rejects=%3 diverged_ms=%4 candidate_gap=%5:%6 "
+                             "kept_gap=%7:%8 line=%9:%10")
+                  .arg(jump, 0, 'f', 6).arg(allowed, 0, 'f', 6)
+                  .arg(boundaryJumpRejectCount_)
+                  .arg(receivedMs - boundaryDivergedSinceMs_)
+                  .arg(left, 0, 'f', 6).arg(right, 0, 'f', 6)
+                  .arg(boundaryGapStartRatio_, 0, 'f', 6)
+                  .arg(boundaryGapEndRatio_, 0, 'f', 6)
+                  .arg(boundaryLineStartRatio_, 0, 'f', 6)
+                  .arg(boundaryLineEndRatio_, 0, 'f', 6));
+        }
+        return;
+      }
+    }
+    boundaryJumpRejectCount_ = 0;
+    boundaryDivergedSinceMs_ = -1;
     if (phaseMoves() && boundaryObservationMs_ >= 0 && receivedMs > boundaryObservationMs_ &&
         receivedMs - boundaryObservationMs_ <= 250) {
       const double dt = (receivedMs - boundaryObservationMs_) / 1000.0;
@@ -4571,7 +4636,27 @@ bool LaserCorrectionController::stopIfScanBoundaryUnsafe(qint64 now) {
     boundaryRecoveryStartedMs_ = -1;
     boundaryRecoveryDirection_ = 0;
   }
-  if (moving && boundaryObservationReliable_ && measuredMargin <= 0.0) {
+  // One frame reporting the weld outside the scan is not proof that it left:
+  // the profile detector occasionally locks onto a short raised sliver at one
+  // end of the stripe while the chassis has barely moved. Keep the
+  // containment turn running through a short confirmation window. A weld
+  // that really left the scan stays outside on every frame and still parks
+  // well inside the braking distance, while a measurement that keeps
+  // contradicting the trusted envelope is parked separately instead of
+  // crawling blind.
+  const bool outsideScan =
+      moving && boundaryObservationReliable_ && measuredMargin <= 0.0;
+  if (outsideScan) {
+    if (boundaryOutOfScanSinceMs_ < 0) boundaryOutOfScanSinceMs_ = now;
+  } else {
+    boundaryOutOfScanSinceMs_ = -1;
+  }
+  const bool measurementDiverged = moving && boundaryDivergedSinceMs_ >= 0 &&
+      now - boundaryDivergedSinceMs_ >= kBoundaryDivergenceTimeoutMs;
+  if (measurementDiverged) {
+    cause = QStringLiteral("scan_measurement_diverged");
+  } else if (outsideScan &&
+             now - boundaryOutOfScanSinceMs_ >= kBoundaryOutOfScanConfirmMs) {
     cause = QStringLiteral("seam_outside_scan");
   } else if (moving && !freshSourceFrame && !boundedDetectionHold) {
     cause = QStringLiteral("measured_seam_timeout");
@@ -4614,7 +4699,8 @@ bool LaserCorrectionController::stopIfScanBoundaryUnsafe(qint64 now) {
       "measured_margin_ratio=%5 predicted_margin_ratio=%6 line_ratio=%7:%8 "
       "gap_ratio=%9:%10 measured_age_ms=%11 reliable=%12 response_untrusted=%13 "
       "linear_before_mps=%14 angular_before_radps=%15 "
-      "return_direction=%16 wheel_angular_radps=%17 drive_angular_radps=%18")
+      "return_direction=%16 wheel_angular_radps=%17 drive_angular_radps=%18 "
+      "jump_rejects=%19 out_of_scan_ms=%20 diverged_ms=%21")
       .arg(trajectorySessionId_).arg(cameraFrameSequence_).arg(phaseName(phase_)).arg(cause)
       .arg(measuredMargin, 0, 'f', 6).arg(margin, 0, 'f', 6)
       .arg(boundaryLineStartRatio_, 0, 'f', 6).arg(boundaryLineEndRatio_, 0, 'f', 6)
@@ -4622,8 +4708,15 @@ bool LaserCorrectionController::stopIfScanBoundaryUnsafe(qint64 now) {
       .arg(age).arg(boundaryObservationReliable_ ? 1 : 0).arg(centerResponseUntrusted_ ? 1 : 0)
       .arg(currentLinearMps_, 0, 'f', 6).arg(currentAngularRadps_, 0, 'f', 6)
       .arg(returnDirection).arg(measuredAngularRadps, 0, 'f', 6)
-      .arg(driveAppliedAngularRadps_, 0, 'f', 6));
-  stop(CRAWLING_TEXT("扫描范围保护：焊道已出界或回中观测/响应无法保证，已停止；请检查焊道位置后重新启动（%1）")
+      .arg(driveAppliedAngularRadps_, 0, 'f', 6)
+      .arg(boundaryJumpRejectCount_)
+      .arg(boundaryOutOfScanSinceMs_ >= 0 ? now - boundaryOutOfScanSinceMs_ : -1)
+      .arg(boundaryDivergedSinceMs_ >= 0 ? now - boundaryDivergedSinceMs_ : -1));
+  stop((cause == QStringLiteral("scan_measurement_diverged")
+            ? CRAWLING_TEXT("扫描范围保护：实测焊道位置与已有扫描包络持续不一致，"
+                            "已停止；请检查焊道、遮挡与工作面后重新启动（%1）")
+            : CRAWLING_TEXT("扫描范围保护：焊道已出界或回中观测/响应无法保证，"
+                            "已停止；请检查焊道位置后重新启动（%1）"))
            .arg(cause));
   return true;
 }
