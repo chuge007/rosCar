@@ -1032,6 +1032,18 @@ class RobotApi::Impl {
                          mirrorReadbacks(
                              data.value(QStringLiteral("readbacks")).toObject());
                        }
+                       if (ok && operation ==
+                                     QStringLiteral("ultrasound.scan.precision.get")) {
+                         scanPrecisionMmPerCell_ =
+                             data.value(QStringLiteral("mmPerCell")).toDouble(0.0);
+                       }
+                       if (ok && operation == QStringLiteral(
+                                                "ultrasound.encoder.calibration.get")) {
+                         encoderCountsPerMm_[0] =
+                             data.value(QStringLiteral("countsPerMmA")).toDouble(0.0);
+                         encoderCountsPerMm_[1] =
+                             data.value(QStringLiteral("countsPerMmB")).toDouble(0.0);
+                       }
                        if (!ok) {
                          lastErrorCode = toUtf8(errorCode);
                          lastErrorText = toUtf8(errorText);
@@ -1478,14 +1490,15 @@ class RobotApi::Impl {
     if (!remote::decodeGroupScanBatch(payload, &batch, nullptr)) return;
     for (const GroupScanFrame& item : batch) {
       emitAScan(item.groupId, item.frame, item.triggeredModes, item.rangeStart,
-                item.rangeEnd);
+                item.rangeEnd, item.bColumn, item.cColumn, item.cRow);
     }
   }
 
   // 把解码后的 QVector<QVector<qint16>> 直接以指针视图交给调用方，避免
   // 每条波束一次全量拷贝（A 扫 20 Hz × 1024 点 × N 波束）。
   void emitAScan(int groupId, const DecodedFrame& decoded, int scanModes,
-                 double rangeStart, double rangeEnd) {
+                 double rangeStart, double rangeEnd, int bColumn = -1,
+                 int cColumn = -1, int cRow = -1) {
     if (!ultrasoundFrameHandler || decoded.beams.isEmpty()) return;
     std::vector<const std::int16_t*> beamPointers;
     beamPointers.reserve(size_t(decoded.beams.size()));
@@ -1525,6 +1538,17 @@ class RobotApi::Impl {
     view.timestamp = decoded.tail.timestamp;
     view.rangeStartMm = rangeStart;
     view.rangeEndMm = rangeEnd;
+    view.bColumn = bColumn;
+    view.cColumn = cColumn;
+    view.cRow = cRow;
+    // 原始包尾：5 路编码器计数与各类错误标志，直接来自设备包。
+    for (int index = 0; index < 5; ++index)
+      view.encoders[index] = std::int32_t(decoded.tail.encoder[index]);
+    view.encoderTriggerError = decoded.tail.encoderTriggerError;
+    view.encoderSyncError = decoded.tail.encoderSyncError;
+    view.frameError = decoded.tail.frameError;
+    view.scannerIo = decoded.tail.scannerIo;
+    view.multiFrame = decoded.tail.multiFrame;
     view.beams = beamPointers.data();
     view.measurementCount = int(gates.size());
     view.measurements = gates.empty() ? nullptr : gates.data();
@@ -1551,6 +1575,8 @@ class RobotApi::Impl {
   ProfileState profile;
   bool decoderAppliedThisSession = false;
   bool ultrasoundSnapshotDone = false;
+  double scanPrecisionMmPerCell_ = 0.0;
+  double encoderCountsPerMm_[2] = {0.0, 0.0};
   double lastLinearMps = 0.0;
   double lastAngularRadps = 0.0;
   std::string statusText;
@@ -1680,6 +1706,15 @@ Result RobotApi::requestUltrasoundScanPrecision() {
 
 Result RobotApi::setUltrasoundScanPrecision(int presetId, double mmPerCell) {
   return impl_->setUltrasoundScanPrecision(presetId, mmPerCell);
+}
+
+double RobotApi::scanPrecisionMmPerCell() const {
+  return impl_->scanPrecisionMmPerCell_;
+}
+
+double RobotApi::encoderCountsPerMm(int axis) const {
+  if (axis < 0 || axis > 1) return 0.0;
+  return impl_->encoderCountsPerMm_[axis];
 }
 
 Result RobotApi::requestUltrasoundEncoderCalibration() {

@@ -413,6 +413,45 @@ if (f.measurementCount > 0) {
 }
 ```
 
+### 5.2.1 编码器数值（每帧原始数据里就有）
+
+A 扫帧除了波形，还带**原始包尾**：5 路编码器计数 + 错误标志。这是设备原始
+数据，不经过主机换算，可以直接算物理位置。
+
+| 字段 | 含义 |
+|---|---|
+| `encoders[0]` | A 轴计数（扫查方向） |
+| `encoders[1]` | B 轴计数（行方向） |
+| `encoders[2..4]` | 设备其余轴（C/D/E） |
+| `encoderTriggerError` | 编码器触发错误，这一帧不应参与拼图 |
+| `encoderSyncError` | 编码器同步错误 |
+| `frameError` / `scannerIo` / `multiFrame` | 包级状态 |
+
+换算成毫米（系数来自 `ultrasound.encoder.calibration`）：
+
+```cpp
+robot.requestUltrasoundEncoderCalibration();     // 先读一次系数
+
+robot.setUltrasoundFrameHandler([](const pa1664::UltrasoundAScanFrame& f) {
+  const double countsPerMm = robot.encoderCountsPerMm(0);   // A 轴
+  if (countsPerMm <= 0.0) return;
+  if (f.encoderTriggerError || f.encoderSyncError) return;  // 该帧丢弃
+  const double positionMm = f.encoders[0] / countsPerMm;
+  std::printf("帧 %u 位置 %.2f mm（B 轴 %d）\n", f.frameNumber, positionMm,
+              f.encoders[1]);
+});
+```
+
+另外 `f.cColumn` / `f.cRow` / `f.bColumn` 是主机按编码器算好的**网格列号**，
+只在 C 扫批次通道（TCP 43103）出现；实时显示流（UDP 43102）里是 `-1`：
+
+```cpp
+positionMm = f.cColumn * robot.scanPrecisionMmPerCell();
+```
+
+两者的区别：`encoders` 是原始计数（精度高、可自己定原点），`cColumn` 是
+主机按 `mm/格` 取整后的列号（直接画图方便）。
+
 ## 5.3 读参数 / 改参数
 
 参数一共 84 项，用 SDK 的方法名访问：`getGain` 读、`setGain` 写。
@@ -718,8 +757,8 @@ robot.setResponseHandler([](const std::string& op, bool ok,
 | `ultrasoundParametersSettled(resume)` | 写完后恢复采集 |
 | `configureUltrasoundDecoder(cfg)` | 手动配解码器（一般不用） |
 | `requestUltrasoundPresets()` / `switchUltrasoundPreset()` / `captureUltrasoundPreset()` | 预设 |
-| `requestUltrasoundScanPrecision()` / `setUltrasoundScanPrecision()` | 扫查精度 |
-| `requestUltrasoundEncoderCalibration()` / `setUltrasoundEncoderCalibration()` | 编码器标定 |
+| `requestUltrasoundScanPrecision()` / `setUltrasoundScanPrecision()` / `scanPrecisionMmPerCell()` | 扫查精度 |
+| `requestUltrasoundEncoderCalibration()` / `setUltrasoundEncoderCalibration()` / `encoderCountsPerMm(axis)` | 编码器标定与换算系数 |
 | `ultrasoundResetEncoder()` / `ultrasoundRefreshGeometry()` | 复位 / 刷新几何 |
 
 ## 外围
@@ -806,7 +845,9 @@ robot.setResponseHandler([](const std::string& op, bool ok,
 | `ultrasound.presets.list` | `{}` |
 | `ultrasound.presets.switch` / `.capture` / `.remove` | `{"presetId":0}` |
 | `ultrasound.presets.copy` | `{"sourcePresetId":0}` |
+| `ultrasound.scan.precision.get` | `{"presetId":0}` → `{"presetId":0,"mmPerCell":5.0}` |
 | `ultrasound.scan.precision.set` | `{"presetId":0,"mmPerCell":5.0}` |
+| `ultrasound.encoder.calibration.get` | `{}` → `{"wheelDiameterMm":500,"resolution":4096,"calibrationMode":0,"countsPerMmA":2.6076,"countsPerMmB":2.6076}` |
 | `ultrasound.encoder.calibration.set` | `{"wheelDiameterMm":500,"resolution":4096,"calibrationMode":0,"countsPerMmA":..,"countsPerMmB":..}` |
 | `ultrasound.encoder.reset` / `ultrasound.geometry.refresh` | `{}` |
 

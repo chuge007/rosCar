@@ -694,6 +694,34 @@ void ClampMotorControlWidget::applyLimitReached(int axis, int index,
   onLimitReached(axis, index, upper);
 }
 
+void ClampMotorControlWidget::applyExternalJog(int axis, int index, int percent) {
+  const int key = axis * 1000 + index;
+  auto slider = sliders_.value(key);
+  if (!slider || !slider->isEnabled()) return;
+  const int bounded = qBound(-100, percent, 100);
+  if (slider->value() != bounded) {
+    // 只做视觉同步，屏蔽 valueChanged：那条链路里带同轴“同步运动”扇出，
+    // 摇杆驱动单个电机（如 X2）时不能顺带把同轴其它电机拖走。
+    const QSignalBlocker blocker(slider);
+    slider->setValue(bounded);
+  }
+  if (bounded != 0) {
+    if (auto hint = limitHints_.value(key)) {
+      hint->clear();
+      hint->setProperty("limitDirection", 0);
+    }
+  }
+  queueMotorSpeed(axis, index, bounded);
+}
+
+void ClampMotorControlWidget::applyExternalJogAxis(int axis, int percent) {
+  const int bounded = qBound(-100, percent, 100);
+  for (auto it = sliders_.constBegin(); it != sliders_.constEnd(); ++it) {
+    if (it.key() / 1000 != axis) continue;
+    applyExternalJog(axis, it.key() % 1000, bounded);
+  }
+}
+
 void ClampMotorControlWidget::queueMotorSpeed(int axis, int index, int percent) {
   const int key = axis * 1000 + index;
   if (percent == 0) {

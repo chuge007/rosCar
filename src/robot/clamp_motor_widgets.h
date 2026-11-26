@@ -97,7 +97,13 @@ class ClampMotorControlWidget final : public QWidget {
                          const std::array<bool, 3>& syncEnabled);
   void setRemoteConnected(bool connected);
   void resetControls();
- public slots:
+  // 外部（实体摇杆/按键）驱动单个电机点动：percent 为 -100..100，0 表示停。
+  // 只做视觉同步 + 走既有 queueMotorSpeed 下发，不触发同轴“同步运动”扇出，
+  // 避免摇杆驱动 X2 时把 X1 一起带走。
+  void applyExternalJog(int axis, int index, int percent);
+  // 整轴点动：对同轴所有可用电机下发同一百分比（Z1+Z2 同步升降，不依赖勾选框）。
+  void applyExternalJogAxis(int axis, int percent);
+public slots:
   void applyLimitReached(int axis, int index, bool upper);
  signals:
   void motorSpeedRequested(int axis, int index, int percent);

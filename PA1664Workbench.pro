@@ -84,7 +84,11 @@ SOURCES += \
 SOURCES += $$ROBOT_SOURCE_ROOT/zdt_can_protocol.cpp \
            $$ROBOT_SOURCE_ROOT/candle_can_adapter.cpp \
            $$ROBOT_SOURCE_ROOT/pcan_can_adapter.cpp \
-           $$ROBOT_SOURCE_ROOT/clamp_motor_widgets.cpp
+           $$ROBOT_SOURCE_ROOT/clamp_motor_widgets.cpp \
+           $$ROBOT_SOURCE_ROOT/remote_platform.cpp \
+           $$ROBOT_SOURCE_ROOT/remote_channel_codec.cpp \
+           $$ROBOT_SOURCE_ROOT/remote_channel_reader.cpp \
+           $$ROBOT_SOURCE_ROOT/remote_input_mapper.cpp
 
 HEADERS += \
     src/common/protocol/protocol_types.h \
@@ -154,4 +158,8 @@ HEADERS += \
     $$ROBOT_SOURCE_ROOT/candle_can_adapter.h \
     $$ROBOT_SOURCE_ROOT/pcan_can_adapter.h \
     $$ROBOT_SOURCE_ROOT/clamp_motor_widgets.h \
+    $$ROBOT_SOURCE_ROOT/remote_platform.h \
+    $$ROBOT_SOURCE_ROOT/remote_channel_codec.h \
+    $$ROBOT_SOURCE_ROOT/remote_channel_reader.h \
+    $$ROBOT_SOURCE_ROOT/remote_input_mapper.h \
     $$ROBOT_SOURCE_ROOT/utf8_compat.h

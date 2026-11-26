@@ -228,6 +228,30 @@ struct CameraFrame {
 };
 
 // ---------------------------------------------------------------------------
+// 激光轮廓（媒体流 kind=10 LaserProfileObservation，streamId=0x0204）
+// ---------------------------------------------------------------------------
+
+// 一行完整轮廓 + 焊道检测结果。坐标是激光 SDK 原始值（相机坐标系，不做换算），
+// 项目里约定 x 为横向、z 为高度，y 为扫描方向。
+struct LaserProfileFrame {
+  int pointCount = 0;
+  // pointCount 组 (x, y, z) 顺序排列，长度 = pointCount * 3；仅回调期间有效。
+  const float* coordinates = nullptr;
+  std::uint32_t frameNumber = 0;     // 激光 SDK 帧号
+  std::int64_t receivedAtEpochMs = 0;
+
+  // 焊道检测（LaserGapDetection 子集，其余字段未导出）
+  bool valid = false;
+  bool baselineSupported = false;
+  double normalizedCenter = 0.5;
+  double absoluteCenterRatio = 0.5;
+  double confidence = 0.0;
+  int gapStartPx = -1;
+  int gapEndPx = -1;
+  std::string detectionReason;
+};
+
+// ---------------------------------------------------------------------------
 // 自动纠偏
 // ---------------------------------------------------------------------------
 
@@ -260,6 +284,24 @@ struct UltrasoundAScanFrame {
   std::uint64_t timestamp = 0;
   double rangeStartMm = 0.0;
   double rangeEndMm = 0.0;
+
+  // 扫查位置（编码器触发的网格坐标，来自 C 扫批次通道）。
+  // 实时显示流（UDP 0x0100）不带这些信息，此时为 -1。
+  // 换算成毫米：positionMm = column * UltrasoundScanPrecision(mm/格)。
+  int bColumn = -1;   // B 扫列号
+  int cColumn = -1;   // C 扫列号（扫查方向）
+  int cRow = -1;      // C 扫行号（探头横向）
+
+  // ---- 原始包尾（每个 A 扫帧自带，实时流与 C 扫批次都有）----------------
+  // 5 路编码器原始计数：A=扫查方向，B=行方向，C/D/E 为设备其余轴。
+  // 换算成毫米：positionMm = encoders[axis] / encoderCountsPerMm(axis)
+  // （系数来自 ultrasound.encoder.calibration，见 encoderCountsPerMm()）
+  std::int32_t encoders[5] = {0, 0, 0, 0, 0};
+  bool encoderTriggerError = false;  // 编码器触发错误，该帧不应参与拼图
+  bool encoderSyncError = false;     // 编码器同步错误
+  bool frameError = false;           // 包级帧错误标志
+  int scannerIo = 0;                 // 扫描器 IO 位（0..7）
+  int multiFrame = 0;                // 一包多帧时的序号
   const std::int16_t* const* beams = nullptr;  // [beamCount] → pointCount 个采样
   int measurementCount = 0;
   const struct GateMeasurement* measurements = nullptr;  // [beamCount]，可为空
@@ -460,6 +502,14 @@ class PA1664_API RobotApi {
   Result captureUltrasoundPreset(int presetId); // 把当前硬件参数存成预设
   Result requestUltrasoundScanPrecision();    // ultrasound.scan.precision.get
   Result setUltrasoundScanPrecision(int presetId, double mmPerCell);
+  // 最近一次读到的扫查精度（mm/格）。配合 A 扫帧的 cColumn 换算物理位置：
+  //   positionMm = cColumn * scanPrecisionMmPerCell()
+  // 未读过时为 0，调用 requestUltrasoundScanPrecision() 刷新。
+  double scanPrecisionMmPerCell() const;
+  // 编码器换算系数 counts/mm（axis 0=A 扫查方向，1=B 行方向）。
+  // 来自 ultrasound.encoder.calibration.get，未读过时为 0；读到后可直接：
+  //   positionMm = frame.encoders[0] / encoderCountsPerMm(0)
+  double encoderCountsPerMm(int axis) const;
   Result requestUltrasoundEncoderCalibration();  // encoder.calibration.get
   Result setUltrasoundEncoderCalibration(const std::string& json);
   Result ultrasoundResetEncoder();            // encoder.reset
@@ -519,6 +569,9 @@ class PA1664_API RobotApi {
   // requestDriveConfig() 的应答；loaded=false 表示主机未返回有效配置。
   void setDriveConfigHandler(std::function<void(const DriveConfig&)> handler);
   void setCameraFrameHandler(std::function<void(const CameraFrame&)> handler);
+  // 激光轮廓（每帧 33 ms 左右）。需要主机已连接激光相机。
+  void setLaserProfileHandler(
+      std::function<void(const LaserProfileFrame&)> handler);
   void setUltrasoundFrameHandler(
       std::function<void(const UltrasoundAScanFrame&)> handler);
   void setCorrectionStatusHandler(

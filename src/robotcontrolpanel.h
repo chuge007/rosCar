@@ -4,6 +4,7 @@
 #include "drive_types.h"
 #include "laser_correction_controller.h"
 #include "laser_trajectory_renderer.h"
+#include "remote_channel_codec.h"
 #include "rim302_protocol.h"
 #include "wheel_motor_controller.h"
 #include "services/remote_workbench_session.h"
@@ -27,11 +28,14 @@ class QDialog;
 class QDoubleSpinBox;
 class QComboBox;
 class QEvent;
+class QGridLayout;
 class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
+class QProgressBar;
 class QPushButton;
+class QScrollArea;
 class QResizeEvent;
 class QShowEvent;
 class QSlider;
@@ -48,6 +52,8 @@ class ClampMotorControlWidget;
 class SynchronizedDriveController;
 class RobotSensorController;
 class RobotUsbCameraController;
+class RemoteChannelReader;
+class RemoteInputMapper;
 class ProfileDetectionLogWriter;
 }
 
@@ -193,6 +199,22 @@ private:
     void requestEnable(bool enabled);
     void emergencyStop();
     void stopMotion();
+    // 实体遥控器（HC10pro 等平台）：串口通道 → 现有按钮/滑块。
+    void setupRemoteInput();
+    void refreshRemotePlatforms();
+    void refreshRemotePorts();
+    bool connectRemoteInput();
+    void disconnectRemoteInput(const QString &reason);
+    void resetRemoteOutputs(const QString &reason);
+    void applyRemoteDriveAxes(int linear, int angular);
+    void applyRemoteMotorJog(int axis, int index, int percent);
+    void handleRemoteAction(int action);
+    void rebuildRemoteMonitor();
+    void updateRemoteMonitor(const crawling::RemoteChannelSample &sample);
+    void updateRemoteLinkUi(bool connected, const QString &detail);
+    void loadRemoteInputSettings();
+    void saveRemoteInputSettings();
+    QWidget *buildRemoteInputGroup(QWidget *parentFragment);
     void setStateStyle(crawling::DriveState state);
     void updateInformationDialog();
     void displayUsbCameraImage(int slot, const QImage &image);
@@ -284,6 +306,12 @@ private:
     QLabel *m_usbViews[crawling::kUsbCameraChannelCount] = {nullptr, nullptr};
     QSlider *m_speedSlider = nullptr;
     QLabel *m_speedLabel = nullptr;
+    // 方向/急停按钮提升为成员：实体摇杆驱动时需要用 setDown() 给操作员视觉反馈。
+    QPushButton *m_forwardButton = nullptr;
+    QPushButton *m_reverseButton = nullptr;
+    QPushButton *m_leftButton = nullptr;
+    QPushButton *m_rightButton = nullptr;
+    QPushButton *m_emergencyButton = nullptr;
     QPushButton *m_connectButton = nullptr;
     QPushButton *m_enableButton = nullptr;
     QPushButton *m_stopMotionButton = nullptr;
@@ -379,6 +407,23 @@ private:
     QPointer<QLabel> m_dialogRightWheel;
     QPointer<QLabel> m_dialogFeedback;
     QPointer<QLabel> m_dialogSync;
+    // 实体遥控器：平台下拉、串口连接、只读通道监视（小车信息弹窗内）。
+    crawling::RemoteChannelReader *m_remoteReader = nullptr;
+    crawling::RemoteInputMapper *m_remoteMapper = nullptr;
+    QComboBox *m_remotePlatformCombo = nullptr;
+    QComboBox *m_remotePortCombo = nullptr;
+    QPushButton *m_remoteConnectButton = nullptr;
+    QPushButton *m_remoteDisconnectButton = nullptr;
+    QCheckBox *m_remoteTakeoverCheck = nullptr;
+    QLabel *m_remoteLinkLabel = nullptr;
+    QLabel *m_remoteHintLabel = nullptr;
+    QScrollArea *m_remoteMonitorScroll = nullptr;
+    QGridLayout *m_remoteMonitorGrid = nullptr;
+    QHash<QString, QProgressBar *> m_remoteBars;
+    QHash<QString, QLabel *> m_remoteIndicators;
+    QString m_remotePlatformId;
+    QString m_remotePortName;
+    QStringList m_remotePlatformIds;
     QPointer<QDialog> m_profileTemplateDialog;
     QStringList m_logLines;
     QStringList m_pendingLogLines;

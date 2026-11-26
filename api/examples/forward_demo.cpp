@@ -748,8 +748,86 @@ int runUltrasoundParam(const std::string& host, const std::string& method,
   return (online && done) ? 0 : 8;
 }
 
+// 扫查位置验证：只看 A 扫帧里的编码器网格坐标（cColumn/cRow/bColumn），
+// 不发任何运动指令。
+int runScanColumnTest(const std::string& host) {
+  QCoreApplication* app = QCoreApplication::instance();
+  pa1664::Config config;
+  config.host = host;
+  pa1664::RobotApi robot(config);
+
+  int frames = 0;
+  int withColumn = 0;
+  bool statusRequested = false;
+
+  robot.setLogHandler([](pa1664::LogLevel level, const std::string& text) {
+    if (level == pa1664::LogLevel::Error) print("ERROR", text);
+  });
+
+  robot.setUltrasoundStatusHandler([&](const pa1664::UltrasoundStatus& s) {
+    std::printf("[USSTATUS] online=%d capturing=%d point=%d beam=%d\n",
+                s.hardwareOnline, s.capturing, s.pointCount, s.beamCount);
+    if (s.hardwareOnline && !statusRequested) {
+      statusRequested = true;
+      robot.requestUltrasoundScanPrecision();
+      robot.requestUltrasoundEncoderCalibration();
+      if (!s.capturing) robot.ultrasoundStartAcquisition();
+    }
+  });
+
+  robot.setResponseHandler([&](const std::string& op, bool ok,
+                               const std::string& code,
+                               const std::string& text,
+                               const std::string& data) {
+    if (!ok) {
+      std::printf("[REJECT] %s [%s] %s\n", op.c_str(), code.c_str(), text.c_str());
+      return;
+    }
+    if (op == "ultrasound.scan.precision.get") {
+      std::printf("[PRECISION] %s\n", data.c_str());
+      std::printf("[PRECISION] mmPerCell=%.3f\n",
+                  robot.scanPrecisionMmPerCell());
+    }
+  });
+
+  robot.setUltrasoundFrameHandler([&](const pa1664::UltrasoundAScanFrame& f) {
+    ++frames;
+    if (f.cColumn >= 0 || f.cRow >= 0 || f.bColumn >= 0) ++withColumn;
+    if (frames <= 8) {
+      const double countsPerMm = robot.encoderCountsPerMm(0);
+      const double posMm =
+          countsPerMm > 0.0 ? f.encoders[0] / countsPerMm : 0.0;
+      std::printf("[AScan] frame=%u cColumn=%d cRow=%d bColumn=%d encA=%d "
+                  "encB=%d posA=%.2fmm trigErr=%d syncErr=%d\n",
+                  f.frameNumber, f.cColumn, f.cRow, f.bColumn, f.encoders[0],
+                  f.encoders[1], posMm, f.encoderTriggerError ? 1 : 0,
+                  f.encoderSyncError ? 1 : 0);
+    }
+  });
+
+  robot.setConnectionHandler([&](bool online, const std::string& detail) {
+    print(online ? "ONLINE" : "OFFLINE", detail);
+    if (online) robot.requestUltrasoundStatus();
+  });
+
+  robot.start();
+  QTimer::singleShot(6000, app, [&] {
+    std::printf("=== A 扫帧 %d，其中带列号 %d 帧；mm/格=%.3f；"
+                "counts/mm A=%.4f B=%.4f ===\n",
+                frames, withColumn, robot.scanPrecisionMmPerCell(),
+                robot.encoderCountsPerMm(0), robot.encoderCountsPerMm(1));
+    app->quit();
+  });
+  app->exec();
+  robot.ultrasoundStopAcquisition();
+  robot.stop();
+  return withColumn > 0 ? 0 : 6;
+}
+
 int main(int argc, char** argv) {
   QCoreApplication app(argc, argv);
+  if (argc > 1 && std::string(argv[1]) == "--scancolumn")
+    return runScanColumnTest(argc > 2 ? std::string(argv[2]) : "192.168.1.20");
 
   if (argc > 1 && std::string(argv[1]) == "--selftest")
     return runSelfTest(argc > 2 ? std::string(argv[2]) : std::string());
