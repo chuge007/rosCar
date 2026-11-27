@@ -35,6 +35,7 @@ class RemoteInputMapper : public QObject {
   void driveAxesChanged(int linear, int angular);
   void motorJogChanged(int axis, int index, int percent);
   void speedPresetChanged(int percent);
+  void driveSpeedStepChanged(int direction); // drive.speed：-1 减一格，+1 加一格
   void actionTriggered(int action); // crawling::RemoteAction
   void armedChanged(bool armed);
   void statusMessage(const QString &message);
@@ -61,6 +62,8 @@ class RemoteInputMapper : public QObject {
   int lastLinear_ = 0;
   int lastAngular_ = 0;
   int lastSpeedPreset_ = -1;
+  int lastDriveSpeedStep_ = 0;
+  qint64 lastDriveSpeedTickMs_ = 0;
   int lastInterlockBand_ = -2;
   QHash<QString, bool> lastButton_;
   QHash<QString, int> lastMotorPercent_;

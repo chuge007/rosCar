@@ -201,6 +201,8 @@ QString RemotePlatformProfile::validationError() const {
   const QVector<QPair<QString, RemoteAxisMapping>> axisMappings{
       {QStringLiteral("drive.linear"), mapping.linear},
       {QStringLiteral("drive.angular"), mapping.angular},
+      {QStringLiteral("drive.speed"), mapping.driveSpeed},
+      {QStringLiteral("laserProfile.swing"), mapping.laserProfileSwing},
       {QStringLiteral("probe.spacing"), mapping.spacing},
       {QStringLiteral("probe.lift"), mapping.lift}};
   for (const auto &pair : axisMappings) {
@@ -221,7 +223,11 @@ QString RemotePlatformProfile::validationError() const {
       {QStringLiteral("action.startCorrection"), mapping.buttonStartCorrection},
       {QStringLiteral("action.stopCorrection"), mapping.buttonStopCorrection},
       {QStringLiteral("action.pauseToggle"), mapping.buttonPauseToggle},
-      {QStringLiteral("action.emergencyStop"), mapping.buttonEmergencyStop}};
+      {QStringLiteral("action.emergencyStop"), mapping.buttonEmergencyStop},
+      {QStringLiteral("action.ultrasoundStart"), mapping.buttonUltrasoundStart},
+      {QStringLiteral("action.ultrasoundPause"), mapping.buttonUltrasoundPause},
+      {QStringLiteral("action.ultrasoundStop"), mapping.buttonUltrasoundStop},
+      {QStringLiteral("action.oneKeyReturn"), mapping.buttonOneKeyReturn}};
   for (const auto &pair : buttonMappings) {
     if (pair.second.isEmpty()) continue;
     if (!button(pair.second))
@@ -314,6 +320,12 @@ QJsonObject RemotePlatformProfile::toJson() const {
   mappingObject.insert(QStringLiteral("drive.linear"), axisMappingToJson(mapping.linear));
   mappingObject.insert(QStringLiteral("drive.angular"),
                        axisMappingToJson(mapping.angular));
+  mappingObject.insert(QStringLiteral("drive.speed"),
+                       axisMappingToJson(mapping.driveSpeed));
+  QJsonObject laserProfileSwing = axisMappingToJson(mapping.laserProfileSwing);
+  laserProfileSwing.insert(QStringLiteral("motor"),
+                           motorTargetToJson(mapping.laserProfileSwingMotor));
+  mappingObject.insert(QStringLiteral("laserProfile.swing"), laserProfileSwing);
   QJsonObject spacing = axisMappingToJson(mapping.spacing);
   spacing.insert(QStringLiteral("motor"), motorTargetToJson(mapping.spacingMotor));
   mappingObject.insert(QStringLiteral("probe.spacing"), spacing);
@@ -346,6 +358,10 @@ QJsonObject RemotePlatformProfile::toJson() const {
   insertButton(QStringLiteral("action.stopCorrection"), mapping.buttonStopCorrection);
   insertButton(QStringLiteral("action.pauseToggle"), mapping.buttonPauseToggle);
   insertButton(QStringLiteral("action.emergencyStop"), mapping.buttonEmergencyStop);
+  insertButton(QStringLiteral("action.ultrasoundStart"), mapping.buttonUltrasoundStart);
+  insertButton(QStringLiteral("action.ultrasoundPause"), mapping.buttonUltrasoundPause);
+  insertButton(QStringLiteral("action.ultrasoundStop"), mapping.buttonUltrasoundStop);
+  insertButton(QStringLiteral("action.oneKeyReturn"), mapping.buttonOneKeyReturn);
 
   root.insert(QStringLiteral("mapping"), mappingObject);
   return root;
@@ -425,6 +441,15 @@ bool RemotePlatformProfile::fromJson(const QJsonObject &object,
       readAxisMapping(mapping.value(QStringLiteral("drive.linear")).toObject());
   profile.mapping.angular =
       readAxisMapping(mapping.value(QStringLiteral("drive.angular")).toObject());
+  profile.mapping.driveSpeed =
+      readAxisMapping(mapping.value(QStringLiteral("drive.speed")).toObject());
+
+  const QJsonObject laserProfileSwing =
+      mapping.value(QStringLiteral("laserProfile.swing")).toObject();
+  profile.mapping.laserProfileSwing = readAxisMapping(laserProfileSwing);
+  if (laserProfileSwing.contains(QStringLiteral("motor")))
+    profile.mapping.laserProfileSwingMotor =
+        readMotorTarget(laserProfileSwing.value(QStringLiteral("motor")).toObject());
 
   const QJsonObject spacing = mapping.value(QStringLiteral("probe.spacing")).toObject();
   profile.mapping.spacing = readAxisMapping(spacing);
@@ -469,6 +494,14 @@ bool RemotePlatformProfile::fromJson(const QJsonObject &object,
       readButtonKey(QStringLiteral("action.pauseToggle"));
   profile.mapping.buttonEmergencyStop =
       readButtonKey(QStringLiteral("action.emergencyStop"));
+  profile.mapping.buttonUltrasoundStart =
+      readButtonKey(QStringLiteral("action.ultrasoundStart"));
+  profile.mapping.buttonUltrasoundPause =
+      readButtonKey(QStringLiteral("action.ultrasoundPause"));
+  profile.mapping.buttonUltrasoundStop =
+      readButtonKey(QStringLiteral("action.ultrasoundStop"));
+  profile.mapping.buttonOneKeyReturn =
+      readButtonKey(QStringLiteral("action.oneKeyReturn"));
 
   const QString validation = profile.validationError();
   if (!validation.isEmpty()) {
@@ -481,6 +514,7 @@ bool RemotePlatformProfile::fromJson(const QJsonObject &object,
 
 RemotePlatformProfile RemotePlatformRegistry::builtinHc10Pro() {
   RemotePlatformProfile profile;
+  profile.schemaVersion = 2;
   profile.id = QStringLiteral("hc10pro");
   profile.displayName = QStringLiteral("HC10pro 手持地面站");
   profile.baudRate = 115200;
@@ -532,30 +566,37 @@ RemotePlatformProfile RemotePlatformRegistry::builtinHc10Pro() {
     appendButton(&profile, QStringLiteral("R%1").arg(i + 1), 37, 4 + i);
   appendButton(&profile, QStringLiteral("RETURN"), 38, 0);
 
-  profile.mapping.linear.channel = QStringLiteral("T2");
+  profile.mapping.linear.channel = QStringLiteral("T1");
   profile.mapping.linear.sign = 1;
-  profile.mapping.angular.channel = QStringLiteral("T1");
+  profile.mapping.angular.channel = QStringLiteral("T2");
   profile.mapping.angular.sign = 1;
-  profile.mapping.spacing.channel = QStringLiteral("T3");
+  profile.mapping.driveSpeed.channel = QStringLiteral("T6");
+  profile.mapping.driveSpeed.sign = 1;
+  profile.mapping.laserProfileSwing.channel = QStringLiteral("T8");
+  profile.mapping.laserProfileSwing.sign = 1;
+  profile.mapping.laserProfileSwingMotor = RemoteMotorTarget{0, 0, 1};
+  profile.mapping.spacing.channel = QStringLiteral("T4");
   profile.mapping.spacing.sign = 1;
   profile.mapping.spacingMotor.axis = 0;
   profile.mapping.spacingMotor.index = 1;
   profile.mapping.spacingMotor.sign = 1;
-  profile.mapping.lift.channel = QStringLiteral("T4");
+  profile.mapping.lift.channel = QStringLiteral("T3");
   profile.mapping.lift.sign = 1;
   profile.mapping.liftMotors.append(RemoteMotorTarget{2, 0, 1});
   profile.mapping.liftMotors.append(RemoteMotorTarget{2, 1, 1});
   profile.mapping.interlockSwitch = QStringLiteral("SA");
   profile.mapping.interlockArmedBand = QStringLiteral("up");
-  profile.mapping.speedSwitch = QStringLiteral("SB");
+  // 底盘移动速度改由 T6 连续控制，SB 三档开关不再抢占速度滑块。
+  profile.mapping.speedSwitch.clear();
   profile.mapping.speedDown = 20;
   profile.mapping.speedMid = 50;
   profile.mapping.speedUp = 80;
-  profile.mapping.buttonEnable = QStringLiteral("R4");
-  profile.mapping.buttonStartCorrection = QStringLiteral("R1");
-  profile.mapping.buttonStopCorrection = QStringLiteral("R2");
-  profile.mapping.buttonPauseToggle = QStringLiteral("R3");
-  profile.mapping.buttonEmergencyStop = QStringLiteral("RETURN");
+  profile.mapping.buttonEnable = QStringLiteral("L1");
+  profile.mapping.buttonEmergencyStop = QStringLiteral("L2");
+  profile.mapping.buttonOneKeyReturn = QStringLiteral("L3");
+  profile.mapping.buttonUltrasoundStart = QStringLiteral("R1");
+  profile.mapping.buttonUltrasoundPause = QStringLiteral("R2");
+  profile.mapping.buttonUltrasoundStop = QStringLiteral("R3");
   return profile;
 }
 
@@ -574,21 +615,25 @@ QString RemotePlatformRegistry::profileDir() const {
 void RemotePlatformRegistry::ensureBuiltinOnDisk() const {
   const QDir dir(profileDir());
   const QString path = dir.filePath(QStringLiteral("hc10pro.json"));
-  if (!QFileInfo::exists(path)) {
-    QFile file(path);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-      file.write(
-          QJsonDocument(builtinHc10Pro().toJson()).toJson(QJsonDocument::Indented));
-      file.close();
-    }
+  // 内置平台是随程序升级的权威配置：每次启动都按当前代码重写，
+  // 避免旧 hc10pro.json 覆盖新映射。
+  const QByteArray json =
+      QJsonDocument(builtinHc10Pro().toJson()).toJson(QJsonDocument::Indented);
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+      file.write(json) != json.size()) {
+    AppLogger::warning(
+        QStringLiteral("REMOTE.PLATFORM"),
+        QStringLiteral("event=builtin_profile_write_failed file=%1").arg(path));
   }
+  file.close();
 
   // 新品牌模板：后缀是 .json.txt，不会被 reload 的 *.json 扫到，复制改名即可用。
   const QString templatePath = dir.filePath(QStringLiteral("generic_template.json.txt"));
   if (QFileInfo::exists(templatePath)) return;
   static const char kTemplate[] = R"JSON({
   "_comment": "外部遥控器平台模板。复制本文件为 <品牌id>.json（去掉 .txt）后重启或点“刷新”，即出现在平台下拉框。以下字段全部可选，只写该品牌实际存在的项。",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "mybrand",
   "displayName": "我的遥控器",
   "serial": {
@@ -637,6 +682,8 @@ void RemotePlatformRegistry::ensureBuiltinOnDisk() const {
     "_comment": "语义键固定这几个；某品牌没有的控件就留空（不写或写空串）。channel/button 填上面的 key。",
     "drive.linear": { "channel": "T2", "sign": 1 },
     "drive.angular": { "channel": "T1", "sign": 1 },
+    "drive.speed": { "channel": "", "sign": 1 },
+    "laserProfile.swing": { "channel": "", "sign": 1, "motor": { "axis": 0, "index": 0, "sign": 1 } },
     "probe.spacing": { "channel": "", "sign": 1, "motor": { "axis": 0, "index": 1, "sign": 1 } },
     "probe.lift": { "channel": "", "sign": 1, "motors": [] },
     "mode.interlock": { "switch": "SA", "armed": "up" },
@@ -645,7 +692,11 @@ void RemotePlatformRegistry::ensureBuiltinOnDisk() const {
     "action.startCorrection": { "button": "" },
     "action.stopCorrection": { "button": "" },
     "action.pauseToggle": { "button": "" },
-    "action.emergencyStop": { "button": "B1" }
+    "action.emergencyStop": { "button": "B1" },
+    "action.ultrasoundStart": { "button": "" },
+    "action.ultrasoundPause": { "button": "" },
+    "action.ultrasoundStop": { "button": "" },
+    "action.oneKeyReturn": { "button": "" }
   }
 }
 )JSON";

@@ -8,6 +8,8 @@ namespace {
 // 三档开关阈值、迟滞、失联时长随平台 profile 走（不同品牌落点不同），
 // 这里只保留与平台无关的去重带宽。
 constexpr int kPercentDedupeBand = 2;
+// T6 持续调速：首次拨动立即响应，之后每 100 ms 再推进一格。
+constexpr qint64 kDriveSpeedRepeatMs = 100;
 
 } // namespace
 
@@ -19,6 +21,8 @@ void RemoteInputMapper::setProfile(const RemotePlatformProfile &profile) {
   deadzone_ = qBound(20, profile.tuning.deadzone, 300);
   lastInterlockBand_ = -2;
   lastSpeedPreset_ = -1;
+  lastDriveSpeedStep_ = 0;
+  lastDriveSpeedTickMs_ = 0;
   lastButton_.clear();
 }
 
@@ -38,6 +42,8 @@ void RemoteInputMapper::reset() {
   lastButton_.clear();
   lastMotorPercent_.clear();
   lastSpeedPreset_ = -1;
+  lastDriveSpeedStep_ = 0;
+  lastDriveSpeedTickMs_ = 0;
   if (lastLinear_ != 0 || lastAngular_ != 0) {
     lastLinear_ = 0;
     lastAngular_ = 0;
@@ -48,6 +54,9 @@ void RemoteInputMapper::reset() {
   if (profile_.mapping.spacing.bound())
     emitMotorJog(profile_.mapping.spacingMotor.axis,
                  profile_.mapping.spacingMotor.index, 0);
+  if (profile_.mapping.laserProfileSwing.bound())
+    emitMotorJog(profile_.mapping.laserProfileSwingMotor.axis,
+                 profile_.mapping.laserProfileSwingMotor.index, 0);
   if (armed_) {
     armed_ = false;
     emit armedChanged(false);
@@ -118,6 +127,9 @@ void RemoteInputMapper::updateArmed(int band) {
     if (profile_.mapping.spacing.bound())
       emitMotorJog(profile_.mapping.spacingMotor.axis,
                    profile_.mapping.spacingMotor.index, 0);
+    if (profile_.mapping.laserProfileSwing.bound())
+      emitMotorJog(profile_.mapping.laserProfileSwingMotor.axis,
+                   profile_.mapping.laserProfileSwingMotor.index, 0);
   }
 }
 
@@ -168,6 +180,14 @@ void RemoteInputMapper::applySample(const RemoteChannelSample &sample) {
                RemoteAction::StopCorrection, true);
   handleButton(sample, profile_.mapping.buttonPauseToggle, RemoteAction::PauseToggle,
                true);
+  handleButton(sample, profile_.mapping.buttonUltrasoundStart,
+               RemoteAction::UltrasoundStart, true);
+  handleButton(sample, profile_.mapping.buttonUltrasoundPause,
+               RemoteAction::UltrasoundPause, true);
+  handleButton(sample, profile_.mapping.buttonUltrasoundStop,
+               RemoteAction::UltrasoundStop, true);
+  handleButton(sample, profile_.mapping.buttonOneKeyReturn,
+               RemoteAction::OneKeyReturn, true);
 
   if (profile_.mapping.speedSwitch.trimmed().isEmpty() == false) {
     const int speedBand = switchBand(sample, profile_.mapping.speedSwitch);
@@ -181,6 +201,20 @@ void RemoteInputMapper::applySample(const RemoteChannelSample &sample) {
   }
 
   if (!armed_) return;
+
+  if (profile_.mapping.driveSpeed.bound()) {
+    const int step =
+        axisLevel(sample, profile_.mapping.driveSpeed, lastDriveSpeedStep_);
+    if (step != lastDriveSpeedStep_) {
+      lastDriveSpeedStep_ = step;
+      lastDriveSpeedTickMs_ = now;
+      if (step != 0) emit driveSpeedStepChanged(step);
+    } else if (step != 0 &&
+               now - lastDriveSpeedTickMs_ >= kDriveSpeedRepeatMs) {
+      lastDriveSpeedTickMs_ = now;
+      emit driveSpeedStepChanged(step);
+    }
+  }
 
   const int linear = axisLevel(sample, profile_.mapping.linear, lastLinear_);
   const int angular = axisLevel(sample, profile_.mapping.angular, lastAngular_);
@@ -200,6 +234,11 @@ void RemoteInputMapper::applySample(const RemoteChannelSample &sample) {
     const int base = axisPercent(sample, profile_.mapping.lift);
     for (const auto &motor : profile_.mapping.liftMotors)
       emitMotorJog(motor.axis, motor.index, base * (motor.sign < 0 ? -1 : 1));
+  }
+  if (profile_.mapping.laserProfileSwing.bound()) {
+    const int base = axisPercent(sample, profile_.mapping.laserProfileSwing);
+    const auto &motor = profile_.mapping.laserProfileSwingMotor;
+    emitMotorJog(motor.axis, motor.index, base * (motor.sign < 0 ? -1 : 1));
   }
 }
 

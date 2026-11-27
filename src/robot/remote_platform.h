@@ -34,6 +34,10 @@ enum class RemoteAction {
   StopCorrection,
   PauseToggle,
   EmergencyStop,
+  UltrasoundStart,
+  UltrasoundPause,
+  UltrasoundStop,
+  OneKeyReturn,
 };
 
 struct RemoteChannel {
@@ -68,12 +72,15 @@ struct RemoteMotorTarget {
 };
 
 struct RemoteSemanticMapping {
-  RemoteAxisMapping linear;                   // drive.linear：左摇杆前后
-  RemoteAxisMapping angular;                  // drive.angular：左摇杆左右
-  RemoteAxisMapping spacing;                  // probe.spacing：右摇杆左右
-  RemoteAxisMapping lift;                     // probe.lift：右摇杆上下
+  RemoteAxisMapping linear;                   // drive.linear：底盘前后
+  RemoteAxisMapping angular;                  // drive.angular：底盘转向
+  RemoteAxisMapping spacing;                  // probe.spacing：探头间距
+  RemoteAxisMapping lift;                     // probe.lift：探头升降
+  RemoteAxisMapping driveSpeed;               // drive.speed：左右拨动增减底盘速度
+  RemoteAxisMapping laserProfileSwing;        // laserProfile.swing：激光轮廓仪摆动
   RemoteMotorTarget spacingMotor;             // 间距电机（X2）
   QVector<RemoteMotorTarget> liftMotors;      // 升降电机（Z1、Z2 同步）
+  RemoteMotorTarget laserProfileSwingMotor;   // 激光轮廓仪摆动电机（X1）
   QString interlockSwitch;                    // mode.interlock：三档开关 key
   QString interlockArmedBand = QStringLiteral("up");
   QString speedSwitch;                        // speed.preset：三档开关 key
@@ -85,6 +92,10 @@ struct RemoteSemanticMapping {
   QString buttonStopCorrection;
   QString buttonPauseToggle;
   QString buttonEmergencyStop;
+  QString buttonUltrasoundStart;
+  QString buttonUltrasoundPause;
+  QString buttonUltrasoundStop;
+  QString buttonOneKeyReturn;
 };
 
 struct RemoteFrameFormat {

@@ -1596,6 +1596,27 @@ void MainWindow::buildUi()
             showMessage(QStringLiteral("自动纠偏跟踪已开始，超声数据采集同步启动。"), false);
         }
     });
+    // 手柄 R1/R2/R3 与界面“启动/暂停/停止”按钮完全等价：
+    // 统一 trigger 这三个 QAction，副作用（扫描缓存、自动纠偏、按钮状态）一致。
+    connect(m_robotPanel, &RobotControlPanel::remoteUltrasoundStartRequested,
+            this, [this] {
+        if (m_startAction && m_startAction->isEnabled())
+            m_startAction->trigger();
+        else
+            startAcquisitionFromUi();
+    });
+    connect(m_robotPanel, &RobotControlPanel::remoteUltrasoundPauseRequested,
+            this, [this] {
+        if (m_pauseAction && m_pauseAction->isEnabled())
+            m_pauseAction->trigger();
+    });
+    connect(m_robotPanel, &RobotControlPanel::remoteUltrasoundStopRequested,
+            this, [this] {
+        if (m_stopAction && m_stopAction->isEnabled())
+            m_stopAction->trigger();
+        else
+            stopAcquisition();
+    });
 
     // 初始定位到「超声」分区，但面板保持隐藏——与参考项目一致：
     // 只有点击右侧导航栏分区时才弹出浮动面板。

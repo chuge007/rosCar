@@ -102,6 +102,9 @@ private:
     // 方向键的按下/松开逻辑，鼠标、触摸、笔三条输入路径共用一份实现。
     void beginJog(QPushButton *button, bool *flag);
     void endJog(QPushButton *button, bool *flag);
+    // 一键返回纠偏起点：轮端里程记录、闭环倒退与按钮状态。
+    void updateReturnButtonState();
+    void finishReturn(const QString &reason, bool completed);
 
 private slots:
     void refreshPorts();
@@ -118,6 +121,7 @@ private slots:
     void saveSettings();
     void restoreSettings();
     void sendMotionCommand();
+    void oneKeyReturn();
     void updateTelemetry(const crawling::DriveTelemetry &telemetry);
     void updateState(crawling::DriveState state, const QString &reason);
     void updateConnection(bool connected, const QString &message);
@@ -157,6 +161,9 @@ signals:
     void vehicleStatusChanged(const QStringList &metrics);
     void autoCorrectionPausedChanged(bool paused);
     void autoCorrectionTrackingStarted();
+    void remoteUltrasoundStartRequested();
+    void remoteUltrasoundPauseRequested();
+    void remoteUltrasoundStopRequested();
 
 private:
     // Operator-side media accounting: shows whether frames actually arrive at
@@ -298,6 +305,13 @@ private:
     bool m_autoCorrectionStartPending = false;
     bool m_autoCorrectionPaused = false;
     bool m_profileDetectionLogSessionActive = false;
+    // 一键返回：纠偏期间累积轮端反馈的净纵向里程，停止后按该里程闭环倒退。
+    double m_correctionTravelM = 0.0;
+    double m_returnTargetM = 0.0;
+    double m_returnTravelM = 0.0;
+    qint64 m_returnTelemetryMs = -1;
+    QElapsedTimer m_returnClock;
+    bool m_returning = false;
 
     QLabel *m_stateLabel = nullptr;
     QLabel *m_connectionLabel = nullptr;
@@ -312,6 +326,7 @@ private:
     QPushButton *m_leftButton = nullptr;
     QPushButton *m_rightButton = nullptr;
     QPushButton *m_emergencyButton = nullptr;
+    QPushButton *m_returnButton = nullptr;
     QPushButton *m_connectButton = nullptr;
     QPushButton *m_enableButton = nullptr;
     QPushButton *m_stopMotionButton = nullptr;

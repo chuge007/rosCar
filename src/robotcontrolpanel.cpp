@@ -72,6 +72,12 @@ namespace {
 constexpr double kMillimetersPerMeter = 1000.0;
 constexpr double kDegreesPerRadian = 57.29577951308232;
 constexpr double kRadiansPerDegree = 0.017453292519943295;
+// 一键返回：低于 1 mm 视为没有有效纠偏里程；停到 3 mm 内即认为回到出发点；
+// 超时或遥测断档时主动停车，不让底盘无限倒退。
+constexpr double kReturnMinTravelM = 0.001;
+constexpr double kReturnToleranceM = 0.003;
+constexpr qint64 kReturnTimeoutMs = 60000;
+constexpr qint64 kReturnTelemetryTimeoutMs = 3000;
 
 QPushButton *actionButton(const QString &text, const char *kind = "secondary")
 {
@@ -1779,11 +1785,19 @@ void RobotControlPanel::buildUi()
     m_stopMotionButton = actionButton(QStringLiteral("暂停"));
     m_stopMotionButton->setEnabled(false);
     m_stopMotionButton->setToolTip(QStringLiteral("暂停/继续自动纠偏"));
+    m_returnButton = actionButton(QStringLiteral("一键返回纠偏起点"));
+    m_returnButton->setObjectName(QStringLiteral("returnToStartButton"));
+    m_returnButton->setEnabled(false);
+    m_returnButton->setToolTip(QStringLiteral(
+        "纠偏停止后按轮端里程倒退回出发点；返回过程中再次点击可中止"));
+    connect(m_returnButton, &QPushButton::clicked,
+            this, &RobotControlPanel::oneKeyReturn);
     m_emergencyButton = actionButton(QStringLiteral("紧急停止"), "danger");
     auto *emergency = m_emergencyButton;
     driveGrid->addWidget(m_enableButton, 0, 0);
     driveGrid->addWidget(m_stopMotionButton, 0, 1);
-    driveGrid->addWidget(emergency, 1, 0, 1, 2);
+    driveGrid->addWidget(m_returnButton, 1, 0, 1, 2);
+    driveGrid->addWidget(emergency, 2, 0, 1, 2);
     manualLayout->addLayout(driveGrid);
 
     auto *clampGroup = new QGroupBox(QStringLiteral("前架电机手动控制"));
@@ -3770,6 +3784,8 @@ void RobotControlPanel::beginJog(QPushButton *button, bool *flag)
 {
     if (!button || !flag)
         return;
+    if (m_returning)
+        finishReturn(QStringLiteral("手动方向介入，一键返回已中止"), false);
     clearJogLatch();
     m_pressedJogButton = button;
     m_pressedJogFlag = flag;
@@ -3856,6 +3872,8 @@ void RobotControlPanel::requestEnable(bool enabled)
 
 void RobotControlPanel::emergencyStop()
 {
+    if (m_returning)
+        finishReturn(QStringLiteral("紧急停止，一键返回已中止"), false);
     crawling::AppLogger::write(
         QStringLiteral("CORRECTION.STOP"),
         QStringLiteral("event=correction_stop_requested source=emergency_stop active=%1 pending=%2")
@@ -3972,11 +3990,116 @@ void RobotControlPanel::sendMotionCommand()
                               Q_ARG(double, angular));
 }
 
+void RobotControlPanel::updateReturnButtonState()
+{
+    if (!m_returnButton)
+        return;
+    const bool available = !m_autoCorrectionActive &&
+                           !m_autoCorrectionStartPending && !m_returning &&
+                           m_correctionTravelM > kReturnMinTravelM;
+    m_returnButton->setEnabled(available || m_returning);
+    m_returnButton->setText(m_returning ? QStringLiteral("中止返回")
+                                        : QStringLiteral("一键返回纠偏起点"));
+    m_returnButton->setToolTip(
+        available
+            ? QStringLiteral("已记录纠偏净行驶 %1 mm，点击后按轮端里程倒退回出发点")
+                  .arg(m_correctionTravelM * kMillimetersPerMeter, 0, 'f', 1)
+            : (m_returning ? QStringLiteral("正在倒退，点击可中途停车")
+                           : QStringLiteral("纠偏停止并记录到行驶里程后可用")));
+}
+
+void RobotControlPanel::oneKeyReturn()
+{
+    if (m_returning) {
+        finishReturn(QStringLiteral("操作员中止一键返回"), false);
+        return;
+    }
+    if (m_autoCorrectionActive || m_autoCorrectionStartPending) {
+        appendLog(QStringLiteral("自动纠偏尚未停止，不能一键返回"));
+        return;
+    }
+    if (m_correctionTravelM <= kReturnMinTravelM) {
+        appendLog(QStringLiteral("没有可用的纠偏行驶里程，无法一键返回"));
+        return;
+    }
+    if (!m_connected || m_state != crawling::DriveState::Enabled) {
+        appendLog(QStringLiteral("底盘未处于使能状态，请先点击“底盘使能”再一键返回"));
+        return;
+    }
+    clearJogLatch();
+    m_forward = m_left = m_right = false;
+    m_returnTargetM = m_correctionTravelM;
+    m_returnTravelM = 0.0;
+    m_returnTelemetryMs = -1;
+    m_returnClock.restart();
+    m_returning = true;
+    m_reverse = true;
+    sendMotionCommand();
+    updateReturnButtonState();
+    appendLog(QStringLiteral("一键返回已启动：按轮端里程倒退 %1 mm 回到纠偏出发点")
+                  .arg(m_returnTargetM * kMillimetersPerMeter, 0, 'f', 1));
+}
+
+void RobotControlPanel::finishReturn(const QString &reason, bool completed)
+{
+    if (!m_returning)
+        return;
+    const double targetM = m_returnTargetM;
+    const double travelledM = m_returnTravelM;
+    m_returning = false;
+    m_reverse = false;
+    m_returnTravelM = 0.0;
+    m_returnTelemetryMs = -1;
+    sendMotionCommand();
+    if (completed)
+        m_correctionTravelM = 0.0;
+    updateReturnButtonState();
+    appendLog(reason);
+    crawling::AppLogger::write(
+        QStringLiteral("CORRECTION.RETURN"),
+        QStringLiteral("event=one_key_return completed=%1 target_mm=%2 travelled_mm=%3 reason=%4")
+            .arg(completed ? 1 : 0)
+            .arg(targetM * kMillimetersPerMeter, 0, 'f', 1)
+            .arg(travelledM * kMillimetersPerMeter, 0, 'f', 1)
+            .arg(reason));
+}
+
 void RobotControlPanel::updateTelemetry(const crawling::DriveTelemetry &telemetry)
 {
     if (m_telemetryUiClock.isValid() && m_telemetryUiClock.elapsed() < 100)
         return;
     m_telemetryUiClock.restart();
+
+    // 里程直接取轮端速度反馈，与纠偏控制器 integrateWheelMotion 同一路信号：
+    // 不改协议、不依赖电机绝对编码器标度。纠偏中的带符号净位移即相对出发点的
+    // 位置，首段往返会自动抵消；返回阶段按实际倒退里程闭环停车。
+    const qint64 nowMs = m_returnClock.isValid() ? m_returnClock.elapsed() : -1;
+    const double meanWheelSpeedMps =
+        (telemetry.left.wheelSpeedMps + telemetry.right.wheelSpeedMps) * 0.5;
+    if (m_returnTelemetryMs >= 0 && nowMs > m_returnTelemetryMs) {
+        const double dt = std::min(0.75, (nowMs - m_returnTelemetryMs) / 1000.0);
+        if (m_autoCorrectionActive)
+            m_correctionTravelM += meanWheelSpeedMps * dt;
+        else if (m_returning)
+            m_returnTravelM += std::abs(meanWheelSpeedMps) * dt;
+    }
+    m_returnTelemetryMs = nowMs;
+    if (m_returning) {
+        if (!m_connected || m_state != crawling::DriveState::Enabled ||
+            telemetry.state == crawling::DriveState::EmergencyStop ||
+            telemetry.state == crawling::DriveState::Fault) {
+            finishReturn(QStringLiteral("底盘状态变化，一键返回已中止"), false);
+        } else if (m_returnClock.elapsed() > kReturnTimeoutMs ||
+                   (m_returnTelemetryMs >= 0 &&
+                    m_returnClock.elapsed() - m_returnTelemetryMs >
+                        kReturnTelemetryTimeoutMs)) {
+            finishReturn(QStringLiteral("一键返回遥测中断或超时，已停车"), false);
+        } else if (m_returnTravelM + kReturnToleranceM >= m_returnTargetM) {
+            finishReturn(QStringLiteral("已倒退回纠偏出发点"), true);
+        }
+    }
+    updateReturnButtonState();
+
     m_targetText = QStringLiteral("线速度 %1 mm/s，角速度 %2 deg/s")
                        .arg(telemetry.targetLinearMps * kMillimetersPerMeter, 0, 'f', 1)
                        .arg(telemetry.targetAngularRadps * kDegreesPerRadian, 0, 'f', 1);
@@ -4222,6 +4345,14 @@ void RobotControlPanel::finishProfileDetectionLogSession(const QString &reason)
 
 void RobotControlPanel::startAutoCorrection()
 {
+    if (m_returning)
+        finishReturn(QStringLiteral("纠偏重新启动，一键返回已中止"), false);
+    m_correctionTravelM = 0.0;
+    m_returnTargetM = 0.0;
+    m_returnTravelM = 0.0;
+    m_returnTelemetryMs = -1;
+    m_returnClock.restart();
+    updateReturnButtonState();
     if (m_remoteSession) {
         const auto fail = [this](const QString &reason) {
             m_autoCorrectionStartPending = false;
@@ -4505,6 +4636,7 @@ void RobotControlPanel::updateCorrectionStatus(
         m_correctionStatus->setText(status.reason.isEmpty()
                                          ? QStringLiteral("未启动")
                                          : status.reason);
+        updateReturnButtonState();
         return;
     }
     if (m_remoteSession && m_autoCorrectionStartPending) {
@@ -5085,6 +5217,15 @@ void RobotControlPanel::setupRemoteInput()
     m_remoteMapper->setProfile(
         crawling::RemotePlatformRegistry::instance().profile(m_remotePlatformId));
 
+    // 接管复选框只在“小车信息”对话框里创建：构造阶段 loadRemoteInputSettings()
+    // 执行到这里时 mapper 尚未 new，setTakeoverEnabled 无法生效，导致必须点开该
+    // 页面手柄才会响应。这里按 ini 保存值补一次，实现启动即接管。
+    {
+        QSettings settings(remoteInputSettingsFile(), QSettings::IniFormat);
+        m_remoteMapper->setTakeoverEnabled(
+            settings.value(QStringLiteral("takeover"), false).toBool());
+    }
+
     connect(m_remoteReader, &crawling::RemoteChannelReader::sampleReceived,
             this, &RobotControlPanel::updateRemoteMonitor);
     connect(m_remoteReader, &crawling::RemoteChannelReader::sampleReceived,
@@ -5104,6 +5245,14 @@ void RobotControlPanel::setupRemoteInput()
                 m_speedSlider->setValue(
                     qBound(m_speedSlider->minimum(), percent, m_speedSlider->maximum()));
             });
+    connect(m_remoteMapper, &crawling::RemoteInputMapper::driveSpeedStepChanged,
+            this, [this](int direction) {
+                if (!m_speedSlider || direction == 0) return;
+                const int next = m_speedSlider->value() +
+                                 direction * m_speedSlider->singleStep();
+                m_speedSlider->setValue(
+                    qBound(m_speedSlider->minimum(), next, m_speedSlider->maximum()));
+            });
     connect(m_remoteMapper, &crawling::RemoteInputMapper::actionTriggered,
             this, &RobotControlPanel::handleRemoteAction);
     connect(m_remoteMapper, &crawling::RemoteInputMapper::armedChanged,
@@ -5113,6 +5262,11 @@ void RobotControlPanel::setupRemoteInput()
             });
     connect(m_remoteMapper, &crawling::RemoteInputMapper::statusMessage,
             this, &RobotControlPanel::appendLog);
+
+    // 启动即按保存的 HC10pro/串口配置自动连接，无需每次手动点“连接”。
+    if (!m_remotePortName.isEmpty()) {
+        QTimer::singleShot(0, this, [this] { connectRemoteInput(); });
+    }
 }
 
 QWidget *RobotControlPanel::buildRemoteInputGroup(QWidget *parentFragment)
@@ -5211,6 +5365,7 @@ QWidget *RobotControlPanel::buildRemoteInputGroup(QWidget *parentFragment)
     });
 
     rebuildRemoteMonitor();
+    refreshRemotePorts();
     return group;
 }
 
@@ -5325,8 +5480,25 @@ void RobotControlPanel::rebuildRemoteMonitor()
         hints << QStringLiteral("%1 → %2 同步升降")
                      .arg(mapping.lift.channel, motors.join(QLatin1Char('+')));
     }
+    if (mapping.driveSpeed.bound())
+        hints << QStringLiteral("%1 → 左右拨动增减底盘速度")
+                     .arg(mapping.driveSpeed.channel);
+    if (mapping.laserProfileSwing.bound())
+        hints << QStringLiteral("%1 → X%2 激光轮廓仪摆动")
+                     .arg(mapping.laserProfileSwing.channel)
+                     .arg(mapping.laserProfileSwingMotor.index + 1);
+    if (!mapping.buttonEnable.isEmpty())
+        hints << QStringLiteral("%1 → 使能").arg(mapping.buttonEnable);
     if (!mapping.buttonEmergencyStop.isEmpty())
         hints << QStringLiteral("%1 → 急停").arg(mapping.buttonEmergencyStop);
+    if (!mapping.buttonOneKeyReturn.isEmpty())
+        hints << QStringLiteral("%1 → 一键返回纠偏起点")
+                     .arg(mapping.buttonOneKeyReturn);
+    if (!mapping.buttonUltrasoundStart.isEmpty())
+        hints << QStringLiteral("%1/%2/%3 → 超声启动/暂停/停止")
+                     .arg(mapping.buttonUltrasoundStart,
+                          mapping.buttonUltrasoundPause,
+                          mapping.buttonUltrasoundStop);
     if (m_remoteHintLabel && !hints.isEmpty())
         m_remoteHintLabel->setText(hints.join(QStringLiteral("；")));
 }
@@ -5460,6 +5632,8 @@ void RobotControlPanel::resetRemoteOutputs(const QString &reason)
 
 void RobotControlPanel::applyRemoteDriveAxes(int linear, int angular)
 {
+    if (m_returning)
+        finishReturn(QStringLiteral("遥控器方向介入，一键返回已中止"), false);
     if (m_autoCorrectionActive || m_autoCorrectionStartPending) {
         // 纠偏占用期间手动通道关闭：必须把标志清掉，否则纠偏停止后车会突然走。
         if (m_forward || m_reverse || m_left || m_right)
@@ -5516,6 +5690,25 @@ void RobotControlPanel::handleRemoteAction(int action)
         name = QStringLiteral("暂停/继续");
         if (m_stopMotionButton) m_stopMotionButton->click();
         break;
+    case crawling::RemoteAction::UltrasoundStart:
+        name = QStringLiteral("超声启动");
+        // 与 R2（暂停）一致走本地信号：MainWindow 的槽在远程模式下会转成
+        // ultrasound.acquisition.start，同时同步“启动/停止”按钮状态；
+        // 直接发远程请求会让 UI 按钮保持不变，看起来像按键没生效。
+        emit remoteUltrasoundStartRequested();
+        break;
+    case crawling::RemoteAction::UltrasoundPause:
+        name = QStringLiteral("超声暂停/继续");
+        emit remoteUltrasoundPauseRequested();
+        break;
+    case crawling::RemoteAction::UltrasoundStop:
+        name = QStringLiteral("超声停止");
+        emit remoteUltrasoundStopRequested();
+        break;
+    case crawling::RemoteAction::OneKeyReturn:
+        name = QStringLiteral("一键返回纠偏起点");
+        oneKeyReturn();
+        break;
     case crawling::RemoteAction::EmergencyStop:
         name = QStringLiteral("紧急停止");
         emergencyStop();
@@ -5534,7 +5727,16 @@ void RobotControlPanel::loadRemoteInputSettings()
     const bool takeover = settings.value(QStringLiteral("takeover"), false).toBool();
 
     m_remotePlatformId = platformId.isEmpty() ? QStringLiteral("hc10pro") : platformId;
-    if (!port.isEmpty()) m_remotePortName = port;
+    if (!port.isEmpty()) {
+        m_remotePortName = port;
+    } else if (m_remotePortName.isEmpty()) {
+        // 首次启动没有 ini：回退到平台默认串口，让“启动即自动连接”真正生效。
+        // 连接成功后 saveRemoteInputSettings() 写出 ini，后续按保存的端口连接。
+        m_remotePortName =
+            crawling::RemotePlatformRegistry::instance()
+                .profile(m_remotePlatformId)
+                .defaultPort;
+    }
 
     if (m_remoteMapper) {
         const auto profile =
@@ -5544,11 +5746,13 @@ void RobotControlPanel::loadRemoteInputSettings()
     }
     refreshRemotePlatforms();
     refreshRemotePorts();
-    if (!m_remoteTakeoverCheck) return;
-    {
+    if (m_remoteTakeoverCheck) {
         const QSignalBlocker blocker(m_remoteTakeoverCheck);
         m_remoteTakeoverCheck->setChecked(takeover);
     }
+    // 接管复选框只在“小车信息”对话框里创建；软件启动时对话框尚未打开，
+    // 此时也必须把保存的接管状态应用到 mapper，否则手柄按键一直无效，
+    // 表现为“必须点开小车信息页面才能控制”。
     if (m_remoteMapper) m_remoteMapper->setTakeoverEnabled(takeover);
     rebuildRemoteMonitor();
 }

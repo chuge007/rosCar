@@ -1,9 +1,9 @@
 ---
-description: 执行命令（编译、结束进程、ssh/scp 部署、启动软件、读日志、git 查询、生成编译数据库）直接做完再报告，禁止输出"要不要/是否需要/如果愿意我可以"类确认问句；只有越界与破坏性操作才停下
+description: 
 alwaysApply: true
 enabled: true
-updatedAt: 2026-11-11T00:00:00.000Z
-provider:
+updatedAt: 2026-11-27T16:41:41.361+08:00
+provider: 
 ---
 
 # 执行命令不询问，直接做完再报告
